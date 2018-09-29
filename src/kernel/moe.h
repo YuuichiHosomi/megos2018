@@ -30,8 +30,6 @@
 #define	NULL (0)
 #endif
 
-int printf(const char* format, ...);
-
 void memset32(uint32_t* p, uint32_t v, size_t n);
 
 typedef struct {
@@ -52,3 +50,4 @@ void mgs_init(moe_video_info_t* _video);
 void mgs_fill_rect(int x, int y, int width, int height, uint32_t color);
 void mgs_fill_block(int x, int y, int width, int height, uint32_t color);
 void mgs_cls();
+int printf(const char* format, ...);

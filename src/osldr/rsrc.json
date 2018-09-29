@@ -1,0 +1,38 @@
+{
+	"description": "MEG-OS Boot Loader Resource File",
+	"prefix": "rsrc",
+	"strings": {
+		"default": {
+			"main_title": "MEG-OS Boot Menu v0.0",
+			"starting": "Starting up...",
+			"press_esc_to_menu": "To display advanced option menu, press ESC key within %d seconds...",
+			"load_error_title": "Load Error",
+			"load_error": "An error occurred during load system",
+			"error_code": "ERROR CODE",
+			"press_any_key": "Press any key to continue...",
+			"choose_an_option": "Choose an option",
+			"start_normally": "Start Normally",
+			"advanced_option": "Advanced Option Menu",
+			"return_to_previous": "Return to Previous Screen",
+			"reset": "Restart",
+			"shutdown": "Shutdown",
+			"boot_to_fw_ui": "BIOS/UEFI Setup",
+			"display_settings": "Display Settings"
+		},
+		"ja": {
+			"starting": "起動中...",
+			"press_esc_to_menu": "ここで ESC キーを押すとメニューを表示します...",
+			"load_error": "システムのロード中にエラーが発生しました",
+			"error_code": "エラーコード",
+			"press_any_key": "何かキーを押すと続行します...",
+			"choose_an_option": "オプションを選択してください",
+			"start_normally": "通常起動する",
+			"advanced_option": "拡張オプションメニュー",
+			"return_to_previous": "前の画面に戻る",
+			"reset": "再起動",
+			"shutdown": "シャットダウン",
+			"boot_to_fw_ui": "BIOS/UEFI セットアップ",
+			"display_settings": "画面の設定"
+		}
+	}
+}

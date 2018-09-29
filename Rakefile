@@ -83,6 +83,7 @@ desc "Run with QEMU"
 task :run => [:default, PATH_EFI_BOOT, PATH_OVMF] do
   (target, efi_suffix) = convert_arch(ARCH)
   FileUtils.cp("#{PATH_BIN}boot#{efi_suffix}.efi", "#{PATH_EFI_BOOT}boot#{efi_suffix}.efi")
+  FileUtils.cp("#{PATH_BIN}krnl#{efi_suffix}.efi", "#{PATH_EFI_BOOT}krnl#{efi_suffix}.efi")
   sh "qemu-system-#{QEMU_ARCH} #{QEMU_OPTS} -bios #{PATH_OVMF} -monitor stdio -drive file=fat:ro:mnt"
 end
 
@@ -237,8 +238,9 @@ namespace :main do
 
   targets = []
 
-  %w(x64).each do |arch|
-    targets << make_efi(arch, 'boot', %w( moeldr moe mgs printf memory ), { base: 'kernel' })
+  [ARCH].each do |arch|
+    targets << make_efi(arch, 'boot', %w( osldr atop menu stdio printf memory ), { base: 'osldr' })
+    targets << make_efi(arch, 'krnl', %w( moeldr moe mgs printf memory ), { base: 'kernel' })
   end
 
   desc "Build Main"
