@@ -30,7 +30,7 @@
 
 moe_video_info_t* video;
 int font_w8, line_height, font_offset, padding_x, padding_y;
-int cols, rows, cursor_x, cursor_y;
+int cols, rows, cursor_x, cursor_y, rotate;
 uint32_t bgcolor = DEFAULT_BGCOLOR;
 uint32_t fgcolor = DEFAULT_FGCOLOR;
 
@@ -44,26 +44,38 @@ static int row_to_y(int y) {
     return padding_y + line_height * y;
 }
 
-void mgs_fill_rect(int x, int y, int width, int height, uint32_t color) {
-    int left = x, right = x+width, top = y, bottom = y+height;
+void mgs_fill_rect(int x, int y, int w, int h, uint32_t color) {
 
-    if (width < 0 || height < 0) return;
+    int sw = video->res_x, sh = video->res_y;
+
+    if(rotate) {
+        int z = x;
+        x = sw -y -h;
+        y = z;
+        z = w;
+        w = h;
+        h = z;
+    }
+
+    int left = x, right = x+w, top = y, bottom = y+h;
+
+    if (w < 0 || h < 0) return;
     if (left < 0) left = 0;
     if (top < 0) top = 0;
-    if (right > video->res_x) right = video->res_x;
-    if (bottom > video->res_y) bottom = video->res_y;
+    if (right > sw) right = sw;
+    if (bottom > sh) bottom = sh;
 
-    if (left > video->res_x || top > video->res_y || right < 0 || bottom < 0) return;
+    if (left > sw || top > sh || right < 0 || bottom < 0) return;
 
-    int w = right - left;
+    int width = right - left;
     int ppl = video->pixel_per_scan_line;
     uint32_t* p = (uint32_t*)video->vram + top * ppl;
-    if (w == ppl) {
+    if (width == ppl) {
         memset32(p, color, (bottom - top) * ppl);
     } else {
         p += left;
         for (int i = top; i < bottom; i++, p+=ppl) {
-            memset32(p, color, w);
+            memset32(p, color, width);
         }
     }
 }
@@ -79,27 +91,50 @@ void mgs_cls() {
 }
 
 void mgs_draw_pattern(int x, int y, int w, int h, const uint8_t* pattern, uint32_t color) {
+    int sw = video->res_x;
     int ppl = video->pixel_per_scan_line;
     int w8 = (w+7)/8;
 
     if(x<0 || y<0) return;
 
-    int wl = ppl - w;
-    uint32_t* p = (uint32_t*)video->vram + y*ppl + x;
+    if(rotate) {
+        y = sw -y -h;
+        int wl = ppl - h;
+        uint32_t* p = (uint32_t*)video->vram + x*ppl + y;
 
-    for(int i=0; i<h; i++) {
         int l=w;
         for(int k=0; k<w8; k++, l-=8) {
             int m = (l>8) ? 8 : l;
-            uint8_t font_pattern = *pattern++;
-            for(int j=0; j<m; j++, p++) {
-                if(font_pattern & (0x80>>j)) {
-                    *p = color;
+            for(int i=0; i<m; i++) {
+                uint32_t mask = 0x80>>i;
+                for(int j=h-1; j>=0; j--,p++) {
+                    if(pattern[j*w8+k] & mask) {
+                        *p = color;
+                    }
                 }
+                p += wl;
             }
         }
-        p += wl;
+
+    } else {
+        int wl = ppl - w;
+        uint32_t* p = (uint32_t*)video->vram + y*ppl + x;
+
+        for(int i=0; i<h; i++) {
+            int l=w;
+            for(int k=0; k<w8; k++, l-=8) {
+                int m = (l>8) ? 8 : l;
+                uint8_t font_pattern = *pattern++;
+                for(int j=0; j<m; j++, p++) {
+                    if(font_pattern & (0x80>>j)) {
+                        *p = color;
+                    }
+                }
+            }
+            p += wl;
+        }
     }
+
 }
 
 void mgs_draw_font(int x, int y, uint32_t c, uint32_t color) {
@@ -142,8 +177,17 @@ void mgs_init(moe_video_info_t* _video) {
     font_offset = (line_height-font_h)/2;
     padding_x = font_w * 2;
     padding_y = line_height;
-    cols = (video->res_x - padding_x * 2) / font_w;
-    rows = (video->res_y - padding_y * 2) / line_height;
+
+    rotate = (video->res_x < video->res_y);
+    // rotate = 1;
+
+    if (rotate) {
+        cols = (video->res_y - padding_x * 2) / font_w;
+        rows = (video->res_x - padding_y * 2) / line_height;
+    } else {
+        cols = (video->res_x - padding_x * 2) / font_w;
+        rows = (video->res_y - padding_y * 2) / line_height;
+    }
 
     mgs_cls();
 }
