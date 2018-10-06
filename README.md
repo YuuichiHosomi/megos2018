@@ -1,4 +1,4 @@
-# MEG-OS MOE - Minimal Operating Environment
+# A Minimal Step OS using UEFI
 
 * A Minimal Step OS using UEFI
 

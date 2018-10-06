@@ -16,11 +16,13 @@ else
   :unknown
 end
 
+VENDOR_NAME     = "MOE"
 PATH_BIN        = "bin/"
 PATH_SRC        = "src/"
 PATH_OBJ        = "obj/"
 PATH_MNT        = "mnt/"
 PATH_EFI_BOOT   = "#{PATH_MNT}EFI/BOOT/"
+PATH_EFI_VENDOR = "#{PATH_MNT}EFI/#{VENDOR_NAME}/"
 PATH_INC        = "#{PATH_SRC}include/"
 
 case ARCH.to_sym
@@ -69,6 +71,7 @@ CLEAN.include(BOOTFONT_INC)
 directory PATH_OBJ
 directory PATH_BIN
 directory PATH_EFI_BOOT
+directory PATH_EFI_VENDOR
 
 TASKS = [ :main ]
 
@@ -80,10 +83,10 @@ desc "Defaults"
 task :default => [PATH_OBJ, PATH_BIN, TASKS].flatten
 
 desc "Run with QEMU"
-task :run => [:default, PATH_EFI_BOOT, PATH_OVMF] do
+task :run => [:default, PATH_EFI_BOOT, PATH_EFI_VENDOR, PATH_OVMF] do
   (target, efi_suffix) = convert_arch(ARCH)
   FileUtils.cp("#{PATH_BIN}boot#{efi_suffix}.efi", "#{PATH_EFI_BOOT}boot#{efi_suffix}.efi")
-  FileUtils.cp("#{PATH_BIN}krnl#{efi_suffix}.efi", "#{PATH_EFI_BOOT}krnl#{efi_suffix}.efi")
+  FileUtils.cp("#{PATH_BIN}krnl#{efi_suffix}.efi", "#{PATH_EFI_VENDOR}krnl#{efi_suffix}.efi")
   sh "qemu-system-#{QEMU_ARCH} #{QEMU_OPTS} -bios #{PATH_OVMF} -monitor stdio -drive file=fat:ro:mnt"
 end
 
@@ -188,13 +191,14 @@ def make_efi(cputype, target, src_tokens, options = {})
   end
 
   srcs = src_tokens.map do |s|
+    t = nil
     if s !~ /\.\w+/
       s += '.c'
     end
     base = File.basename(s, '.*')
     ext = File.extname(s)
     if s !~ /\//
-      s = [
+      t = [
         "#{path_src_p}#{s}",
         "#{path_src_p}#{base}-#{efi_suffix}#{ext}",
         "#{PATH_SRC}#{s}",
@@ -205,7 +209,7 @@ def make_efi(cputype, target, src_tokens, options = {})
         end
       end
     end
-    s
+    t || s
   end
 
   objs = srcs.map do |src|
@@ -239,8 +243,8 @@ namespace :main do
   targets = []
 
   [ARCH].each do |arch|
-    targets << make_efi(arch, 'boot', %w( osldr atop menu stdio printf memory ), { base: 'osldr' })
-    targets << make_efi(arch, 'krnl', %w( moeldr moe mgs printf memory ), { base: 'kernel' })
+    targets << make_efi(arch, 'boot', %w( osldr atop menu stdlib ), { base: 'boot' })
+    targets << make_efi(arch, 'krnl', %w( moeldr moe mgs stdlib ), { base: 'kernel' })
   end
 
   desc "Build Main"
