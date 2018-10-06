@@ -1,9 +1,9 @@
 {
-	"description": "MEG-OS Boot Loader Resource File",
+	"description": "Minimal OS Boot Loader Resource File",
 	"prefix": "rsrc",
 	"strings": {
 		"default": {
-			"main_title": "MEG-OS Boot Menu v0.0",
+			"main_title": "Minimal OS Boot Menu v0.0",
 			"starting": "Starting up...",
 			"press_esc_to_menu": "To display advanced option menu, press ESC key within %d seconds...",
 			"load_error_title": "Load Error",

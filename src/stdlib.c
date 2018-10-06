@@ -1,6 +1,6 @@
 /*
 
-	Subset of PRINTF
+	Subset of Standard C Library
 
 	Copyright (c) 1998,2000,2018 MEG-OS project, All rights reserved.
 
@@ -30,20 +30,45 @@
 int putchar(char c);
 
 
+/*********************************************************************/
+
+
+void* memcpy(void* p, const void* q, size_t n) {
+    uint8_t* _p = (uint8_t*)p;
+    const uint8_t* _q = (const uint8_t*)q;
+    #pragma clang loop vectorize(enable) interleave(enable)
+    for (int i = 0; i < n; i++) {
+        *_p++ = *_q++;
+    }
+    return p;
+}
+
+void* memset(void * p, int v, size_t n) {
+    uint8_t* _p = (uint8_t*)p;
+    #pragma clang loop vectorize(enable) interleave(enable)
+    for (int i = 0; i < n; i++) {
+        *_p++ = v;
+    }
+    return p;
+}
+
+/*********************************************************************/
+
+
 static int sprintf_num(char** _buffer, uintptr_t val, unsigned base, size_t width, char padding, size_t* _count, size_t _limit) {
 	char* buffer = *_buffer;
 	size_t count = *_count;
 	int sign = 0;
 
-	if(base == 10){
+	if (base == 10){
 		intptr_t ival = (intptr_t)val;
-		if(ival < 0) {
+		if (ival < 0) {
 			sign = 1;
-			val = -ival;
+			val = 0 - ival;
 		}
 	}
 
-	if(sign) {
+	if (sign) {
 		*buffer++ = '-';
 		count++;
 	}
@@ -51,30 +76,30 @@ static int sprintf_num(char** _buffer, uintptr_t val, unsigned base, size_t widt
 	uintptr_t work = val;
 	size_t content_size = 0;
 	unsigned mod;
-	do{
+	do {
 		work /= base;
 		content_size++;
-	}while(work);
+	} while (work);
 
-	if(width > content_size) {
+	if (width > content_size) {
 		content_size = width;
 	}
 
 	size_t limit = _limit - count;
-	if(limit < content_size) {
+	if (limit < content_size) {
 		content_size = limit;
 	}
-	if(width) {
-		for(int i=0;i<width;i++) {
+	if (width) {
+		for (int i = 0; i < width; i++) {
 			buffer[i] = padding;
 		}
 	}
 
-	for(int i=content_size-1; i>=0; i--) {
+	for (int i = content_size - 1; i >= 0; i--) {
 		mod = val % base;
 		val /= base;
 		buffer[i] = (mod<10) ? ('0'+mod) : ('a'-10+mod);
-		if(!val) break;
+		if (!val) break;
 	}
 
 	*_buffer = buffer + content_size;
@@ -89,19 +114,33 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
 	for(;*p && count<limit;) {
 		char c = *p++;
 		if(c=='%') {
-			size_t width = 0;
+			size_t width = 0, dot_width = 0;
 			int z_flag = 0;
 			int l_flag = 0;
+			int dot_width_enable = 0;
 			char padding = ' ';
 			c = *p++;
 
-			if(c == '0') {
+			if (c == '0') {
 				padding = '0';
 				c = *p++;
 			}
-			while(c >= '0' && c <= '9') {
+			while (c >= '0' && c <= '9') {
 				width = width*10 + (c-'0');
 				c = *p++;
+			}
+			if (c == '.') {
+				dot_width_enable = 1;
+				c = *p++;
+				while (c >= '0' && c <= '9') {
+					dot_width = dot_width*10 + (c-'0');
+					c = *p++;
+				}
+			}
+
+			size_t slimit = limit;
+			if (dot_width_enable && limit - count > dot_width) {
+				slimit = count + dot_width;
 			}
 
 			for(;c == 'z';c=*p++) { z_flag=1; }
@@ -115,8 +154,8 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
 				case 's':
 					{
 						const char* r = va_arg(args, char*);
-						if(!r) r = "(null)";
-						for(;*r && count<limit;count++) {
+						if (!r) r = "(null)";
+						for (; *r && count < slimit; count++) {
 							*q++ = *r++;
 						}
 					}
@@ -124,14 +163,14 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
 				case 'S':
 					{
 						const CHAR16* r = va_arg(args, const CHAR16*);
-						if(!r) r = L"(null)";
-						for(;*r && count<limit;count++) {
+						if (!r) r = L"(null)";
+						for (; *r && count < slimit; count++) {
 							CHAR16 ch = *r++;
-							if(ch < 0x80) {
+							if (ch < 0x80) {
 								*q++ = ch;
-							} else if(ch < 0x0800) {
+							} else if (ch < 0x0800) {
 								uint8_t utf[] = { 0xC0|(ch>>6), 0x80|(ch&0x3F) };
-								if(count+1<limit) {
+								if (count + 1 < slimit) {
 									count++;
 									*q++ = utf[0];
 									*q++ = utf[1];
@@ -140,8 +179,8 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
 								}
 							} else {
 								uint8_t utf[] = { 0xE0|(ch>>12), 0x80|((ch>>6)&0x3F), 0x80|(ch&0x3F) };
-								if(count+2<limit) {
-									count+=2;
+								if (count + 2 < slimit) {
+									count += 2;
 									*q++ = utf[0];
 									*q++ = utf[1];
 									*q++ = utf[2];
@@ -153,31 +192,24 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
 					}
 					break;
 				case 'd':
-					if(l_flag){
-						sprintf_num(&q, va_arg(args, int64_t), 10, width, padding, &count, limit);
-					} else if(z_flag) {
-						sprintf_num(&q, va_arg(args, intptr_t), 10, width, padding, &count, limit);
-					} else {
-						sprintf_num(&q, va_arg(args, int32_t), 10, width, padding, &count, limit);
-					}
-					break;
 				case 'u':
-					if(l_flag){
-						sprintf_num(&q, va_arg(args, uint64_t), 10, width, padding, &count, limit);
-					} else if(z_flag) {
-						sprintf_num(&q, va_arg(args, uintptr_t), 10, width, padding, &count, limit);
-					} else {
-						sprintf_num(&q, va_arg(args, uint32_t), 10, width, padding, &count, limit);
-					}
-					break;
 				case 'x':
+					// TODO: 'u' is currently not suppported
+					uintptr_t val;
+					unsigned base;
 					if(l_flag){
-						sprintf_num(&q, va_arg(args, uint64_t), 16, width, padding, &count, limit);
+						val = va_arg(args, int64_t);
 					} else if(z_flag) {
-						sprintf_num(&q, va_arg(args, uintptr_t), 16, width, padding, &count, limit);
+						val = va_arg(args, intptr_t);
 					} else {
-						sprintf_num(&q, va_arg(args, uint32_t), 16, width, padding, &count, limit);
+						val = va_arg(args, int32_t);
 					}
+					if (c == 'x')
+						base = 16;
+					else
+						base = 10;
+
+					sprintf_num(&q, val, base, width, padding, &count, limit);
 					break;
 				case 'p':
 					sprintf_num(&q, va_arg(args, uintptr_t), 16, 2*sizeof(void*), '0', &count, limit);

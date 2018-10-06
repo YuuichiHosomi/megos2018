@@ -27,6 +27,13 @@
 
 /*********************************************************************/
 
+void memset32(uint32_t* p, uint32_t v, size_t n) {
+    #pragma clang loop vectorize(enable) interleave(enable)
+    for (int i = 0; i < n; i++) {
+        *p++ = v;
+    }
+}
+
 int puts(const char* s) {
     return printf("%s\n", s);
 }

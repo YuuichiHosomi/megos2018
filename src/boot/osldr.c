@@ -36,8 +36,8 @@
 #define	OS_INDICATIONS_SUPPORTED_NAME	L"OsIndicationsSupported"
 #define	OS_INDICATIONS_NAME	L"OsIndications"
 
-#define	KERNEL_PATH L"\\EFI\\BOOT\\KRNL" EFI_SUFFIX ".EFI"
-// #define	KERNEL_PATH L"\\EFI\\BOOT\\KERNEL.EFI"
+#define	KERNEL_PATH L"\\EFI\\MEGOS\\KRNL" EFI_SUFFIX ".EFI"
+// #define	KERNEL_PATH L"\\EFI\\MEGOS\\KERNEL.EFI"
 
 CONST CHAR16* cp932_bin_path = L"\\EFI\\MEGOS\\CP932.BIN";
 CONST CHAR16* cp932_fnt_path = L"\\EFI\\MEGOS\\CP932.FNT";
@@ -166,6 +166,31 @@ int putchar(unsigned char c) {
             return 0;
     }
 
+}
+
+void* malloc(size_t n) {
+    void* result = 0;
+    EFI_STATUS status = gST->BootServices->AllocatePool(EfiLoaderData, n, &result);
+    if(EFI_ERROR(status)){
+        return 0;
+    }
+    return result;
+}
+
+void free(void* p) {
+    if(p) {
+        gBS->FreePool(p);
+    }
+}
+
+int puts(const char* s){
+    return printf("%s\n", s);
+    // const char* p=s;
+    // for(;*p;p++) {
+    //     putchar(*p);
+    // }
+    // putchar('\n');
+    // return 0;
 }
 
 

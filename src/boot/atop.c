@@ -49,7 +49,6 @@ typedef struct {
     const uint8_t* font_data;
     uint8_t mode_cols, mode_rows;
 } ATOP_Context;
-ATOP_Context self;
 
 typedef struct {
     uint8_t cols, rows;
