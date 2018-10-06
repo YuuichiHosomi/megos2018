@@ -182,16 +182,6 @@ void free(void* p) {
     }
 }
 
-int puts(const char* s){
-    return printf("%s\n", s);
-    // const char* p=s;
-    // for(;*p;p++) {
-    //     putchar(*p);
-    // }
-    // putchar('\n');
-    // return 0;
-}
-
 
 EFI_STATUS init_gop(EFI_HANDLE* image) {
     EFI_STATUS status;

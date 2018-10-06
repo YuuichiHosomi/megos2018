@@ -24,6 +24,7 @@ PATH_MNT        = "mnt/"
 PATH_EFI_BOOT   = "#{PATH_MNT}EFI/BOOT/"
 PATH_EFI_VENDOR = "#{PATH_MNT}EFI/#{VENDOR_NAME}/"
 PATH_INC        = "#{PATH_SRC}include/"
+CP932_BIN       = "#{PATH_EFI_VENDOR}cp932.bin"
 
 case ARCH.to_sym
 when :x64
@@ -67,6 +68,7 @@ INCS << BOOTFONT_INC
 CLEAN.include(FileList["#{PATH_BIN}**/*"])
 CLEAN.include(FileList["#{PATH_OBJ}**/*"])
 CLEAN.include(BOOTFONT_INC)
+CLEAN.include(CP932_BIN)
 
 directory PATH_OBJ
 directory PATH_BIN
@@ -83,7 +85,7 @@ desc "Defaults"
 task :default => [PATH_OBJ, PATH_BIN, TASKS].flatten
 
 desc "Run with QEMU"
-task :run => [:default, PATH_EFI_BOOT, PATH_EFI_VENDOR, PATH_OVMF] do
+task :run => [:default, PATH_EFI_BOOT, PATH_EFI_VENDOR, PATH_OVMF, CP932_BIN] do
   (target, efi_suffix) = convert_arch(ARCH)
   FileUtils.cp("#{PATH_BIN}boot#{efi_suffix}.efi", "#{PATH_EFI_BOOT}boot#{efi_suffix}.efi")
   FileUtils.cp("#{PATH_BIN}krnl#{efi_suffix}.efi", "#{PATH_EFI_VENDOR}krnl#{efi_suffix}.efi")
@@ -108,6 +110,11 @@ file BOOTFONT_INC => "#{PATH_SRC}bootfont.fnt" do |t|
     file.puts "const uint8_t font_data[] = {\n#{ data.join(",\n") }\n};"
   end
 end
+
+file CP932_BIN => [ PATH_EFI_VENDOR, "#{PATH_SRC}cp932.asm"] do |t|
+  sh "#{AS} -f bin #{ t.prerequisites[1] } -o #{t.name}"
+end
+
 
 def convert_arch(s)
   case s.to_sym
@@ -242,9 +249,11 @@ namespace :main do
 
   targets = []
 
+  targets << CP932_BIN
+
   [ARCH].each do |arch|
     targets << make_efi(arch, 'boot', %w( osldr atop menu stdlib ), { base: 'boot' })
-    targets << make_efi(arch, 'krnl', %w( moeldr moe mgs stdlib ), { base: 'kernel' })
+    targets << make_efi(arch, 'krnl', %w( moeldr moe mgs mmm arch acpi stdlib mkasm.asm ), { base: 'kernel' })
   end
 
   desc "Build Main"

@@ -253,3 +253,7 @@ int printf(const char* format, ...) {
 	va_end(list);
 	return retval;
 }
+
+int puts(const char* s) {
+    return printf("%s\n", s);
+}

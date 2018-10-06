@@ -1,6 +1,6 @@
 /*
 
-    Minimal Operating Environment
+    Minimal ACPI Support
 
     Copyright (c) 1998,2000,2018 MEG-OS project, All rights reserved.
 
@@ -23,46 +23,24 @@
     SOFTWARE.
 
 */
-#include <stdint.h>
-#include "acpi.h"
-
-#ifndef NULL
-#define	NULL (0)
-#endif
-
-void memset32(uint32_t* p, uint32_t v, size_t n);
-
-typedef struct {
-    void* vram;
-    size_t vram_size;
-    int res_x, res_y, pixel_per_scan_line;
-} moe_video_info_t;
-
-typedef struct {
-    moe_video_info_t video;
-    acpi_rsd_ptr_t* acpi;
-} moe_bootinfo_t;
+#include "moe.h"
+// #include "acpi.h"
 
 
-//  Assembly Routines
-extern void start_kernel(moe_bootinfo_t* bootinfo) __attribute__((__noreturn__));
-extern uintptr_t xchg_add(volatile uintptr_t*, uintptr_t);
-
-//  Architecture Specific
-void arch_init();
-
-//  ACPI
-void* acpi_find_table(acpi_xsdt_t* xsdt, const char* signature);
+static int is_equal_signature(const void* p1, const void* p2) {
+    const uint32_t* _p1 = (const uint32_t*)p1;
+    const uint32_t* _p2 = (const uint32_t*)p2;
+    return (*_p1 == *_p2);
+}
 
 
-//  Minimal Graphics Subsystem
-void mgs_init(moe_video_info_t* _video);
-void mgs_fill_rect(int x, int y, int width, int height, uint32_t color);
-void mgs_fill_block(int x, int y, int width, int height, uint32_t color);
-void mgs_cls();
-int printf(const char* format, ...);
-
-
-//  Minimal Memory Subsystem
-void mm_init();
-void* mm_alloc_object(size_t n);
+void* acpi_find_table(acpi_xsdt_t* xsdt, const char* signature) {
+    int n_entries = (xsdt->Header.length - 0x24 /* offset_of Entry */ ) / sizeof(xsdt->Entry[0]);
+    for (int i=0; i<n_entries; i++) {
+        acpi_header_t* entry = (acpi_header_t*)(xsdt->Entry[i]);
+        if (is_equal_signature(entry->signature, signature)) {
+            return entry;
+        }
+    }
+    return NULL;
+}

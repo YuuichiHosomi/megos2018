@@ -1,13 +1,17 @@
+//
+//  x86 Protected Mode Contexts and System Objects
+//
+
+#include <stdint.h>
 
 
-
-
+//  GPR Context for i386 Protected-Mode
 typedef	struct _i386_context_t {
     /* 00 */ uint32_t	cr2;
     /* 04 */ union { uint32_t edi; uint16_t di; uint8_t dil; };
     /* 08 */ union { uint32_t esi; uint16_t si; uint8_t sil; };
     /* 0C */ union { uint32_t ebp; uint16_t bp; uint8_t bpl; };
-    /* 10 */ uint32_t	_DUMMY_esp;
+    /* 10 */ uint32_t	esp_DUMMY;
     /* 14 */ union { uint32_t ebx; uint16_t bx; struct { uint8_t bl, bh; }; };
     /* 18 */ union { uint32_t edx; uint16_t dx; struct { uint8_t dl, dh; }; };
     /* 1C */ union { uint32_t ecx; uint16_t cx; struct { uint8_t cl, ch; }; };
@@ -30,6 +34,36 @@ typedef	struct _i386_context_t {
     /* 58 */ uint32_t	vmfs;
     /* 5C */ uint32_t	vmgs;
 } i386_context_t;
+
+
+//  GPR Context for x64
+typedef struct {
+    /* 00 */ uint64_t   cr2;
+    /* 08 */ uint64_t   r15, r14, r13, r12, r11, r10, r9, r8, rdi, rsi, rbp, rbx, rdx, rcx, rax;
+    /* 80 */ uint64_t   intnum;
+    /* 88 */ uint64_t   err;
+    /* 90 */ uint64_t   rip;
+    /* 98 */ uint64_t   cs;
+    /* A0 */ uint64_t   rflags;
+    /* A8 */ uint64_t   rsp;
+    /* B0 */ uint64_t   ss;
+} x64_context_t;
+
+
+typedef union {
+    struct {
+        uint16_t    offset_1;
+        uint16_t    sel;
+        uint16_t    attr;
+        uint16_t    offset_2;
+        uint32_t    offset_3;
+        uint32_t    RESERVED;
+    };
+    uint16_t    u16[8];
+    uint32_t    u32[4];
+    uint64_t    u64[2];
+} x64_idt64_t;
+
 
 
 #define	EFLAGS_CF						0x00000001

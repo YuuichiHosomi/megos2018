@@ -1,6 +1,6 @@
 /*
 
-    Minimal Operating Environment
+    Minimal Memory Management Subsystem
 
     Copyright (c) 1998,2000,2018 MEG-OS project, All rights reserved.
 
@@ -23,46 +23,18 @@
     SOFTWARE.
 
 */
-#include <stdint.h>
-#include "acpi.h"
+#include "moe.h"
 
-#ifndef NULL
-#define	NULL (0)
-#endif
+#define HEAP_SIZE   0x1000000
+static uint8_t heap[HEAP_SIZE];
+static volatile uintptr_t start;
 
-void memset32(uint32_t* p, uint32_t v, size_t n);
+void mm_init() {
+    start = ((uintptr_t)heap+0xFFF) & ~0xFFF;
+}
 
-typedef struct {
-    void* vram;
-    size_t vram_size;
-    int res_x, res_y, pixel_per_scan_line;
-} moe_video_info_t;
+void* mm_alloc_object(size_t n) {
+    uintptr_t result = xchg_add(&start, (n+0xFFF) & ~0xFFF);
+    return (void*)result;
+}
 
-typedef struct {
-    moe_video_info_t video;
-    acpi_rsd_ptr_t* acpi;
-} moe_bootinfo_t;
-
-
-//  Assembly Routines
-extern void start_kernel(moe_bootinfo_t* bootinfo) __attribute__((__noreturn__));
-extern uintptr_t xchg_add(volatile uintptr_t*, uintptr_t);
-
-//  Architecture Specific
-void arch_init();
-
-//  ACPI
-void* acpi_find_table(acpi_xsdt_t* xsdt, const char* signature);
-
-
-//  Minimal Graphics Subsystem
-void mgs_init(moe_video_info_t* _video);
-void mgs_fill_rect(int x, int y, int width, int height, uint32_t color);
-void mgs_fill_block(int x, int y, int width, int height, uint32_t color);
-void mgs_cls();
-int printf(const char* format, ...);
-
-
-//  Minimal Memory Subsystem
-void mm_init();
-void* mm_alloc_object(size_t n);

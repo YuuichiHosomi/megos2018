@@ -34,26 +34,28 @@ void memset32(uint32_t* p, uint32_t v, size_t n) {
     }
 }
 
-int puts(const char* s) {
-    return printf("%s\n", s);
-}
-
 /*********************************************************************/
 
 void start_kernel(moe_bootinfo_t* bootinfo) {
 
     mgs_init(&bootinfo->video);
 
+    arch_init();
+
     mgs_fill_rect(50, 50, 300, 300, 0xFF77CC);
     mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
     mgs_fill_rect(250, 100, 300, 300, 0xCC77FF);
 
-    printf("Minimal Operating Environment v0.0 [%zdbit kernel]\n", 8*sizeof(void*));
-    printf("----\nBOOTINFO: @%p\n", (void*)bootinfo);
-    printf("ACPI: @%p\n", (void*)bootinfo->acpi);
-    printf("Screen: %dx%d @%p\n", bootinfo->video.res_x, bootinfo->video.res_y, bootinfo->video.vram);
+    printf("Minimal OS v0.0\n");
     printf("\n");
     printf("Hello, world!\n");
+
+    // void* fadt = acpi_find_table((acpi_xsdt_t*)bootinfo->acpi->xsdtaddr, "FACP");
+    // printf("ACPI %p, FADT %p\n", (void*)bootinfo->acpi, fadt);
+
+    volatile intptr_t* hoge = (intptr_t*)(0x123456789abc);
+    *hoge = *hoge;
+    __asm__ volatile ("int $3");
 
     for(;;) __asm__ volatile ("hlt");
 }

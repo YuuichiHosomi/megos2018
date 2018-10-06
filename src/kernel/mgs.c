@@ -48,7 +48,7 @@ void mgs_fill_rect(int x, int y, int w, int h, uint32_t color) {
 
     int sw = video->res_x, sh = video->res_y;
 
-    if(rotate) {
+    if (rotate) {
         int z = x;
         x = sw -y -h;
         y = z;
@@ -95,9 +95,9 @@ void mgs_draw_pattern(int x, int y, int w, int h, const uint8_t* pattern, uint32
     int ppl = video->pixel_per_scan_line;
     int w8 = (w+7)/8;
 
-    if(x<0 || y<0) return;
+    if ( x < 0 || y < 0) return;
 
-    if(rotate) {
+    if (rotate) {
         y = sw -y -h;
         int wl = ppl - h;
         uint32_t* p = (uint32_t*)video->vram + x*ppl + y;
@@ -150,6 +150,10 @@ void putchar32(uint32_t c) {
                 mgs_draw_font(col_to_x(cursor_x), row_to_y(cursor_y), c, fgcolor);
             }
             cursor_x++;
+            break;
+
+        case '\r':
+            cursor_x = 0;
             break;
 
         case '\n':
