@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 
-//  GPR Context for i386 Protected-Mode
+//  GPR Context for Protected-Mode i386
 typedef	struct _i386_context_t {
     /* 00 */ uint32_t	cr2;
     /* 04 */ union { uint32_t edi; uint16_t di; uint8_t dil; };
@@ -36,7 +36,7 @@ typedef	struct _i386_context_t {
 } i386_context_t;
 
 
-//  GPR Context for x64
+//  GPR Context for Long mode x64
 typedef struct {
     /* 00 */ uint64_t   cr2;
     /* 08 */ uint64_t   r15, r14, r13, r12, r11, r10, r9, r8, rdi, rsi, rbp, rbx, rdx, rcx, rax;
@@ -65,7 +65,6 @@ typedef union {
 } x64_idt64_t;
 
 
-
 #define	EFLAGS_CF						0x00000001
 #define	EFLAGS_PF						0x00000004
 #define	EFLAGS_AF						0x00000010
@@ -92,7 +91,6 @@ typedef union {
 #define	PTE_PRESENT					0x0000000000000001
 #define	PTE_WRITE					0x0000000000000002
 #define	PTE_USER					0x0000000000000004
-#define	PTE_NOCACHE					0x0000000000000000
 #define	PTE_ACCESS					0x0000000000000020
 #define	PTE_DIRTY					0x0000000000000040
 #define	PTE_LARGE2M					0x0000000000000080		// PAE

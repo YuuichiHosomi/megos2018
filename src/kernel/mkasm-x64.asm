@@ -40,6 +40,7 @@ xchg_add:
 ; int gdtr_init(void);
     global gdtr_init
 gdtr_init:
+
     ; load GDTR
     lea rax, [rel __GDT]
     mov [rax+2], rax
@@ -57,7 +58,7 @@ gdtr_init:
     ret
 
 
-; void idtr_load(void* lidtr, size_t limit);
+; void idtr_load(void* idt, size_t limit);
     global idtr_load
 idtr_load:
     shl rdx, 48

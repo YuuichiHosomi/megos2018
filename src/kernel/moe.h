@@ -34,13 +34,17 @@ void memset32(uint32_t* p, uint32_t v, size_t n);
 
 typedef struct {
     void* vram;
-    size_t vram_size;
     int res_x, res_y, pixel_per_scan_line;
 } moe_video_info_t;
 
 typedef struct {
     moe_video_info_t video;
     acpi_rsd_ptr_t* acpi;
+
+    void* efiRT; // EFI_RUNTIME_SERVICES
+
+    void* mmap; // EFI_MEMORY_DESCRIPTOR
+    uintptr_t mmap_size, mmap_desc_size;
 } moe_bootinfo_t;
 
 
@@ -52,7 +56,8 @@ extern uintptr_t xchg_add(volatile uintptr_t*, uintptr_t);
 void arch_init();
 
 //  ACPI
-void* acpi_find_table(acpi_xsdt_t* xsdt, const char* signature);
+void acpi_init(acpi_rsd_ptr_t* rsd);
+void* acpi_find_table(const char* signature);
 
 
 //  Minimal Graphics Subsystem
@@ -64,5 +69,5 @@ int printf(const char* format, ...);
 
 
 //  Minimal Memory Subsystem
-void mm_init();
+uintptr_t mm_init(void* efi_mmap, uintptr_t mmap_size, uintptr_t mmap_desc_size);
 void* mm_alloc_object(size_t n);

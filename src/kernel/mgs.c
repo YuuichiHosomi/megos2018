@@ -68,13 +68,13 @@ void mgs_fill_rect(int x, int y, int w, int h, uint32_t color) {
     if (left > sw || top > sh || right < 0 || bottom < 0) return;
 
     int width = right - left;
-    int ppl = video->pixel_per_scan_line;
-    uint32_t* p = (uint32_t*)video->vram + top * ppl;
-    if (width == ppl) {
-        memset32(p, color, (bottom - top) * ppl);
+    int delta = video->pixel_per_scan_line;
+    uint32_t* p = (uint32_t*)video->vram + top * delta;
+    if (width == delta) {
+        memset32(p, color, (bottom - top) * delta);
     } else {
         p += left;
-        for (int i = top; i < bottom; i++, p+=ppl) {
+        for (int i = top; i < bottom; i++, p += delta) {
             memset32(p, color, width);
         }
     }
@@ -92,15 +92,15 @@ void mgs_cls() {
 
 void mgs_draw_pattern(int x, int y, int w, int h, const uint8_t* pattern, uint32_t color) {
     int sw = video->res_x;
-    int ppl = video->pixel_per_scan_line;
+    int delta = video->pixel_per_scan_line;
     int w8 = (w+7)/8;
 
     if ( x < 0 || y < 0) return;
 
     if (rotate) {
         y = sw -y -h;
-        int wl = ppl - h;
-        uint32_t* p = (uint32_t*)video->vram + x*ppl + y;
+        int wl = delta - h;
+        uint32_t* p = (uint32_t*)video->vram + x * delta + y;
 
         int l=w;
         for(int k=0; k<w8; k++, l-=8) {
@@ -117,8 +117,8 @@ void mgs_draw_pattern(int x, int y, int w, int h, const uint8_t* pattern, uint32
         }
 
     } else {
-        int wl = ppl - w;
-        uint32_t* p = (uint32_t*)video->vram + y*ppl + x;
+        int wl = delta - w;
+        uint32_t* p = (uint32_t*)video->vram + y * delta + x;
 
         for(int i=0; i<h; i++) {
             int l=w;

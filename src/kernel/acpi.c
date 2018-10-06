@@ -26,6 +26,7 @@
 #include "moe.h"
 // #include "acpi.h"
 
+static acpi_rsd_ptr_t* rsdp;
 
 static int is_equal_signature(const void* p1, const void* p2) {
     const uint32_t* _p1 = (const uint32_t*)p1;
@@ -33,8 +34,9 @@ static int is_equal_signature(const void* p1, const void* p2) {
     return (*_p1 == *_p2);
 }
 
-
-void* acpi_find_table(acpi_xsdt_t* xsdt, const char* signature) {
+void* acpi_find_table(const char* signature) {
+    if (!rsdp) return NULL;
+    acpi_xsdt_t* xsdt = (acpi_xsdt_t*)rsdp->xsdtaddr;
     int n_entries = (xsdt->Header.length - 0x24 /* offset_of Entry */ ) / sizeof(xsdt->Entry[0]);
     for (int i=0; i<n_entries; i++) {
         acpi_header_t* entry = (acpi_header_t*)(xsdt->Entry[i]);
@@ -43,4 +45,8 @@ void* acpi_find_table(acpi_xsdt_t* xsdt, const char* signature) {
         }
     }
     return NULL;
+}
+
+void acpi_init(acpi_rsd_ptr_t* _rsdp) {
+    rsdp = _rsdp;
 }

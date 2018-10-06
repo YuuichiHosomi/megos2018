@@ -24,17 +24,63 @@
 
 */
 #include "moe.h"
+#include "efi.h"
 
-#define HEAP_SIZE   0x1000000
+typedef struct {
+    uintptr_t base;
+    uintptr_t size;
+    uintptr_t type;
+} moe_mmap;
+
+#define HEAP_SIZE   0x400000
 static uint8_t heap[HEAP_SIZE];
 static volatile uintptr_t start;
 
-void mm_init() {
-    start = ((uintptr_t)heap+0xFFF) & ~0xFFF;
-}
+#define ROUNDUP_4K(n) ((n + 0xFFF) & ~0xFFF)
 
 void* mm_alloc_object(size_t n) {
-    uintptr_t result = xchg_add(&start, (n+0xFFF) & ~0xFFF);
+    uintptr_t result = xchg_add(&start, ROUNDUP_4K(n));
     return (void*)result;
+}
+
+uintptr_t total_memory = 0;
+
+static int efi_mm_type_convert(uint32_t type) {
+    switch (type) {
+        case EfiReservedMemoryType:
+        case EfiUnusableMemory:
+        default:
+            return 0;
+
+        case EfiConventionalMemory:
+            return EfiConventionalMemory;
+        case EfiBootServicesCode:
+        case EfiBootServicesData:
+        case EfiLoaderCode:
+        case EfiLoaderData:
+        case EfiACPIMemoryNVS:
+        case EfiACPIReclaimMemory:
+        case EfiRuntimeServicesCode:
+        case EfiRuntimeServicesData:
+            return type;
+    }
+}
+
+uintptr_t mm_init(void* efi_mmap, uintptr_t efi_mmap_size, uintptr_t efi_mmap_desc_size) {
+    start = ROUNDUP_4K((uintptr_t)heap);
+
+    uint8_t* mmap_ptr = (uint8_t*)efi_mmap;
+    int n_mmap = efi_mmap_size / efi_mmap_desc_size;
+    for (int i = 0; i < n_mmap; i++) {
+        EFI_MEMORY_DESCRIPTOR* efi_mem = (EFI_MEMORY_DESCRIPTOR*)(mmap_ptr + i * efi_mmap_desc_size);
+        if (efi_mem->PhysicalStart >= 0x100000) {
+            moe_mmap mem = { efi_mem->PhysicalStart, efi_mem->NumberOfPages*0x1000, efi_mm_type_convert(efi_mem->Type) };
+            if (mem.type > 0) {
+                total_memory += mem.size;
+            }
+        }
+    }
+
+    return total_memory;
 }
 

@@ -88,8 +88,6 @@ static void* efi_find_config_table(CONST EFI_GUID* guid) {
 EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
     EFI_STATUS status;
     moe_bootinfo_t bootinfo;
-    EFI_GRAPHICS_OUTPUT_PROTOCOL* gop = NULL;
-    EFI_MEMORY_DESCRIPTOR* mmap = NULL;
 
     // Init UEFI Environments
     gST = st;
@@ -110,18 +108,27 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
 
     //	Get GOP
     {
+        EFI_GRAPHICS_OUTPUT_PROTOCOL* gop = NULL;
+
         status = gBS->LocateProtocol(&EfiGraphicsOutputProtocolGuid, NULL, (void**)&gop);
         if (!gop) {
             EFI_PRINT("ERROR: GOP NOT FOUND");
             goto errexit;
         }
+
+        bootinfo.video.vram = (void*)gop->Mode->FrameBufferBase;
+        bootinfo.video.res_x = gop->Mode->Info->HorizontalResolution;
+        bootinfo.video.res_y = gop->Mode->Info->VerticalResolution;
+        bootinfo.video.pixel_per_scan_line = gop->Mode->Info->PixelsPerScanLine;
     }
 
     //	Exit BootServices
     {
+        EFI_MEMORY_DESCRIPTOR* mmap = NULL;
         UINTN mmapsize = 0;
         UINTN mapkey, descriptorsize;
         UINT32 descriptorversion;
+
         do {
             status = gBS->GetMemoryMap(&mmapsize, mmap, &mapkey, &descriptorsize, &descriptorversion);
             while (status == EFI_BUFFER_TOO_SMALL) {
@@ -137,16 +144,14 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
             }
             status = gBS->ExitBootServices(image, mapkey);
         } while (EFI_ERROR(status));
+
+        bootinfo.mmap = mmap;
+        bootinfo.mmap_size = mmapsize;
+        bootinfo.mmap_desc_size = descriptorsize;
     }
 
     //	Start Kernel
     {
-        bootinfo.video.vram = (void*)gop->Mode->FrameBufferBase;
-        bootinfo.video.vram_size = gop->Mode->FrameBufferSize;
-        bootinfo.video.res_x = gop->Mode->Info->HorizontalResolution;
-        bootinfo.video.res_y = gop->Mode->Info->VerticalResolution;
-        bootinfo.video.pixel_per_scan_line = gop->Mode->Info->PixelsPerScanLine;
-
         start_kernel(&bootinfo);
     }
 
