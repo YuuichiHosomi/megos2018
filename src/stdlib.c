@@ -55,12 +55,12 @@ void* memset(void * p, int v, size_t n) {
 /*********************************************************************/
 
 
-static int sprintf_num(char** _buffer, uintptr_t val, unsigned base, size_t width, char padding, size_t* _count, size_t _limit) {
+static int sprintf_num(char** _buffer, uintptr_t val, unsigned base, size_t width, char padding, size_t* _count, size_t _limit, int _signed) {
 	char* buffer = *_buffer;
 	size_t count = *_count;
 	int sign = 0;
 
-	if (base == 10){
+	if (_signed) {
 		intptr_t ival = (intptr_t)val;
 		if (ival < 0) {
 			sign = 1;
@@ -151,6 +151,7 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
 					*q++ = va_arg(args, int);
 					count++;
 					break;
+
 				case 's':
 					{
 						const char* r = va_arg(args, char*);
@@ -160,6 +161,7 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
 						}
 					}
 					break;
+
 				case 'S':
 					{
 						const CHAR16* r = va_arg(args, const CHAR16*);
@@ -191,28 +193,34 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
 						}
 					}
 					break;
+
 				case 'd':
 				case 'u':
 				case 'x':
-					// TODO: 'u' is currently not suppported
 					uintptr_t val;
-					unsigned base;
+					unsigned base = (c == 'x') ? 16 : 10;
+					int _signed = (c == 'd');
 					if(l_flag){
 						val = va_arg(args, int64_t);
 					} else if(z_flag) {
-						val = va_arg(args, intptr_t);
+						if(_signed) {
+							val = va_arg(args, intptr_t);
+						} else {
+							val = va_arg(args, uintptr_t);
+						}
 					} else {
-						val = va_arg(args, int32_t);
+						if (_signed) {
+							val = va_arg(args, int32_t);
+						} else {
+							val = va_arg(args, uint32_t);
+						}
 					}
-					if (c == 'x')
-						base = 16;
-					else
-						base = 10;
 
-					sprintf_num(&q, val, base, width, padding, &count, limit);
+					sprintf_num(&q, val, base, width, padding, &count, limit, _signed);
 					break;
+
 				case 'p':
-					sprintf_num(&q, va_arg(args, uintptr_t), 16, 2*sizeof(void*), '0', &count, limit);
+					sprintf_num(&q, va_arg(args, uintptr_t), 16, 2*sizeof(void*), '0', &count, limit, 0);
 					break;
 			}
 

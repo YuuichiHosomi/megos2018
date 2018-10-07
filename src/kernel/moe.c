@@ -1,6 +1,6 @@
 /*
 
-    Minimal Kernel
+    Minimal Operating Environment - Kernel
 
     Copyright (c) 1998,2000,2018 MEG-OS project, All rights reserved.
 
@@ -42,19 +42,20 @@ int rgb32_to_luminance(uint32_t rgb) {
 }
 
 void draw_logo_bitmap(moe_video_info_t* video, const uint8_t* bmp, int offset_x, int offset_y) {
-    uintptr_t offset = *((uint32_t*)(bmp+10));
-    int bmp_w = *((uint32_t*)(bmp+18));
-    int bmp_h = *((uint32_t*)(bmp+22));
-    int bmp_bpp = *((uint16_t*)(bmp+28));
-    int bmp_bpp8 = (bmp_bpp/8);
+    uintptr_t offset = *((uint32_t*)(bmp + 10));
+    int bmp_w = *((uint32_t*)(bmp + 18));
+    int bmp_h = *((uint32_t*)(bmp + 22));
+    int bmp_bpp = *((uint16_t*)(bmp + 28));
+    int bmp_bpp8 = (bmp_bpp + 7) / 8;
     int bmp_ppl = (bmp_bpp8 * bmp_w + 3) & 0xFFFFFFFC;
+    int delta = video->pixel_per_scan_line;
     const uint8_t* dib = bmp+offset;
 
     if (offset_x < 0) offset_x = (video->res_x - bmp_w) / 2;
     if (offset_y < 0) offset_y = (video->res_y - bmp_h) / 2;
 
     uint32_t* vram = (uint32_t*)video->vram;
-    vram += offset_x + offset_y * video->pixel_per_scan_line;
+    vram += offset_x + offset_y * delta;
 
     switch (bmp_bpp) {
         case 24:
@@ -68,7 +69,7 @@ void draw_logo_bitmap(moe_video_info_t* video, const uint8_t* bmp, int offset_x,
                         vram[j] = b + (b<<8) + (b<<16);
                     }
                 }
-                vram += video->pixel_per_scan_line;
+                vram += delta;
             }
             break;
 
@@ -82,7 +83,7 @@ void draw_logo_bitmap(moe_video_info_t* video, const uint8_t* bmp, int offset_x,
                         vram8[k] = vram8[k] * alpha;
                     }
                 }
-                vram += video->pixel_per_scan_line;
+                vram += delta;
             }
             break;
     }
@@ -92,30 +93,44 @@ void draw_logo_bitmap(moe_video_info_t* video, const uint8_t* bmp, int offset_x,
 
 void start_kernel(moe_bootinfo_t* bootinfo) {
 
+    mgs_init(&bootinfo->video);
     uintptr_t memsize = mm_init(bootinfo->mmap, bootinfo->mmap_size, bootinfo->mmap_desc_size);
     acpi_init(bootinfo->acpi);
     arch_init();
-    mgs_init(&bootinfo->video);
 
     mgs_fill_rect(50, 50, 300, 300, 0xFF77CC);
     mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
     mgs_fill_rect(250, 100, 300, 300, 0x77CCFF);
 
-    printf("Minimal OS v0.1 [Memory %dMB]\n", (int)(memsize >> 20));
+    printf("Minimal Step OS using UEFI v0.1 [Memory %dMB]\n", (int)(memsize >> 20));
     printf("\n");
     printf("Hello, world!\n");
 
-    void* fadt = acpi_find_table("FACP");
-    printf("ACPI %p, FADT %p\n", (void*)bootinfo->acpi, fadt);
+    int n = acpi_get_number_of_table_entries();
+    for (int i = 0; i < n; i++) {
+        acpi_header_t* table = acpi_enum_table_entry(i);
+        if (table) {
+            printf("%p: %.4s %d\n", (void*)table, table->signature, table->length);
+        }
+    }
 
-    acpi_bgrt_t* bgrt = acpi_find_table("BGRT");
+    acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
     if (bgrt) {
         draw_logo_bitmap(&bootinfo->video, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
     }
 
-    volatile intptr_t* hoge = (intptr_t*)(0x123456789abc);
-    *hoge = *hoge;
-    __asm__ volatile ("int $3");
+    acpi_hpet_t* hpet = acpi_find_table(ACPI_HPET_SIGNATURE);
+    if (hpet) {
+        MOE_PHYSICAL_ADDRESS base = hpet->address.address;
+        printf("HPET: %p %08zx %016llx\n", (void*)hpet, base, READ_PHYSICAL_UINT64(base));
+        for (;;) {
+            printf("HPET Main Count: %ld\r", READ_PHYSICAL_UINT64(base + 0xF0));
+        }
+    }
+
+    // volatile intptr_t* hoge = (intptr_t*)(0x123456789abc);
+    // *hoge = *hoge;
+    // __asm__ volatile ("int $3");
 
     for(;;) __asm__ volatile ("hlt");
 }

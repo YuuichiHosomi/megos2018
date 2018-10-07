@@ -54,11 +54,13 @@ typedef union {
     struct {
         uint16_t    offset_1;
         uint16_t    sel;
-        uint16_t    attr;
+        uint8_t     ist;
+        uint8_t     attr;
         uint16_t    offset_2;
         uint32_t    offset_3;
         uint32_t    RESERVED;
     };
+    uint8_t     u8[16];
     uint16_t    u16[8];
     uint32_t    u32[4];
     uint64_t    u64[2];

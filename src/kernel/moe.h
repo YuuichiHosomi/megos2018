@@ -30,6 +30,8 @@
 #define	NULL (0)
 #endif
 
+void* memcpy(void* p, const void* q, size_t n);
+void* memset(void * p, int v, size_t n);
 void memset32(uint32_t* p, uint32_t v, size_t n);
 
 typedef struct {
@@ -48,16 +50,25 @@ typedef struct {
 } moe_bootinfo_t;
 
 
-//  Assembly Routines
-extern void start_kernel(moe_bootinfo_t* bootinfo) __attribute__((__noreturn__));
-extern uintptr_t xchg_add(volatile uintptr_t*, uintptr_t);
-
 //  Architecture Specific
+extern void start_kernel(moe_bootinfo_t* bootinfo) __attribute__((__noreturn__));
+uintptr_t atomic_exchange_add(volatile uintptr_t*, uintptr_t);
 void arch_init();
+typedef uintptr_t MOE_PHYSICAL_ADDRESS;
+
+void* PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(MOE_PHYSICAL_ADDRESS va);
+uint8_t READ_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p);
+uint32_t READ_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p);
+void WRITE_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p, uint32_t v);
+uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p);
+void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v);
+
 
 //  ACPI
 void acpi_init(acpi_rsd_ptr_t* rsd);
 void* acpi_find_table(const char* signature);
+int acpi_get_number_of_table_entries();
+void* acpi_enum_table_entry(int index);
 
 
 //  Minimal Graphics Subsystem

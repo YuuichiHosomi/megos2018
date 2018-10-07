@@ -39,7 +39,7 @@ static volatile uintptr_t static_start;
 #define ROUNDUP_4K(n) ((n + 0xFFF) & ~0xFFF)
 
 void* mm_alloc_static(size_t n) {
-    uintptr_t result = xchg_add(&static_start, ROUNDUP_4K(n));
+    uintptr_t result = atomic_exchange_add(&static_start, ROUNDUP_4K(n));
     return (void*)result;
 }
 

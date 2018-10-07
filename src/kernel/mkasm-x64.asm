@@ -29,17 +29,38 @@
 [section .text]
 
 
-; uintptr_t xchg_add(uintptr_t*, uintptr_t);
-    global xchg_add
-xchg_add:
+; uintptr_t atomic_exchange_add(volatile uintptr_t*, uintptr_t);
+    global atomic_exchange_add
+atomic_exchange_add:
     mov rax, rdx
     lock xadd [rcx], rax
     ret
 
 
-; int gdtr_init(void);
-    global gdtr_init
-gdtr_init:
+; uint64_t rdmsr(uint32_t addr);
+    global rdmsr
+rdmsr:
+    rdmsr
+    mov eax, eax
+    shl rdx, 32
+    or rax, rdx
+    ret
+
+
+; void wrmsr(uint32_t addr, uint64_t val);
+    global wrmsr
+wrmsr:
+    mov rax, rdx
+    shr rdx, 32
+    wrmsr
+    ret
+
+
+
+
+; int gdt_init(void);
+    global gdt_init
+gdt_init:
 
     ; load GDTR
     lea rax, [rel __GDT]
@@ -58,9 +79,9 @@ gdtr_init:
     ret
 
 
-; void idtr_load(void* idt, size_t limit);
-    global idtr_load
-idtr_load:
+; void idt_load(void* idt, size_t limit);
+    global idt_load
+idt_load:
     shl rdx, 48
     push rcx
     push rdx
@@ -134,7 +155,7 @@ _intXX_main:
     pop rdx
     pop rcx
     pop rax
-    add rsp, byte 16 ; err/intnum
+    add rsp, BYTE 16 ; err/intnum
 _iretq:
     iretq
 
@@ -147,8 +168,8 @@ _iretq:
 [section .data]
 align 16
 __GDT:
-    dw (__end_GDT-__GDT-1), 0, 0, 0     ; NULL
-    resb 8                              ; 08 RESERVED
+    dw (__end_GDT-__GDT-1), 0, 0, 0     ; 00 NULL
+    dw 0, 0, 0, 0                       ; 08 RESERVED
     dw 0xFFFF, 0x0000, 0x9A00, 0x00AF   ; 10 64bit KERNEL TEXT FLAT
     dw 0xFFFF, 0x0000, 0x9200, 0x00CF   ; 18 32bit KERNEL DATA FLAT
     dw 0xFFFF, 0x0000, 0xFA00, 0x00AF   ; 23 64bit USER TEXT FLAT

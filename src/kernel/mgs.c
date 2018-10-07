@@ -152,11 +152,17 @@ void putchar32(uint32_t c) {
             cursor_x++;
             break;
 
-        case '\r':
+        case '\b': // Backspace
+            if (cursor_x > 0) {
+                cursor_x--;
+            }
+            break;
+
+        case '\r': // Carriage Return
             cursor_x = 0;
             break;
 
-        case '\n':
+        case '\n': // New Line (Line Feed)
             cursor_x = 0;
             cursor_y++;
             break;
