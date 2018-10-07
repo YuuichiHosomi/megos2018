@@ -4,11 +4,16 @@
 
 ## Requirements
 
+### To Build
+
 * rake (ruby)
 * llvm (clang/lld)
 * nasm
+
+### To Run
+
 * qemu (qemu-system-x86_64)
-* [ovmf](https://sourceforge.net/projects/edk2/files/OVMF/)
+* [ovmf]((https://github.com/tianocore/tianocore.github.io/wiki/OVMF)) to /var/bios64.bin
 
 ## License
 
