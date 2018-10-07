@@ -58,7 +58,7 @@ void idtr_set_handler(x64_idt64_t* idt, int num, uintptr_t offset, uint16_t sel,
 void idtr_init(uint16_t cs_sel) {
 
     const size_t idt_limit = 0x20 * sizeof(x64_idt64_t);
-    idt = mm_alloc_object(idt_limit);
+    idt = mm_alloc_static(idt_limit);
     memset(idt, 0, idt_limit);
 
     SET_SYSTEM_INT_HANDLER(00); // #DE

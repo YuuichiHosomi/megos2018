@@ -70,4 +70,4 @@ int printf(const char* format, ...);
 
 //  Minimal Memory Subsystem
 uintptr_t mm_init(void* efi_mmap, uintptr_t mmap_size, uintptr_t mmap_desc_size);
-void* mm_alloc_object(size_t n);
+void* mm_alloc_static(size_t n);
