@@ -37,9 +37,24 @@ atomic_exchange_add:
     ret
 
 
-; uint64_t rdmsr(uint32_t addr);
-    global rdmsr
-rdmsr:
+; uintptr_t atomic_compare_exchange(volatile uintptr_t* p, uintptr_t expected, uintptr_t new_value);
+    global atomic_compare_exchange
+atomic_compare_exchange:
+    mov rax, rdx
+    lock cmpxchg [rcx], r8
+    ret
+
+
+; void io_pause();
+    global io_pause
+io_pause:
+    pause
+    ret
+
+
+; uint64_t io_rdmsr(uint32_t addr);
+    global io_rdmsr
+io_rdmsr:
     rdmsr
     mov eax, eax
     shl rdx, 32
@@ -47,9 +62,9 @@ rdmsr:
     ret
 
 
-; void wrmsr(uint32_t addr, uint64_t val);
-    global wrmsr
-wrmsr:
+; void io_wrmsr(uint32_t addr, uint64_t val);
+    global io_wrmsr
+io_wrmsr:
     mov rax, rdx
     shr rdx, 32
     wrmsr
@@ -94,27 +109,27 @@ idt_load:
 _int00: ; #DE
     push BYTE 0
     push BYTE 0x00
-    jmp short _intXX_main
+    jmp short _intXX
 
 _int03: ; #DB
     push BYTE 0
     push BYTE 0x03
-    jmp short _intXX_main
+    jmp short _intXX
 
 _int06: ; #UD
     push BYTE 0
     push BYTE 0x06
-    jmp short _intXX_main
+    jmp short _intXX
 
 _int0D: ; #GP
     push BYTE 0x0D
-    jmp short _intXX_main
+    jmp short _intXX
 
 _int0E: ; #PF
     push BYTE 0x0E
-    ; jmp short _intXX_main
+    ; jmp short _intXX
 
-_intXX_main:
+_intXX:
     cli
     cld
     push rax
@@ -135,9 +150,9 @@ _intXX_main:
     mov rax, cr2
     push rax
 
-    extern _intXX_handler
+    extern default_int_handler
     mov rcx, rsp
-    call _intXX_handler
+    call default_int_handler
 
     add rsp, BYTE 8 ; CR2
     pop r15
@@ -157,6 +172,68 @@ _intXX_main:
     pop rax
     add rsp, BYTE 16 ; err/intnum
 _iretq:
+    iretq
+
+
+    global _irq00
+_irq00:
+    push byte 0
+    push byte 0x00
+    jmp short _irqXX
+
+    global _irq01
+_irq01:
+    push byte 0
+    push byte 0x01
+    jmp short _irqXX
+
+    global _irq02
+_irq02:
+    push byte 0
+    push byte 0x02
+    jmp short _irqXX
+
+_irqXX:
+    cli
+    cld
+    push rax
+    push rcx
+    push rdx
+    push rbx
+    push rbp
+    push rsi
+    push rdi
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    push byte 0
+
+    extern _irq_main
+    mov rcx, rsp
+    call _irq_main
+
+    add rsp, BYTE 8 ; CR2
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdi
+    pop rsi
+    pop rbp
+    pop rbx
+    pop rdx
+    pop rcx
+    pop rax
+    add rsp, BYTE 16 ; err/intnum
     iretq
 
 

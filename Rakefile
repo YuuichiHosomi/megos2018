@@ -30,7 +30,7 @@ case ARCH.to_sym
 when :x64
   PATH_OVMF     = "var/bios64.bin"
   QEMU_ARCH     = "x86_64"
-  QEMU_OPTS     = ""
+  QEMU_OPTS     = "-smp 4"
 when :i386
   PATH_OVMF     = "var/bios32.bin"
   QEMU_ARCH     = "x86_64"
@@ -84,11 +84,15 @@ end
 desc "Defaults"
 task :default => [PATH_OBJ, PATH_BIN, TASKS].flatten
 
-desc "Run with QEMU"
-task :run => [:default, PATH_EFI_BOOT, PATH_EFI_VENDOR, PATH_OVMF, CP932_BIN] do
+desc "Install to #{PATH_MNT}"
+task :install => [:default, PATH_EFI_BOOT, PATH_EFI_VENDOR, PATH_OVMF, CP932_BIN] do
   (target, efi_suffix) = convert_arch(ARCH)
   FileUtils.cp("#{PATH_BIN}boot#{efi_suffix}.efi", "#{PATH_EFI_BOOT}boot#{efi_suffix}.efi")
   FileUtils.cp("#{PATH_BIN}krnl#{efi_suffix}.efi", "#{PATH_EFI_VENDOR}krnl#{efi_suffix}.efi")
+end
+
+desc "Run with QEMU"
+task :run => :install do
   sh "qemu-system-#{QEMU_ARCH} #{QEMU_OPTS} -bios #{PATH_OVMF} -monitor stdio -drive format=raw,file=fat:rw:mnt"
 end
 
@@ -145,14 +149,14 @@ def make_efi(cputype, target, src_tokens, options = {})
 
   local_incs = []
 
-  if options[:base]
-    path_src_p    = "#{PATH_SRC}#{options[:base]}/"
+  if options['base']
+    path_src_p    = "#{PATH_SRC}#{options['base']}/"
     local_incs  << FileList["#{path_src_p}*.h"]
   else
     path_src_p    = "#{PATH_SRC}"
   end
 
-  if options[:no_suffix]
+  if options['no_suffix']
     efi_output    = "#{PATH_BIN}#{target}.efi"
   else
     efi_output    = "#{PATH_BIN}#{target}#{efi_suffix}.efi"
@@ -251,9 +255,13 @@ namespace :main do
 
   targets << CP932_BIN
 
-  [ARCH].each do |arch|
-    targets << make_efi(arch, 'boot', %w( osldr atop menu stdlib ), { base: 'boot' })
-    targets << make_efi(arch, 'krnl', %w( moeldr moe mgs mmm arch acpi stdlib mkasm.asm ), { base: 'kernel' })
+  json = File.open("make.json") do |file|
+    JSON.load(file)
+  end
+
+  json['targets'].keys.each do |target|
+    sources = json['targets'][target]['sources']
+    targets << make_efi(ARCH, target, sources, json['targets'][target])
   end
 
   desc "Build Main"

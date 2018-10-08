@@ -1,0 +1,28 @@
+{
+    "targets": {
+        "boot": {
+            "valid_arch": "all",
+            "base": "boot",
+            "sources": [
+                "osldr",
+                "atop",
+                "menu",
+                "stdlib"
+            ]
+        },
+        "krnl": {
+            "valid_arch": ["i386", "x64"],
+            "base": "kernel",
+            "sources": [
+                "moeldr",
+                "moe",
+                "mgs",
+                "mmm",
+                "arch",
+                "acpi",
+                "stdlib",
+                "mkasm.asm"
+            ]
+        }
+    }
+}

@@ -1,4 +1,4 @@
-.PHONY: all clean run love
+.PHONY: all clean install run love
 
 RAKE = rake
 
@@ -8,7 +8,8 @@ all:
 clean:
 	$(RAKE) clobber
 
+install:
+	$(RAKE) install
+
 run:
 	$(RAKE) run
-
-love:

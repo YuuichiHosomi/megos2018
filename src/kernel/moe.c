@@ -25,6 +25,12 @@
 */
 #include "moe.h"
 
+#define VER_SYSTEM_NAME     "Minimal OS"
+#define VER_SYSTEM_MAJOR    0
+#define VER_SYSTEM_MINOR    1
+#define VER_SYSTEM_REVISION 2
+
+
 /*********************************************************************/
 
 void memset32(uint32_t* p, uint32_t v, size_t n) {
@@ -91,6 +97,15 @@ void draw_logo_bitmap(moe_video_info_t* video, const uint8_t* bmp, int offset_x,
 
 /*********************************************************************/
 
+void dump_madt(uint8_t* p, size_t n) {
+    for (int i = 0; i < n; i++) {
+        printf(" %02x", p[i]);
+    }
+    printf("\n");
+}
+
+extern uint64_t hpet_get_count();
+
 void start_kernel(moe_bootinfo_t* bootinfo) {
 
     mgs_init(&bootinfo->video);
@@ -98,33 +113,34 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
     acpi_init(bootinfo->acpi);
     arch_init();
 
-    mgs_fill_rect(50, 50, 300, 300, 0xFF77CC);
+    mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
     mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
     mgs_fill_rect(250, 100, 300, 300, 0x77CCFF);
 
-    printf("Minimal Step OS using UEFI v0.1 [Memory %dMB]\n", (int)(memsize >> 20));
-    printf("\n");
+    printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(memsize >> 20));
     printf("Hello, world!\n");
 
-    int n = acpi_get_number_of_table_entries();
-    for (int i = 0; i < n; i++) {
-        acpi_header_t* table = acpi_enum_table_entry(i);
-        if (table) {
-            printf("%p: %.4s %d\n", (void*)table, table->signature, table->length);
-        }
-    }
+    // int n = acpi_get_number_of_table_entries();
+    // for (int i = 0; i < n; i++) {
+    //     acpi_header_t* table = acpi_enum_table_entry(i);
+    //     if (table) {
+    //         printf("%p: %.4s %d\n", (void*)table, table->signature, table->length);
+    //     }
+    // }
 
     acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
     if (bgrt) {
         draw_logo_bitmap(&bootinfo->video, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
     }
 
-    acpi_hpet_t* hpet = acpi_find_table(ACPI_HPET_SIGNATURE);
-    if (hpet) {
-        MOE_PHYSICAL_ADDRESS base = hpet->address.address;
-        printf("HPET: %p %08zx %016llx\n", (void*)hpet, base, READ_PHYSICAL_UINT64(base));
-        for (;;) {
-            printf("HPET Main Count: %ld\r", READ_PHYSICAL_UINT64(base + 0xF0));
+    acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
+    if (madt) {
+        size_t max_length = madt->Header.length - 44;
+        uint8_t* p = madt->Structure;
+        for (size_t loc = 0; loc < max_length; ) {
+            size_t len = p[loc+1];
+            dump_madt(p+loc, len);
+            loc += len;
         }
     }
 
@@ -132,5 +148,8 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
     // *hoge = *hoge;
     // __asm__ volatile ("int $3");
 
-    for(;;) __asm__ volatile ("hlt");
+    for (;;) {
+        printf("HPET Count: %lld\r", hpet_get_count());
+        __asm__ volatile ("hlt");
+    }
 }

@@ -43,6 +43,30 @@ void* mm_alloc_static(size_t n) {
     return (void*)result;
 }
 
+
+/*********************************************************************/
+
+
+int mm_try_to_acquire(moe_spinlock_t* spinlock) {
+    uintptr_t expected = 0;
+    uintptr_t locked = 1;
+    return (expected == atomic_compare_exchange(spinlock, expected, locked));
+}
+
+void mm_release(moe_spinlock_t* spinlock) {
+    *spinlock = 0;
+}
+
+void mm_acquire(moe_spinlock_t* spinlock) {
+    while (!mm_try_to_acquire(spinlock)) {
+        io_pause();
+    }
+}
+
+
+/*********************************************************************/
+
+
 uintptr_t total_memory = 0;
 
 static int efi_mm_type_convert(uint32_t type) {

@@ -52,12 +52,16 @@ typedef struct {
 
 //  Architecture Specific
 extern void start_kernel(moe_bootinfo_t* bootinfo) __attribute__((__noreturn__));
-uintptr_t atomic_exchange_add(volatile uintptr_t*, uintptr_t);
 void arch_init();
-typedef uintptr_t MOE_PHYSICAL_ADDRESS;
 
+uintptr_t atomic_exchange_add(volatile uintptr_t*, uintptr_t);
+uintptr_t atomic_compare_exchange(volatile uintptr_t* p, uintptr_t expected, uintptr_t new_value);
+void io_pause();
+
+typedef uintptr_t MOE_PHYSICAL_ADDRESS;
 void* PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(MOE_PHYSICAL_ADDRESS va);
 uint8_t READ_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p);
+void WRITE_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p, uint8_t v);
 uint32_t READ_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p);
 void WRITE_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p, uint32_t v);
 uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p);
@@ -82,3 +86,8 @@ int printf(const char* format, ...);
 //  Minimal Memory Subsystem
 uintptr_t mm_init(void* efi_mmap, uintptr_t mmap_size, uintptr_t mmap_desc_size);
 void* mm_alloc_static(size_t n);
+
+typedef uintptr_t moe_spinlock_t;
+void mm_acquire(moe_spinlock_t*);
+int mm_try_to_acquire(moe_spinlock_t*);
+void mm_release(moe_spinlock_t*);
