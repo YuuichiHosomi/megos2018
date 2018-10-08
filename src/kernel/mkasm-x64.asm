@@ -71,6 +71,21 @@ io_wrmsr:
     ret
 
 
+; void io_outportb8(uint16_t port, uint8_t val);
+    global io_outportb8
+io_outportb8:
+    mov al, dl
+    mov edx, ecx
+    out dx, al
+    ret
+
+
+; uint8_t io_inportb8(uint16_t port);
+    global io_inportb8
+io_inportb8:
+    mov edx, ecx
+    in al, dx
+    ret
 
 
 ; int gdt_init(void);

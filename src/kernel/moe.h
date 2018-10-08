@@ -54,6 +54,8 @@ typedef struct {
 extern void start_kernel(moe_bootinfo_t* bootinfo) __attribute__((__noreturn__));
 void arch_init();
 
+typedef int (*IRQ_HANDLER)(int irq, void* context);
+
 uintptr_t atomic_exchange_add(volatile uintptr_t*, uintptr_t);
 uintptr_t atomic_compare_exchange(volatile uintptr_t* p, uintptr_t expected, uintptr_t new_value);
 void io_pause();
@@ -80,6 +82,7 @@ void mgs_init(moe_video_info_t* _video);
 void mgs_fill_rect(int x, int y, int width, int height, uint32_t color);
 void mgs_fill_block(int x, int y, int width, int height, uint32_t color);
 void mgs_cls();
+void mgs_bsod();
 int printf(const char* format, ...);
 
 

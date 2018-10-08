@@ -41,6 +41,9 @@ extern void* _irq02;
 uint64_t io_rdmsr(uint32_t addr);
 void io_wrmsr(uint32_t addr, uint64_t val);
 
+void io_outportb8(uint16_t port, uint8_t val);
+uint8_t io_inportb8(uint16_t port);
+
 
 /*********************************************************************/
 //  IDT
@@ -142,7 +145,6 @@ void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v) {
 
 #define IRQ_BASE    0x40
 #define MAX_IRQ     24
-typedef int (*IRQ_HANDLER)(int irq, x64_context_t* regs);
 
 IRQ_HANDLER irq_handler[MAX_IRQ];
 
@@ -156,31 +158,31 @@ typedef uint8_t apic_id_t;
 int n_cpu = 0;
 apic_id_t apic_ids[MAX_CPU];
 
-MOE_PHYSICAL_ADDRESS local_apic = 0;
-MOE_PHYSICAL_ADDRESS io_apic   = 0;
+MOE_PHYSICAL_ADDRESS lapic_base = 0;
+MOE_PHYSICAL_ADDRESS ioapic_base   = 0;
 
 
 void apic_write_ioapic(uint8_t addr, uint32_t val) {
-    WRITE_PHYSICAL_UINT8(io_apic, addr);
-    WRITE_PHYSICAL_UINT32(io_apic + 0x10, val);
+    WRITE_PHYSICAL_UINT8(ioapic_base, addr);
+    WRITE_PHYSICAL_UINT32(ioapic_base + 0x10, val);
 }
 
 uint32_t apic_read_ioapic(uint8_t addr) {
-    WRITE_PHYSICAL_UINT8(io_apic, addr);
-    uint32_t retval = READ_PHYSICAL_UINT32(io_apic + 0x10);
+    WRITE_PHYSICAL_UINT8(ioapic_base, addr);
+    uint32_t retval = READ_PHYSICAL_UINT32(ioapic_base + 0x10);
     return retval;
 }
 
 void apic_set_io_redirect(uint8_t irq, uint8_t vector, uint8_t trigger, int mask, apic_id_t desination) {
     uint32_t redir_lo = vector | ((trigger & 0xA)<<12) | (mask ? 0x10000 : 0);
-    WRITE_PHYSICAL_UINT8(io_apic, 0x10 + irq * 2);
-    WRITE_PHYSICAL_UINT32(io_apic + 0x10, redir_lo);
-    WRITE_PHYSICAL_UINT8(io_apic, 0x11 + irq * 2);
-    WRITE_PHYSICAL_UINT32(io_apic + 0x10, desination << 24);
+    WRITE_PHYSICAL_UINT8(ioapic_base, 0x10 + irq * 2);
+    WRITE_PHYSICAL_UINT32(ioapic_base + 0x10, redir_lo);
+    WRITE_PHYSICAL_UINT8(ioapic_base, 0x11 + irq * 2);
+    WRITE_PHYSICAL_UINT32(ioapic_base + 0x10, desination << 24);
 }
 
 void apic_end_of_irq(int irq) {
-    WRITE_PHYSICAL_UINT32(local_apic + 0x0B0, 0);
+    WRITE_PHYSICAL_UINT32(lapic_base + 0x0B0, 0);
 }
 
 void apic_enable_irq(uint8_t irq, uint8_t trigger, IRQ_HANDLER handler) {
@@ -221,14 +223,29 @@ void apic_init() {
         }
 
         //  Setup Local APIC
-        uint64_t lapicmsr = io_rdmsr(IA32_APIC_BASE_MSR);
-        lapicmsr |= IA32_APIC_BASE_MSR_ENABLE;
-        io_wrmsr(IA32_APIC_BASE_MSR, lapicmsr);
-        local_apic = lapicmsr & ~0xFFF;
+        uint64_t msr_lapic = io_rdmsr(IA32_APIC_BASE_MSR);
+        msr_lapic |= IA32_APIC_BASE_MSR_ENABLE;
+        io_wrmsr(IA32_APIC_BASE_MSR, msr_lapic);
+        lapic_base = msr_lapic & ~0xFFF;
 
-        apic_ids[n_cpu++] = READ_PHYSICAL_UINT32(local_apic + 0x20) >> 24;
+        apic_ids[n_cpu++] = READ_PHYSICAL_UINT32(lapic_base + 0x20) >> 24;
 
-        io_apic = 0xFEC00000;
+        //  Parse structures
+        size_t max_length = madt->Header.length - 44;
+        uint8_t* p = madt->Structure;
+        for (size_t loc = 0; loc < max_length; ) {
+            size_t len = p[loc+1];
+            switch (p[loc]) {
+            case 0x01: // IO APIC
+                ioapic_base = *((uint32_t*)(p+loc+4));
+                break;
+            default:
+                break;
+            }
+            loc += len;
+        }
+
+        //  Setup IO APIC
 
         //  Mask all IRQ
         for (int i = 0; i< 24; i++) {
@@ -239,18 +256,6 @@ void apic_init() {
         idt_set_handler(IRQ_BASE, (uintptr_t)&_irq00, cs_sel, 0);
         idt_set_handler(IRQ_BASE+1, (uintptr_t)&_irq01, cs_sel, 0);
         idt_set_handler(IRQ_BASE+2, (uintptr_t)&_irq02, cs_sel, 0);
-
-        //  Parse structures
-        // size_t max_length = madt->Header.length - 44;
-        // uint8_t* p = madt->Structure;
-        // for (size_t loc = 0; loc < max_length; ) {
-        //     size_t len = p[loc+1];
-        //     switch (p[loc]) {
-        //     default:
-        //         break;
-        //     }
-        //     loc += len;
-        // }
 
     }
 }
@@ -270,7 +275,7 @@ volatile uint64_t hpet_count = 0;
 //     WRITE_PHYSICAL_UINT32(hpet_base + 0x020, v);
 // }
 
-int hpet_irq_handler(int irq, x64_context_t* regs) {
+int hpet_irq_handler(int irq, void* context) {
     hpet_count++;
     return 0;
 }
@@ -294,9 +299,37 @@ void hpet_init() {
         WRITE_PHYSICAL_UINT64(hpet_base + 0x108, 10000000000000 / hpet_main_cnt_period);
         apic_enable_irq(0x02, 0x00, &hpet_irq_handler);
 
+    } else {
+        mgs_bsod();
+        printf("PANIC: HPET_NOT_AVAILABLE\n");
+        for (;;) __asm__ volatile ("hlt");
     }
 }
 
+
+/*********************************************************************/
+
+volatile uint8_t ps2_data = 0;
+
+int ps2_irq_handler(int irq, void* context) {
+    uint8_t data = io_inportb8(0x64);
+    if((data & 0x21) == 0x01) {
+        ps2_data = io_inportb8(0x60);
+    }
+    return 0;
+}
+
+uint8_t ps2_get_data() {
+    uint8_t data = ps2_data;
+    ps2_data = 0;
+    return data;
+}
+
+void ps2_init() {
+
+    apic_enable_irq(1, 0, ps2_irq_handler);
+
+}
 
 
 /*********************************************************************/
@@ -308,4 +341,6 @@ void arch_init() {
     apic_init();
     hpet_init();
     __asm__ volatile("sti");
+
+    ps2_init();
 }

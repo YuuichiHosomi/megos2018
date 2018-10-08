@@ -11,7 +11,7 @@
             ]
         },
         "krnl": {
-            "valid_arch": ["i386", "x64"],
+            "valid_arch": ["x64"],
             "base": "kernel",
             "sources": [
                 "moeldr",

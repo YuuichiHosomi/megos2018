@@ -104,6 +104,7 @@ void dump_madt(uint8_t* p, size_t n) {
     printf("\n");
 }
 
+extern uint8_t ps2_get_data();
 extern uint64_t hpet_get_count();
 
 void start_kernel(moe_bootinfo_t* bootinfo) {
@@ -120,6 +121,11 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
     printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(memsize >> 20));
     printf("Hello, world!\n");
 
+    acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
+    if (bgrt) {
+        draw_logo_bitmap(&bootinfo->video, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
+    }
+
     // int n = acpi_get_number_of_table_entries();
     // for (int i = 0; i < n; i++) {
     //     acpi_header_t* table = acpi_enum_table_entry(i);
@@ -127,11 +133,6 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
     //         printf("%p: %.4s %d\n", (void*)table, table->signature, table->length);
     //     }
     // }
-
-    acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
-    if (bgrt) {
-        draw_logo_bitmap(&bootinfo->video, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
-    }
 
     acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
     if (madt) {
@@ -144,12 +145,26 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
         }
     }
 
+    {
+        uint8_t data;
+        do {
+            printf("Press any key to continue (%lld)...\r", hpet_get_count());
+            __asm__ volatile ("hlt");
+            data = ps2_get_data();
+        } while(!data);
+        printf("\n* PS/2 Scancode monitor *\n");
+        for (;;) {
+            if (data) {
+                printf("%02x ", data);
+            }
+            data = ps2_get_data();
+            __asm__ volatile ("hlt");
+        }
+    }
+
     // volatile intptr_t* hoge = (intptr_t*)(0x123456789abc);
     // *hoge = *hoge;
     // __asm__ volatile ("int $3");
+    for (;;) __asm__ volatile ("hlt");
 
-    for (;;) {
-        printf("HPET Count: %lld\r", hpet_get_count());
-        __asm__ volatile ("hlt");
-    }
 }

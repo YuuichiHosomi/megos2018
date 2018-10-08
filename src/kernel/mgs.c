@@ -179,6 +179,12 @@ int putchar(unsigned char c) {
     return 1;
 }
 
+void mgs_bsod() {
+    bgcolor = 0x000077;
+    fgcolor = 0xFFFFFF;
+    mgs_cls();
+}
+
 void mgs_init(moe_video_info_t* _video) {
     video = _video;
 

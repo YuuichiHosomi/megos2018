@@ -74,8 +74,10 @@ typedef struct _acpi_fadt_t {
 } __attribute__((packed)) acpi_fadt_t;
 
 #define ACPI_FADT_SIGNATURE         "FACP"
+#define ACPI_FADT_IAPC_LEGACY       0x0001 /* Legacy Devices */
 #define ACPI_FADT_IAPC_8042         0x0002 /* PS2 present */
-#define ACPI_FADT_IAPC_VGA_NP       0x0004 /* VGA not present */
+#define ACPI_FADT_IAPC_NO_VGA       0x0004 /* VGA not present */
+#define ACPI_FADT_IAPC_NO_MSI       0x0008 /* MSI not supported */
 
 
 //  MADT/APIC Multiple APIC Description Table
