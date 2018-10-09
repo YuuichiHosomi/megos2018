@@ -4,6 +4,7 @@
 require 'rake/clean'
 require 'rake/packagetask'
 require 'json'
+require 'base64'
 
 ARCH  = ENV['ARCH'] || case `uname -m`
 when /i[3456789]86/
@@ -115,8 +116,16 @@ file BOOTFONT_INC => "#{PATH_SRC}bootfont.fnt" do |t|
   end
 end
 
-file CP932_BIN => [ PATH_EFI_VENDOR, "#{PATH_SRC}cp932.asm"] do |t|
-  sh "#{AS} -f bin #{ t.prerequisites[1] } -o #{t.name}"
+
+file CP932_BIN => [ PATH_EFI_VENDOR, "#{PATH_SRC}cp932.txt"] do |t|
+  bin = []
+  File.open(t.prerequisites[1]) do |file|
+    file.each_line do |line|
+      bin << Base64.decode64(line)
+    end
+  end
+  File.binwrite(t.name, bin.join(''))
+  raise unless File.exist?(t.name)
 end
 
 
@@ -252,8 +261,6 @@ end
 namespace :main do
 
   targets = []
-
-  targets << CP932_BIN
 
   json = File.open("make.json") do |file|
     JSON.load(file)
