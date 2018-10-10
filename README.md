@@ -1,4 +1,4 @@
-# A Minimal Step OS using UEFI
+# Minimal Operating Environment
 
 * A Minimal Step OS using UEFI
 

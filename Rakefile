@@ -158,8 +158,8 @@ def make_efi(cputype, target, src_tokens, options = {})
 
   local_incs = []
 
-  if options['base']
-    path_src_p    = "#{PATH_SRC}#{options['base']}/"
+  if options['base_dir']
+    path_src_p    = "#{PATH_SRC}#{options['base_dir']}/"
     local_incs  << FileList["#{path_src_p}*.h"]
   else
     path_src_p    = "#{PATH_SRC}"

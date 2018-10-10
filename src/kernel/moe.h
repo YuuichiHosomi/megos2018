@@ -30,6 +30,7 @@
 #define	NULL (0)
 #endif
 
+int printf(const char* format, ...);
 void* memcpy(void* p, const void* q, size_t n);
 void* memset(void * p, int v, size_t n);
 void memset32(uint32_t* p, uint32_t v, size_t n);
@@ -83,14 +84,8 @@ void mgs_fill_rect(int x, int y, int width, int height, uint32_t color);
 void mgs_fill_block(int x, int y, int width, int height, uint32_t color);
 void mgs_cls();
 void mgs_bsod();
-int printf(const char* format, ...);
 
 
 //  Minimal Memory Subsystem
 uintptr_t mm_init(void* efi_mmap, uintptr_t mmap_size, uintptr_t mmap_desc_size);
 void* mm_alloc_static(size_t n);
-
-typedef uintptr_t moe_spinlock_t;
-void mm_acquire(moe_spinlock_t*);
-int mm_try_to_acquire(moe_spinlock_t*);
-void mm_release(moe_spinlock_t*);

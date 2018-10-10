@@ -2,7 +2,7 @@
     "targets": {
         "boot": {
             "valid_arch": "all",
-            "base": "boot",
+            "base_dir": "boot",
             "sources": [
                 "osldr",
                 "atop",
@@ -12,7 +12,7 @@
         },
         "krnl": {
             "valid_arch": ["x64"],
-            "base": "kernel",
+            "base_dir": "kernel",
             "sources": [
                 "moeldr",
                 "moe",

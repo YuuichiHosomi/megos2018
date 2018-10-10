@@ -27,7 +27,6 @@
 #include "x86.h"
 
 
-
 extern uint16_t gdt_init(void);
 extern void idt_load(volatile void*, size_t);
 extern void* _int00;
@@ -181,7 +180,7 @@ void apic_set_io_redirect(uint8_t irq, uint8_t vector, uint8_t trigger, int mask
     WRITE_PHYSICAL_UINT32(ioapic_base + 0x10, desination << 24);
 }
 
-void apic_end_of_irq(int irq) {
+void apic_end_of_irq(uint8_t irq) {
     WRITE_PHYSICAL_UINT32(lapic_base + 0x0B0, 0);
 }
 
@@ -248,7 +247,7 @@ void apic_init() {
         //  Setup IO APIC
 
         //  Mask all IRQ
-        for (int i = 0; i< 24; i++) {
+        for (int i = 0; i < 24; i++) {
             apic_disable_irq(i);
         }
 
