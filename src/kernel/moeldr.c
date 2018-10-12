@@ -1,6 +1,6 @@
 /*
 
-    Minimal EFI OS Loader
+    Minimal OS EFI Part
 
     Copyright (c) 1998,2000,2018 MEG-OS project, All rights reserved.
 
@@ -27,11 +27,7 @@
 #include "moe.h"
 #include "efi.h"
 
-#define	EFI_PRINT(s)	gST->ConOut->OutputString(gST->ConOut, L ## s)
-
-EFI_SYSTEM_TABLE* gST;
-EFI_BOOT_SERVICES* gBS;
-EFI_RUNTIME_SERVICES* gRT;
+#define	EFI_PRINT(s)	st->ConOut->OutputString(st->ConOut, L ## s)
 
 CONST EFI_GUID EfiGraphicsOutputProtocolGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 CONST EFI_GUID efi_acpi_20_table_guid = EFI_ACPI_20_TABLE_GUID;
@@ -39,43 +35,15 @@ CONST EFI_GUID efi_acpi_20_table_guid = EFI_ACPI_20_TABLE_GUID;
 
 /*********************************************************************/
 
-static EFI_INPUT_KEY efi_wait_any_key(BOOLEAN reset) {
-    EFI_INPUT_KEY retval = { 0, 0 };
-    EFI_STATUS status;
-    EFI_EVENT events[2];
-    UINTN index = 0;
-    events[index++] = gST->ConIn->WaitForKey;
-    // EFI_EVENT timer_event;
-    // if (ms >= 0) {
-    // 	status = gBS->CreateEvent(EVT_TIMER, 0, NULL, NULL, &timer_event);
-    // 	status = gBS->SetTimer(timer_event, TimerRelative, ms * 10000);
-    // 	events[index++] = timer_event;
-    // }
-    if (reset) {
-        gST->ConIn->Reset(gST->ConIn, FALSE);
-    }
-    status = gBS->WaitForEvent(index, events, &index);
-    if (!EFI_ERROR(status)) {
-        if (index == 0) {
-            EFI_INPUT_KEY key;
-            status = gST->ConIn->ReadKeyStroke(gST->ConIn, &key);
-            if (!EFI_ERROR(status)) {
-                retval = key;
-            }
-        }
-    }
-    return retval;
-}
-
 static inline int IsEqualGUID(CONST EFI_GUID* guid1, CONST EFI_GUID* guid2) {
     uint64_t* p = (uint64_t*)guid1;
     uint64_t* q = (uint64_t*)guid2;
     return (p[0] == q[0]) && (p[1] == q[1]);
 }
 
-static void* efi_find_config_table(CONST EFI_GUID* guid) {
-    for (int i = 0; i < gST->NumberOfTableEntries; i++) {
-        EFI_CONFIGURATION_TABLE* tab = gST->ConfigurationTable + i;
+static void* efi_find_config_table(EFI_SYSTEM_TABLE *st, CONST EFI_GUID* guid) {
+    for (int i = 0; i < st->NumberOfTableEntries; i++) {
+        EFI_CONFIGURATION_TABLE* tab = st->ConfigurationTable + i;
         if (IsEqualGUID(&tab->VendorGuid, guid)) {
             return tab->VendorTable;
         }
@@ -86,17 +54,16 @@ static void* efi_find_config_table(CONST EFI_GUID* guid) {
 /*********************************************************************/
 
 EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
+    EFI_BOOT_SERVICES* bs;
     EFI_STATUS status;
     moe_bootinfo_t bootinfo;
 
     // Init UEFI Environments
-    gST = st;
-    gBS = st->BootServices;
-    gRT = st->RuntimeServices;
+    bs = st->BootServices;
 
     //	Find ACPI table pointer
     {
-        bootinfo.acpi = efi_find_config_table(&efi_acpi_20_table_guid);
+        bootinfo.acpi = efi_find_config_table(st, &efi_acpi_20_table_guid);
         // if (!bootinfo.acpi) {
         //     bootinfo.acpi = efi_find_config_table(&efi_acpi_table_guid);
         // }
@@ -110,7 +77,7 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
     {
         EFI_GRAPHICS_OUTPUT_PROTOCOL* gop = NULL;
 
-        status = gBS->LocateProtocol(&EfiGraphicsOutputProtocolGuid, NULL, (void**)&gop);
+        status = bs->LocateProtocol(&EfiGraphicsOutputProtocolGuid, NULL, (void**)&gop);
         if (!gop) {
             EFI_PRINT("ERROR: GOP NOT FOUND");
             goto errexit;
@@ -130,19 +97,15 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
         UINT32 descriptorversion;
 
         do {
-            status = gBS->GetMemoryMap(&mmapsize, mmap, &mapkey, &descriptorsize, &descriptorversion);
+            status = bs->GetMemoryMap(&mmapsize, mmap, &mapkey, &descriptorsize, &descriptorversion);
             while (status == EFI_BUFFER_TOO_SMALL) {
                 if (mmap) {
-                    gBS->FreePool(mmap);
+                    bs->FreePool(mmap);
                 }
-                status = gBS->AllocatePool(EfiLoaderData, mmapsize, (void**)&mmap);
-                // if (EFI_ERROR(status)) {
-                //     EFI_PRINT("ERROR: MEMORY ERROR");
-                //     goto errexit;
-                // }
-                status = gBS->GetMemoryMap(&mmapsize, mmap, &mapkey, &descriptorsize, &descriptorversion);
+                status = bs->AllocatePool(EfiLoaderData, mmapsize, (void**)&mmap);
+                status = bs->GetMemoryMap(&mmapsize, mmap, &mapkey, &descriptorsize, &descriptorversion);
             }
-            status = gBS->ExitBootServices(image, mapkey);
+            status = bs->ExitBootServices(image, mapkey);
         } while (EFI_ERROR(status));
 
         bootinfo.mmap = mmap;
@@ -151,13 +114,9 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
     }
 
     //	Start Kernel
-    {
-        start_kernel(&bootinfo);
-    }
+    start_kernel(&bootinfo);
 
 errexit:
-    EFI_PRINT("\r\nPress ANY key to exit...\r\n");
-    efi_wait_any_key(TRUE);
-
     return EFI_LOAD_ERROR;
+
 }
