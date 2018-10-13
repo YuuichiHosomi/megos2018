@@ -51,7 +51,7 @@ uint8_t io_inportb8(uint16_t port);
 uint16_t cs_sel;
 x64_idt64_t* idt;
 
-#define SET_SYSTEM_INT_HANDLER(num)  idt_set_handler(0x ## num, (uintptr_t)&_int ## num, cs_sel, 0)
+#define SET_SYSTEM_INT_HANDLER(num)  idt_set_kernel_handler(0x ## num, (uintptr_t)&_int ## num, 0)
 
 void idt_set_handler(uint8_t num, uintptr_t offset, uint16_t sel, uint8_t ist) {
     x64_idt64_t desc;
@@ -63,6 +63,10 @@ void idt_set_handler(uint8_t num, uintptr_t offset, uint16_t sel, uint8_t ist) {
     desc.offset_3   = offset >> 32;
     desc.RESERVED   = 0;
     idt[num] = desc;
+}
+
+void idt_set_kernel_handler(uint8_t num, uintptr_t offset, uint8_t ist) {
+    idt_set_handler(num, offset, cs_sel, ist);
 }
 
 void default_int_handler(x64_context_t* regs) {
@@ -83,7 +87,7 @@ void default_int_handler(x64_context_t* regs) {
 void idt_init() {
 
     const size_t idt_size = MAX_IDT_NUM * sizeof(x64_idt64_t);
-    idt = mm_alloc_static(idt_size);
+    idt = mm_alloc_static_pages(idt_size);
     memset((void*)idt, 0, idt_size);
 
     SET_SYSTEM_INT_HANDLER(00); // #DE
@@ -161,16 +165,16 @@ MOE_PHYSICAL_ADDRESS lapic_base = 0;
 MOE_PHYSICAL_ADDRESS ioapic_base   = 0;
 
 
-void apic_write_ioapic(uint8_t addr, uint32_t val) {
-    WRITE_PHYSICAL_UINT8(ioapic_base, addr);
-    WRITE_PHYSICAL_UINT32(ioapic_base + 0x10, val);
-}
+// void apic_write_ioapic(uint8_t addr, uint32_t val) {
+//     WRITE_PHYSICAL_UINT8(ioapic_base, addr);
+//     WRITE_PHYSICAL_UINT32(ioapic_base + 0x10, val);
+// }
 
-uint32_t apic_read_ioapic(uint8_t addr) {
-    WRITE_PHYSICAL_UINT8(ioapic_base, addr);
-    uint32_t retval = READ_PHYSICAL_UINT32(ioapic_base + 0x10);
-    return retval;
-}
+// uint32_t apic_read_ioapic(uint8_t addr) {
+//     WRITE_PHYSICAL_UINT8(ioapic_base, addr);
+//     uint32_t retval = READ_PHYSICAL_UINT32(ioapic_base + 0x10);
+//     return retval;
+// }
 
 void apic_set_io_redirect(uint8_t irq, uint8_t vector, uint8_t trigger, int mask, apic_id_t desination) {
     uint32_t redir_lo = vector | ((trigger & 0xA)<<12) | (mask ? 0x10000 : 0);
@@ -194,17 +198,18 @@ void apic_disable_irq(uint8_t irq) {
     irq_handler[irq] = NULL;
 }
 
-void _irq_main(x64_context_t* regs) {
-    int irq = regs->intnum;
+void _irq_main(uint8_t irq, void* context) {
     IRQ_HANDLER handler = irq_handler[irq];
     if (handler) {
-        handler(irq, regs);
+        handler(irq, context);
         apic_end_of_irq(irq);
     } else {
-        //  Simulate GPF
-        regs->err = ((IRQ_BASE + irq) << 3) | ERROR_IDT | ERROR_EXT;
-        regs->intnum = 0x0D;
-        default_int_handler(regs);
+        apic_disable_irq(irq);
+        //  TODO: Simulate GPF
+        x64_context_t regs;
+        regs.err = ((IRQ_BASE + irq) << 3) | ERROR_IDT | ERROR_EXT;
+        regs.intnum = 0x0D;
+        default_int_handler(&regs);
     }
 }
 
@@ -252,9 +257,9 @@ void apic_init() {
         }
 
         //  Install IDT handler
-        idt_set_handler(IRQ_BASE, (uintptr_t)&_irq00, cs_sel, 0);
-        idt_set_handler(IRQ_BASE+1, (uintptr_t)&_irq01, cs_sel, 0);
-        idt_set_handler(IRQ_BASE+2, (uintptr_t)&_irq02, cs_sel, 0);
+        idt_set_kernel_handler(IRQ_BASE, (uintptr_t)&_irq00, 0);
+        idt_set_kernel_handler(IRQ_BASE+1, (uintptr_t)&_irq01, 0);
+        idt_set_kernel_handler(IRQ_BASE+2, (uintptr_t)&_irq02, 0);
 
     }
 }
@@ -308,23 +313,116 @@ void hpet_init() {
 
 /*********************************************************************/
 
-volatile uint8_t ps2_data = 0;
+#define PS2_STATE_RSHIFT    0x0001
+#define PS2_STATE_LSHIFT    0x0002
+#define PS2_STATE_CTRL      0x0004
+#define PS2_STATE_ALT       0x0008
+#define PS2_STATE_EXTEND    0x4000
+
+#define SCANCODE_BREAK      0x80000000
+
+#define PS2_SCAN_LCTRL      0x1D
+#define PS2_SCAN_LSHIFT     0x2A
+#define PS2_SCAN_LALT       0x38
+#define PS2_SCAN_RSHIFT     0x36
+#define PS2_SCAN_BREAK      0x80
+#define PS2_SCAN_EXTEND     0xE0
+
+
+static moe_ring_buffer_t ps2_buffer;
+static uintptr_t ps2_state = 0;
 
 int ps2_irq_handler(int irq, void* context) {
-    uint8_t data = io_inportb8(0x64);
-    if((data & 0x21) == 0x01) {
-        ps2_data = io_inportb8(0x60);
+    while ((io_inportb8(0x64) & 0x21) == 0x01) {
+        uint8_t data = io_inportb8(0x60);
+        moe_ring_buffer_write(&ps2_buffer, data);
     }
     return 0;
 }
 
-uint8_t ps2_get_data() {
-    uint8_t data = ps2_data;
-    ps2_data = 0;
-    return data;
+static void ps2_set_shift(uint32_t state, uint32_t is_break) {
+    if (is_break) {
+        ps2_state &= ~state;
+    } else {
+        ps2_state |= state;
+    }
+}
+
+uint32_t ps2_parse_scancode(uint32_t scancode) {
+    if (scancode == PS2_SCAN_EXTEND) {
+        ps2_state |= PS2_STATE_EXTEND;
+        return 0;
+    } else {
+        uint32_t is_break = (scancode & PS2_SCAN_BREAK) ? SCANCODE_BREAK : 0;
+        uint32_t scan = scancode & 0x7F;
+        if (ps2_state & PS2_STATE_EXTEND) {
+            ps2_state &= ~PS2_STATE_EXTEND;
+            scan |= PS2_STATE_EXTEND;
+        }
+        switch (scan) {
+            case PS2_SCAN_LSHIFT:
+                ps2_set_shift(PS2_STATE_LSHIFT, is_break);
+                break;
+            case PS2_SCAN_RSHIFT:
+                ps2_set_shift(PS2_STATE_RSHIFT, is_break);
+                break;
+            case PS2_SCAN_LCTRL:
+                ps2_set_shift(PS2_STATE_CTRL, is_break);
+                break;
+            case PS2_SCAN_LALT:
+                ps2_set_shift(PS2_STATE_ALT, is_break);
+                break;
+            default:
+                return is_break | (ps2_state << 16) | scan;
+        }
+        return 0;
+    }
+}
+
+uint32_t ps2_get_data() {
+    uint8_t data = moe_ring_buffer_read(&ps2_buffer, 0);
+    if (data) {
+        return ps2_parse_scancode(data);
+    } else {
+        return 0;
+    }
+}
+
+//  TODO: jp109 only
+static uint8_t ps2_scan_table[] = {
+    0, '\x1B', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '^', '\b', '\t',
+    'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '@', '[', '\r', 0, 'a', 's',
+    'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', ':', '`', 0, ']',
+    'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0, '*', 0, ' ', 0,
+};
+
+uint32_t ps2_scan_to_unicode(uint32_t scancode) {
+    if (scancode & SCANCODE_BREAK) return 0;
+    uint32_t scan_lo = (scancode & 0x7F);
+    uint32_t shift_state = scancode >> 16;
+    uint32_t ascii_raw = 0;
+    if (scan_lo < 0x3A) {
+        ascii_raw = ps2_scan_table[scan_lo];
+    }
+    if (ascii_raw >= 0x21 && ascii_raw <= 0x3F) {
+        if (shift_state & (PS2_STATE_LSHIFT | PS2_STATE_CTRL)) {
+            ascii_raw ^= 0x10;
+        }
+    } else if (ascii_raw >= 0x40 && ascii_raw <= 0x7E) {
+        if (shift_state & PS2_STATE_CTRL) {
+            ascii_raw &= 0x1F;
+        } else if (shift_state & (PS2_STATE_LSHIFT | PS2_STATE_CTRL)) {
+            ascii_raw ^= 0x20;
+        }
+    }
+    return ascii_raw;
 }
 
 void ps2_init() {
+
+    uintptr_t size_of_buffer = 16;
+    intptr_t* buffer = mm_alloc_static(size_of_buffer * sizeof(intptr_t));
+    moe_ring_buffer_init(&ps2_buffer, buffer, size_of_buffer);
 
     apic_enable_irq(1, 0, ps2_irq_handler);
 

@@ -51,6 +51,13 @@ typedef struct {
 } moe_bootinfo_t;
 
 
+typedef volatile struct {
+    volatile intptr_t* data;
+    volatile uintptr_t read, write, free;
+    uintptr_t mask, flags;
+} moe_ring_buffer_t;
+
+
 //  Architecture Specific
 extern void start_kernel(moe_bootinfo_t* bootinfo) __attribute__((__noreturn__));
 void arch_init();
@@ -58,7 +65,7 @@ void arch_init();
 typedef int (*IRQ_HANDLER)(int irq, void* context);
 
 uintptr_t atomic_exchange_add(volatile uintptr_t*, uintptr_t);
-uintptr_t atomic_compare_exchange(volatile uintptr_t* p, uintptr_t expected, uintptr_t new_value);
+int atomic_compare_and_swap(volatile uintptr_t* p, uintptr_t expected, uintptr_t new_value);
 void io_pause();
 
 typedef uintptr_t MOE_PHYSICAL_ADDRESS;
@@ -88,4 +95,8 @@ void mgs_bsod();
 
 //  Minimal Memory Subsystem
 uintptr_t mm_init(void* efi_mmap, uintptr_t mmap_size, uintptr_t mmap_desc_size);
+void* mm_alloc_static_pages(size_t n);
 void* mm_alloc_static(size_t n);
+void moe_ring_buffer_init(moe_ring_buffer_t* self, intptr_t* data, uintptr_t capacity);
+intptr_t moe_ring_buffer_read(moe_ring_buffer_t* self, intptr_t default_val);
+int moe_ring_buffer_write(moe_ring_buffer_t* self, intptr_t data);

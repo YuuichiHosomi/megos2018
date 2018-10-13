@@ -104,8 +104,19 @@ void dump_madt(uint8_t* p, size_t n) {
     printf("\n");
 }
 
-extern uint8_t ps2_get_data();
+extern int putchar(char);
+extern uint32_t ps2_get_data();
+extern uint32_t ps2_scan_to_unicode(uint32_t);
 extern uint64_t hpet_get_count();
+
+int getchar() {
+    uint32_t scan = ps2_get_data();
+    if (scan) {
+        return ps2_scan_to_unicode(scan);
+    }
+    return 0;
+}
+
 
 void start_kernel(moe_bootinfo_t* bootinfo) {
 
@@ -134,31 +145,23 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
     //     }
     // }
 
-    acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
-    if (madt) {
-        size_t max_length = madt->Header.length - 44;
-        uint8_t* p = madt->Structure;
-        for (size_t loc = 0; loc < max_length; ) {
-            size_t len = p[loc+1];
-            dump_madt(p+loc, len);
-            loc += len;
-        }
-    }
+    // acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
+    // if (madt) {
+    //     size_t max_length = madt->Header.length - 44;
+    //     uint8_t* p = madt->Structure;
+    //     for (size_t loc = 0; loc < max_length; ) {
+    //         size_t len = p[loc+1];
+    //         dump_madt(p+loc, len);
+    //         loc += len;
+    //     }
+    // }
 
     {
-        uint8_t data;
-        do {
-            printf("Press any key to continue (%lld)...\r", hpet_get_count());
-            __asm__ volatile ("hlt");
-            data = ps2_get_data();
-        } while(!data);
-        printf("\n* PS/2 Scancode monitor *\n");
         for (;;) {
-            if (data) {
-                printf("%02x ", data);
+            char c = getchar();
+            if (c) {
+                putchar(c);
             }
-            data = ps2_get_data();
-            __asm__ volatile ("hlt");
         }
     }
 

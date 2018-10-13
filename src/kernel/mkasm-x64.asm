@@ -37,11 +37,13 @@ atomic_exchange_add:
     ret
 
 
-; uintptr_t atomic_compare_exchange(volatile uintptr_t* p, uintptr_t expected, uintptr_t new_value);
-    global atomic_compare_exchange
-atomic_compare_exchange:
+; int atomic_compare_and_swap(volatile uintptr_t* p, uintptr_t expected, uintptr_t new_value);
+    global atomic_compare_and_swap
+atomic_compare_and_swap:
     mov rax, rdx
     lock cmpxchg [rcx], r8
+    setz al
+    movzx eax, al
     ret
 
 
@@ -121,6 +123,7 @@ idt_load:
 
 
     global _int00, _int03, _int06, _int0D, _int0E
+    extern default_int_handler
 _int00: ; #DE
     push BYTE 0
     push BYTE 0x00
@@ -145,7 +148,6 @@ _int0E: ; #PF
     ; jmp short _intXX
 
 _intXX:
-    cli
     cld
     push rax
     push rcx
@@ -165,7 +167,6 @@ _intXX:
     mov rax, cr2
     push rax
 
-    extern default_int_handler
     mov rcx, rsp
     call default_int_handler
 
@@ -190,65 +191,42 @@ _iretq:
     iretq
 
 
-    global _irq00
+    global _irq00, _irq01, _irq02
+    extern _irq_main
 _irq00:
-    push byte 0
-    push byte 0x00
+    push rcx
+    mov cl, 0x00
     jmp short _irqXX
 
-    global _irq01
 _irq01:
-    push byte 0
-    push byte 0x01
+    push rcx
+    mov cl, 0x01
     jmp short _irqXX
 
-    global _irq02
 _irq02:
-    push byte 0
-    push byte 0x02
+    push rcx
+    mov cl, 0x02
     jmp short _irqXX
 
 _irqXX:
-    cli
     cld
     push rax
-    push rcx
     push rdx
-    push rbx
-    push rbp
-    push rsi
-    push rdi
     push r8
     push r9
     push r10
     push r11
-    push r12
-    push r13
-    push r14
-    push r15
-    push byte 0
 
-    extern _irq_main
-    mov rcx, rsp
+    mov rdx, rsp
     call _irq_main
 
-    add rsp, BYTE 8 ; CR2
-    pop r15
-    pop r14
-    pop r13
-    pop r12
     pop r11
     pop r10
     pop r9
     pop r8
-    pop rdi
-    pop rsi
-    pop rbp
-    pop rbx
     pop rdx
-    pop rcx
     pop rax
-    add rsp, BYTE 16 ; err/intnum
+    pop rcx
     iretq
 
 

@@ -38,10 +38,56 @@ static volatile uintptr_t static_start;
 
 #define ROUNDUP_4K(n) ((n + 0xFFF) & ~0xFFF)
 
-void* mm_alloc_static(size_t n) {
+void* mm_alloc_static_pages(size_t n) {
     uintptr_t result = atomic_exchange_add(&static_start, ROUNDUP_4K(n));
     return (void*)result;
 }
+
+void* mm_alloc_static(size_t n) {
+    //  TODO:
+    return mm_alloc_static_pages(n);
+}
+
+
+/*********************************************************************/
+
+
+void moe_ring_buffer_init(moe_ring_buffer_t* self, intptr_t* data, uintptr_t capacity) {
+    self->data = data;
+    self->read = self->write = self->flags = 0;
+    self->mask = self->free = capacity - 1;
+}
+
+intptr_t moe_ring_buffer_read(moe_ring_buffer_t* self, intptr_t default_val) {
+    uintptr_t read_ptr = self->read;
+    while (read_ptr != self->write) {
+        if (atomic_compare_and_swap(&self->read, read_ptr, read_ptr + 1)) {
+            intptr_t retval = self->data[read_ptr & self->mask];
+            atomic_exchange_add(&self->free, 1);
+            return retval;
+        } else {
+            read_ptr = self->read;
+        }
+    }
+    return default_val;
+}
+
+int moe_ring_buffer_write(moe_ring_buffer_t* self, intptr_t data) {
+    uintptr_t free = self->free;
+    while (free > 0) {
+        if (atomic_compare_and_swap(&self->free, free, free - 1)) {
+            uintptr_t write_ptr = atomic_exchange_add(&self->write, 1);
+            self->data[write_ptr & self->mask] = data;
+            return 0;
+        } else {
+            free = self->free;
+        }
+    }
+    return -1;
+}
+
+
+/*********************************************************************/
 
 
 uintptr_t total_memory = 0;
