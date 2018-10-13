@@ -40,8 +40,8 @@ extern void* _irq02;
 uint64_t io_rdmsr(uint32_t addr);
 void io_wrmsr(uint32_t addr, uint64_t val);
 
-void io_outportb8(uint16_t port, uint8_t val);
-uint8_t io_inportb8(uint16_t port);
+void io_out8(uint16_t port, uint8_t val);
+uint8_t io_in8(uint16_t port);
 
 
 /*********************************************************************/
@@ -333,8 +333,8 @@ static moe_ring_buffer_t ps2_buffer;
 static uintptr_t ps2_state = 0;
 
 int ps2_irq_handler(int irq, void* context) {
-    while ((io_inportb8(0x64) & 0x21) == 0x01) {
-        uint8_t data = io_inportb8(0x60);
+    while ((io_in8(0x64) & 0x21) == 0x01) {
+        uint8_t data = io_in8(0x60);
         moe_ring_buffer_write(&ps2_buffer, data);
     }
     return 0;

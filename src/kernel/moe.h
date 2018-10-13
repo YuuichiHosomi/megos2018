@@ -41,13 +41,17 @@ typedef struct {
 } moe_video_info_t;
 
 typedef struct {
+    void* mmap; // EFI_MEMORY_DESCRIPTOR
+    uintptr_t size, desc_size;
+    uint32_t desc_version;
+} moe_bootinfo_mmap_t;
+
+typedef struct {
     moe_video_info_t video;
     acpi_rsd_ptr_t* acpi;
 
     void* efiRT; // EFI_RUNTIME_SERVICES
-
-    void* mmap; // EFI_MEMORY_DESCRIPTOR
-    uintptr_t mmap_size, mmap_desc_size;
+    moe_bootinfo_mmap_t mmap;
 } moe_bootinfo_t;
 
 
@@ -94,7 +98,7 @@ void mgs_bsod();
 
 
 //  Minimal Memory Subsystem
-uintptr_t mm_init(void* efi_mmap, uintptr_t mmap_size, uintptr_t mmap_desc_size);
+uintptr_t mm_init(void * efi_rt, moe_bootinfo_mmap_t* mmap);
 void* mm_alloc_static_pages(size_t n);
 void* mm_alloc_static(size_t n);
 void moe_ring_buffer_init(moe_ring_buffer_t* self, intptr_t* data, uintptr_t capacity);

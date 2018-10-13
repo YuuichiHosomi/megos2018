@@ -68,6 +68,7 @@ intptr_t moe_ring_buffer_read(moe_ring_buffer_t* self, intptr_t default_val) {
             return retval;
         } else {
             count = self->count;
+            io_pause();
         }
     }
     return default_val;
@@ -83,6 +84,7 @@ int moe_ring_buffer_write(moe_ring_buffer_t* self, intptr_t data) {
             return 0;
         } else {
             free = self->free;
+            io_pause();
         }
     }
     return -1;
@@ -117,21 +119,29 @@ static int efi_mm_type_convert(uint32_t type) {
     }
 }
 
-uintptr_t mm_init(void* efi_mmap, uintptr_t efi_mmap_size, uintptr_t efi_mmap_desc_size) {
+uintptr_t mm_init(void * efi_rt, moe_bootinfo_mmap_t* mmap) {
 
+    EFI_RUNTIME_SERVICES* rt = (EFI_RUNTIME_SERVICES*)efi_rt;
     static_start = ROUNDUP_4K((uintptr_t)static_heap);
 
-    uint8_t* mmap_ptr = (uint8_t*)efi_mmap;
-    int n_mmap = efi_mmap_size / efi_mmap_desc_size;
+    uint8_t* mmap_ptr = (uint8_t*)mmap->mmap;
+    int n_mmap = mmap->size / mmap->desc_size;
     for (int i = 0; i < n_mmap; i++) {
-        EFI_MEMORY_DESCRIPTOR* efi_mem = (EFI_MEMORY_DESCRIPTOR*)(mmap_ptr + i * efi_mmap_desc_size);
+        EFI_MEMORY_DESCRIPTOR* efi_mem = (EFI_MEMORY_DESCRIPTOR*)(mmap_ptr + i * mmap->desc_size);
         if (efi_mem->PhysicalStart >= 0x100000) {
+            switch (efi_mem->Type) {
+                case EfiRuntimeServicesCode:
+                case EfiRuntimeServicesData:
+                    efi_mem->VirtualStart = efi_mem->PhysicalStart;
+                    break;
+            }
             moe_mmap mem = { efi_mem->PhysicalStart, efi_mem->NumberOfPages*0x1000, efi_mm_type_convert(efi_mem->Type) };
             if (mem.type > 0) {
                 total_memory += mem.size;
             }
         }
     }
+    rt->SetVirtualAddressMap(mmap->size, mmap->desc_size, mmap->desc_version, mmap->mmap);
 
     return total_memory;
 }

@@ -24,6 +24,8 @@
 
 */
 #include "moe.h"
+#include "efi.h"
+
 
 #define VER_SYSTEM_NAME     "Minimal Operaring Environment"
 #define VER_SYSTEM_MAJOR    0
@@ -121,7 +123,7 @@ int getchar() {
 void start_kernel(moe_bootinfo_t* bootinfo) {
 
     mgs_init(&bootinfo->video);
-    uintptr_t memsize = mm_init(bootinfo->mmap, bootinfo->mmap_size, bootinfo->mmap_desc_size);
+    uintptr_t memsize = mm_init(bootinfo->efiRT, &bootinfo->mmap);
     acpi_init(bootinfo->acpi);
     arch_init();
 
@@ -161,6 +163,10 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
             char c = getchar();
             if (c) {
                 putchar(c);
+            }
+            if (c == 'q') {
+                EFI_RUNTIME_SERVICES* rt = bootinfo->efiRT;
+                rt->ResetSystem(EfiResetShutdown, 0, 0, NULL);
             }
         }
     }
