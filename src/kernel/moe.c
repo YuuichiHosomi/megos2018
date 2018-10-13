@@ -29,8 +29,8 @@
 
 #define VER_SYSTEM_NAME     "Minimal Operaring Environment"
 #define VER_SYSTEM_MAJOR    0
-#define VER_SYSTEM_MINOR    1
-#define VER_SYSTEM_REVISION 2
+#define VER_SYSTEM_MINOR    2
+#define VER_SYSTEM_REVISION 0
 
 
 /*********************************************************************/
