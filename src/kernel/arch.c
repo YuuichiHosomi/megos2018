@@ -401,17 +401,17 @@ uint32_t ps2_scan_to_unicode(uint32_t scancode) {
     uint32_t scan_lo = (scancode & 0x7F);
     uint32_t shift_state = scancode >> 16;
     uint32_t ascii_raw = 0;
-    if (scan_lo < 0x3A) {
+    if (scan_lo < sizeof(ps2_scan_table)) {
         ascii_raw = ps2_scan_table[scan_lo];
     }
     if (ascii_raw >= 0x21 && ascii_raw <= 0x3F) {
-        if (shift_state & (PS2_STATE_LSHIFT | PS2_STATE_CTRL)) {
+        if (shift_state & (PS2_STATE_LSHIFT | PS2_STATE_RSHIFT)) {
             ascii_raw ^= 0x10;
         }
     } else if (ascii_raw >= 0x40 && ascii_raw <= 0x7E) {
         if (shift_state & PS2_STATE_CTRL) {
             ascii_raw &= 0x1F;
-        } else if (shift_state & (PS2_STATE_LSHIFT | PS2_STATE_CTRL)) {
+        } else if (shift_state & (PS2_STATE_LSHIFT | PS2_STATE_RSHIFT)) {
             ascii_raw ^= 0x20;
         }
     }

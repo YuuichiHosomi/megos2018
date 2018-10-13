@@ -54,19 +54,20 @@ void* mm_alloc_static(size_t n) {
 
 void moe_ring_buffer_init(moe_ring_buffer_t* self, intptr_t* data, uintptr_t capacity) {
     self->data = data;
-    self->read = self->write = self->flags = 0;
+    self->read = self->write = self->count = self->flags = 0;
     self->mask = self->free = capacity - 1;
 }
 
 intptr_t moe_ring_buffer_read(moe_ring_buffer_t* self, intptr_t default_val) {
-    uintptr_t read_ptr = self->read;
-    while (read_ptr != self->write) {
-        if (atomic_compare_and_swap(&self->read, read_ptr, read_ptr + 1)) {
+    uintptr_t count = self->count;
+    while (count > 0) {
+        if (atomic_compare_and_swap(&self->count, count, count - 1)) {
+            uintptr_t read_ptr = atomic_exchange_add(&self->read, 1);
             intptr_t retval = self->data[read_ptr & self->mask];
             atomic_exchange_add(&self->free, 1);
             return retval;
         } else {
-            read_ptr = self->read;
+            count = self->count;
         }
     }
     return default_val;
@@ -78,6 +79,7 @@ int moe_ring_buffer_write(moe_ring_buffer_t* self, intptr_t data) {
         if (atomic_compare_and_swap(&self->free, free, free - 1)) {
             uintptr_t write_ptr = atomic_exchange_add(&self->write, 1);
             self->data[write_ptr & self->mask] = data;
+            atomic_exchange_add(&self->count, 1);
             return 0;
         } else {
             free = self->free;

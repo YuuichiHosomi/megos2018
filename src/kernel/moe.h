@@ -53,7 +53,7 @@ typedef struct {
 
 typedef volatile struct {
     volatile intptr_t* data;
-    volatile uintptr_t read, write, free;
+    volatile uintptr_t read, write, free, count;
     uintptr_t mask, flags;
 } moe_ring_buffer_t;
 
