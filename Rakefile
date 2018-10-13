@@ -31,7 +31,7 @@ case ARCH.to_sym
 when :x64
   PATH_OVMF     = "var/bios64.bin"
   QEMU_ARCH     = "x86_64"
-  QEMU_OPTS     = "-smp 4"
+  QEMU_OPTS     = "-smp 4 -rtc base=localtime"
 when :i386
   PATH_OVMF     = "var/bios32.bin"
   QEMU_ARCH     = "x86_64"

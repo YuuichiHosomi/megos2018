@@ -70,6 +70,7 @@ typedef int (*IRQ_HANDLER)(int irq, void* context);
 
 uintptr_t atomic_exchange_add(volatile uintptr_t*, uintptr_t);
 int atomic_compare_and_swap(volatile uintptr_t* p, uintptr_t expected, uintptr_t new_value);
+void io_hlt();
 void io_pause();
 
 typedef uintptr_t MOE_PHYSICAL_ADDRESS;

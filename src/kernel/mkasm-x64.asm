@@ -54,6 +54,13 @@ io_pause:
     ret
 
 
+; void io_hlt();
+    global io_hlt
+io_hlt:
+    hlt
+    ret
+
+
 ; uint64_t io_rdmsr(uint32_t addr);
     global io_rdmsr
 io_rdmsr:

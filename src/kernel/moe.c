@@ -112,11 +112,44 @@ extern uint32_t ps2_scan_to_unicode(uint32_t);
 extern uint64_t hpet_get_count();
 
 int getchar() {
-    uint32_t scan = ps2_get_data();
-    if (scan) {
-        return ps2_scan_to_unicode(scan);
+    for(;;) {
+        int32_t scan = ps2_get_data();
+        if (scan > 0) {
+            return ps2_scan_to_unicode(scan);
+        }
+        io_hlt();
     }
-    return 0;
+}
+
+int read_cmdline(char* buffer, size_t max_len) {
+    int cont_flag = 1;
+    int len = 0, limit = max_len - 1;
+
+    while (cont_flag) {
+        char c = getchar();
+        switch (c) {
+            case '\b':
+                if (len > 0) {
+                    printf("\b \b");
+                    len--;
+                }
+                break;
+
+            case '\r':
+                cont_flag = 0;
+                break;
+            
+            default:
+                if (len < limit) {
+                    putchar(c);
+                    buffer[len++] = c;
+                }
+                break;
+        }
+    }
+    buffer[len] = '\0';
+    printf("\n");
+    return len;
 }
 
 
@@ -132,48 +165,76 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
     mgs_fill_rect(250, 100, 300, 300, 0x77CCFF);
 
     printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(memsize >> 20));
-    printf("Hello, world!\n");
+    // printf("Hello, world!\n");
 
     acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
     if (bgrt) {
         draw_logo_bitmap(&bootinfo->video, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
     }
 
-    // int n = acpi_get_number_of_table_entries();
-    // for (int i = 0; i < n; i++) {
-    //     acpi_header_t* table = acpi_enum_table_entry(i);
-    //     if (table) {
-    //         printf("%p: %.4s %d\n", (void*)table, table->signature, table->length);
-    //     }
-    // }
-
-    // acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
-    // if (madt) {
-    //     size_t max_length = madt->Header.length - 44;
-    //     uint8_t* p = madt->Structure;
-    //     for (size_t loc = 0; loc < max_length; ) {
-    //         size_t len = p[loc+1];
-    //         dump_madt(p+loc, len);
-    //         loc += len;
-    //     }
-    // }
-
+    //  Pseudo shell
     {
+        EFI_RUNTIME_SERVICES* rt = bootinfo->efiRT;
+        const size_t cmdline_size = 80;
+        char* cmdline = mm_alloc_static(cmdline_size);
+
+        // EFI_TIME time;
+        // rt->GetTime(&time, NULL);
+        // printf("Time: %d-%02d-%02d %02d:%02d:%02d\n", time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second);
+
         for (;;) {
-            char c = getchar();
-            if (c) {
-                putchar(c);
-            }
-            if (c == 'q') {
-                EFI_RUNTIME_SERVICES* rt = bootinfo->efiRT;
-                rt->ResetSystem(EfiResetShutdown, 0, 0, NULL);
+            printf("C>");
+            read_cmdline(cmdline, cmdline_size);
+
+            switch (cmdline[0]) {
+                case 0:
+                break;
+
+                case 'r':
+                    rt->ResetSystem(EfiResetWarm, 0, 0, NULL);
+                    break;
+
+                case 'u':
+                    rt->ResetSystem(EfiResetShutdown, 0, 0, NULL);
+                    break;
+
+                case 'a':
+                {
+                    int n = acpi_get_number_of_table_entries();
+                    printf("ACPI Tables: %d\n", n);
+                    for (int i = 0; i < n; i++) {
+                        acpi_header_t* table = acpi_enum_table_entry(i);
+                        if (table) {
+                            printf("%p: %.4s %d\n", (void*)table, table->signature, table->length);
+                        }
+                    }
+                    break;
+                }
+
+                case 'm':
+                {
+                    acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
+                    if (madt) {
+                        printf("Dump of MADT\n");
+                        size_t max_length = madt->Header.length - 44;
+                        uint8_t* p = madt->Structure;
+                        for (size_t loc = 0; loc < max_length; ) {
+                            size_t len = p[loc+1];
+                            dump_madt(p+loc, len);
+                            loc += len;
+                        }
+                    }
+                    break;
+                }
+
+                default:
+                    printf("Bad command or file name\n");
+                    break;
+
             }
         }
     }
 
-    // volatile intptr_t* hoge = (intptr_t*)(0x123456789abc);
-    // *hoge = *hoge;
-    // __asm__ volatile ("int $3");
-    for (;;) __asm__ volatile ("hlt");
+    for (;;) io_hlt();
 
 }
