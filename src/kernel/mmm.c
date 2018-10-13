@@ -33,32 +33,32 @@ typedef struct {
 } moe_mmap;
 
 #define HEAP_SIZE   0x400000
-static uint8_t static_heap[HEAP_SIZE];
+static uint8_t static_heap[HEAP_SIZE] __attribute__((aligned(4096)));
 static volatile uintptr_t static_start;
 
 #define ROUNDUP_4K(n) ((n + 0xFFF) & ~0xFFF)
 
-void* mm_alloc_static_pages(size_t n) {
+void* mm_alloc_static_page(size_t n) {
     uintptr_t result = atomic_exchange_add(&static_start, ROUNDUP_4K(n));
     return (void*)result;
 }
 
 void* mm_alloc_static(size_t n) {
     //  TODO:
-    return mm_alloc_static_pages(n);
+    return mm_alloc_static_page(n);
 }
 
 
 /*********************************************************************/
 
 
-void moe_ring_buffer_init(moe_ring_buffer_t* self, intptr_t* data, uintptr_t capacity) {
+void moe_fifo_init(moe_fifo_t* self, intptr_t* data, uintptr_t capacity) {
     self->data = data;
     self->read = self->write = self->count = self->flags = 0;
     self->mask = self->free = capacity - 1;
 }
 
-intptr_t moe_ring_buffer_read(moe_ring_buffer_t* self, intptr_t default_val) {
+intptr_t moe_fifo_read(moe_fifo_t* self, intptr_t default_val) {
     uintptr_t count = self->count;
     while (count > 0) {
         if (atomic_compare_and_swap(&self->count, count, count - 1)) {
@@ -67,14 +67,14 @@ intptr_t moe_ring_buffer_read(moe_ring_buffer_t* self, intptr_t default_val) {
             atomic_exchange_add(&self->free, 1);
             return retval;
         } else {
-            count = self->count;
             io_pause();
+            count = self->count;
         }
     }
     return default_val;
 }
 
-int moe_ring_buffer_write(moe_ring_buffer_t* self, intptr_t data) {
+int moe_fifo_write(moe_fifo_t* self, intptr_t data) {
     uintptr_t free = self->free;
     while (free > 0) {
         if (atomic_compare_and_swap(&self->free, free, free - 1)) {
@@ -83,8 +83,8 @@ int moe_ring_buffer_write(moe_ring_buffer_t* self, intptr_t data) {
             atomic_exchange_add(&self->count, 1);
             return 0;
         } else {
-            free = self->free;
             io_pause();
+            free = self->free;
         }
     }
     return -1;

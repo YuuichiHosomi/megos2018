@@ -30,7 +30,7 @@
 #define VER_SYSTEM_NAME     "Minimal Operaring Environment"
 #define VER_SYSTEM_MAJOR    0
 #define VER_SYSTEM_MINOR    2
-#define VER_SYSTEM_REVISION 0
+#define VER_SYSTEM_REVISION 1
 
 
 /*********************************************************************/
@@ -107,7 +107,7 @@ void dump_madt(uint8_t* p, size_t n) {
 }
 
 extern int putchar(char);
-extern uint32_t ps2_get_data();
+extern int32_t ps2_get_data();
 extern uint32_t ps2_scan_to_unicode(uint32_t);
 extern uint64_t hpet_get_count();
 
@@ -128,21 +128,29 @@ int read_cmdline(char* buffer, size_t max_len) {
     while (cont_flag) {
         char c = getchar();
         switch (c) {
-            case '\b':
+            case '\x08': // bs
+            case '\x7F': // del
                 if (len > 0) {
-                    printf("\b \b");
                     len--;
+                    printf("\b \b");
+                    if (buffer[len] < 0x20) { // ^X
+                        printf("\b \b");
+                    }
                 }
                 break;
 
-            case '\r':
+            case '\x0D': // cr
                 cont_flag = 0;
                 break;
             
             default:
                 if (len < limit) {
-                    putchar(c);
                     buffer[len++] = c;
+                    if (c < 0x20) { // ^X
+                        printf("^%c", c | 0x40);
+                    } else {
+                        putchar(c);
+                    }
                 }
                 break;
         }

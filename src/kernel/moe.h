@@ -59,7 +59,7 @@ typedef volatile struct {
     volatile intptr_t* data;
     volatile uintptr_t read, write, free, count;
     uintptr_t mask, flags;
-} moe_ring_buffer_t;
+} moe_fifo_t;
 
 
 //  Architecture Specific
@@ -100,8 +100,8 @@ void mgs_bsod();
 
 //  Minimal Memory Subsystem
 uintptr_t mm_init(void * efi_rt, moe_bootinfo_mmap_t* mmap);
-void* mm_alloc_static_pages(size_t n);
+void* mm_alloc_static_page(size_t n);
 void* mm_alloc_static(size_t n);
-void moe_ring_buffer_init(moe_ring_buffer_t* self, intptr_t* data, uintptr_t capacity);
-intptr_t moe_ring_buffer_read(moe_ring_buffer_t* self, intptr_t default_val);
-int moe_ring_buffer_write(moe_ring_buffer_t* self, intptr_t data);
+void moe_fifo_init(moe_fifo_t* self, intptr_t* data, uintptr_t capacity);
+intptr_t moe_fifo_read(moe_fifo_t* self, intptr_t default_val);
+int moe_fifo_write(moe_fifo_t* self, intptr_t data);

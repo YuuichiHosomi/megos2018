@@ -79,15 +79,14 @@ void default_int_handler(x64_context_t* regs) {
         "R12- %016llx %016llx %016llx %016llx\n",
         regs->rax, regs->rbx, regs->rcx, regs->rdx, regs->rbp, regs->rsi, regs->rdi,
         regs->r8, regs->r9, regs->r10, regs->r11, regs->r12, regs->r13, regs->r14, regs->r15);
-    for (;;) {
-        __asm__ volatile ("hlt");
-    }
+
+    for (;;) io_hlt();
 }
 
 void idt_init() {
 
     const size_t idt_size = MAX_IDT_NUM * sizeof(x64_idt64_t);
-    idt = mm_alloc_static_pages(idt_size);
+    idt = mm_alloc_static_page(idt_size);
     memset((void*)idt, 0, idt_size);
 
     SET_SYSTEM_INT_HANDLER(00); // #DE
@@ -304,9 +303,10 @@ void hpet_init() {
         apic_enable_irq(0x02, 0x00, &hpet_irq_handler);
 
     } else {
+        //  TODO: impl PIT
         mgs_bsod();
         printf("PANIC: HPET_NOT_AVAILABLE\n");
-        for (;;) __asm__ volatile ("hlt");
+        for (;;) io_hlt();
     }
 }
 
@@ -329,13 +329,13 @@ void hpet_init() {
 #define PS2_SCAN_EXTEND     0xE0
 
 
-static moe_ring_buffer_t ps2_buffer;
+static moe_fifo_t ps2_buffer;
 static uintptr_t ps2_state = 0;
 
 int ps2_irq_handler(int irq, void* context) {
     while ((io_in8(0x64) & 0x21) == 0x01) {
         uint8_t data = io_in8(0x60);
-        moe_ring_buffer_write(&ps2_buffer, data);
+        moe_fifo_write(&ps2_buffer, data);
     }
     return 0;
 }
@@ -379,8 +379,8 @@ uint32_t ps2_parse_scancode(uint32_t scancode) {
     }
 }
 
-uint32_t ps2_get_data() {
-    uint8_t data = moe_ring_buffer_read(&ps2_buffer, 0);
+int32_t ps2_get_data() {
+    uint8_t data = moe_fifo_read(&ps2_buffer, 0);
     if (data) {
         return ps2_parse_scancode(data);
     } else {
@@ -390,8 +390,8 @@ uint32_t ps2_get_data() {
 
 //  TODO: jp109 only
 static uint8_t ps2_scan_table[] = {
-    0, '\x1B', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '^', '\b', '\t',
-    'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '@', '[', '\r', 0, 'a', 's',
+    0, '\x1B', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '^', '\x08', '\x09',
+    'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '@', '[', '\x0D', 0, 'a', 's',
     'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', ':', '`', 0, ']',
     'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0, '*', 0, ' ', 0,
 };
@@ -400,29 +400,29 @@ uint32_t ps2_scan_to_unicode(uint32_t scancode) {
     if (scancode & SCANCODE_BREAK) return 0;
     uint32_t scan_lo = (scancode & 0x7F);
     uint32_t shift_state = scancode >> 16;
-    uint32_t ascii_raw = 0;
+    uint32_t ascii = 0;
     if (scan_lo < sizeof(ps2_scan_table)) {
-        ascii_raw = ps2_scan_table[scan_lo];
+        ascii = ps2_scan_table[scan_lo];
     }
-    if (ascii_raw >= 0x21 && ascii_raw <= 0x3F) {
+    if (ascii >= 0x21 && ascii <= 0x3F) {
         if (shift_state & (PS2_STATE_LSHIFT | PS2_STATE_RSHIFT)) {
-            ascii_raw ^= 0x10;
+            ascii ^= 0x10;
         }
-    } else if (ascii_raw >= 0x40 && ascii_raw <= 0x7E) {
+    } else if (ascii >= 0x40 && ascii <= 0x7E) {
         if (shift_state & PS2_STATE_CTRL) {
-            ascii_raw &= 0x1F;
+            ascii &= 0x1F;
         } else if (shift_state & (PS2_STATE_LSHIFT | PS2_STATE_RSHIFT)) {
-            ascii_raw ^= 0x20;
+            ascii ^= 0x20;
         }
     }
-    return ascii_raw;
+    return ascii;
 }
 
 void ps2_init() {
 
     uintptr_t size_of_buffer = 16;
     intptr_t* buffer = mm_alloc_static(size_of_buffer * sizeof(intptr_t));
-    moe_ring_buffer_init(&ps2_buffer, buffer, size_of_buffer);
+    moe_fifo_init(&ps2_buffer, buffer, size_of_buffer);
 
     apic_enable_irq(1, 0, ps2_irq_handler);
 
