@@ -52,10 +52,6 @@ size_t strwidth(const char* s) {
 
 
 EFI_INPUT_KEY efi_wait_any_key(BOOLEAN reset, int ms) {
-    if(reset) {
-        gST->ConIn->Reset(gST->ConIn, FALSE);
-    }
-
     EFI_INPUT_KEY retval = { 0, 0 };
     EFI_STATUS status;
     EFI_EVENT timer_event;
@@ -66,6 +62,10 @@ EFI_INPUT_KEY efi_wait_any_key(BOOLEAN reset, int ms) {
         status = gBS->CreateEvent(EVT_TIMER, 0, NULL, NULL, &timer_event);
         status = gBS->SetTimer(timer_event, TimerRelative, ms * 10000);
         events[index++] = timer_event;
+    }
+
+    if(reset) {
+        gST->ConIn->Reset(gST->ConIn, FALSE);
     }
 
     status = gBS->WaitForEvent(index, events, &index);

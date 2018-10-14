@@ -55,20 +55,22 @@ void* memset(void * p, int v, size_t n) {
 /*********************************************************************/
 
 
-static int sprintf_num(char** _buffer, uintptr_t val, unsigned base, size_t width, char padding, size_t* _count, size_t _limit, int _signed) {
+static int sprintf_num(char** _buffer, uintptr_t val, unsigned base, size_t width, char padding, size_t* _count, size_t _limit, int sign, int _signed) {
 	char* buffer = *_buffer;
 	size_t count = *_count;
-	int sign = 0;
 
 	if (_signed) {
 		intptr_t ival = (intptr_t)val;
 		if (ival < 0) {
-			sign = 1;
+			sign = -1;
 			val = 0 - ival;
 		}
 	}
 
-	if (sign) {
+	if (sign > 0) {
+		*buffer++ = '+';
+		count++;
+	} else if (sign < 0) {
 		*buffer++ = '-';
 		count++;
 	}
@@ -117,10 +119,15 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
 			size_t width = 0, dot_width = 0;
 			int z_flag = 0;
 			int l_flag = 0;
+			int sign = 0;
 			int dot_width_enable = 0;
 			char padding = ' ';
 			c = *p++;
 
+			if (c == '+') {
+				sign = 1;
+				c = *p++;
+			}
 			if (c == '0') {
 				padding = '0';
 				c = *p++;
@@ -197,30 +204,32 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
 				case 'd':
 				case 'u':
 				case 'x':
-					uintptr_t val;
-					unsigned base = (c == 'x') ? 16 : 10;
-					int _signed = (c == 'd');
-					if(l_flag){
-						val = va_arg(args, int64_t);
-					} else if(z_flag) {
-						if(_signed) {
-							val = va_arg(args, intptr_t);
+					{
+						uintptr_t val;
+						unsigned base = (c == 'x') ? 16 : 10;
+						int _signed = (c == 'd');
+						if(l_flag){
+							val = va_arg(args, int64_t);
+						} else if(z_flag) {
+							if(_signed) {
+								val = va_arg(args, intptr_t);
+							} else {
+								val = va_arg(args, uintptr_t);
+							}
 						} else {
-							val = va_arg(args, uintptr_t);
+							if (_signed) {
+								val = va_arg(args, int32_t);
+							} else {
+								val = va_arg(args, uint32_t);
+							}
 						}
-					} else {
-						if (_signed) {
-							val = va_arg(args, int32_t);
-						} else {
-							val = va_arg(args, uint32_t);
-						}
-					}
 
-					sprintf_num(&q, val, base, width, padding, &count, limit, _signed);
+						sprintf_num(&q, val, base, width, padding, &count, limit, sign, _signed);
+					}
 					break;
 
 				case 'p':
-					sprintf_num(&q, va_arg(args, uintptr_t), 16, 2*sizeof(void*), '0', &count, limit, 0);
+					sprintf_num(&q, va_arg(args, uintptr_t), 16, 2*sizeof(void*), '0', &count, limit, 0, 0);
 					break;
 			}
 

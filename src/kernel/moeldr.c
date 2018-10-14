@@ -108,7 +108,7 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
             status = bs->ExitBootServices(image, mapkey);
         } while (EFI_ERROR(status));
 
-        bootinfo.mmap.mmap =  mmap;
+        bootinfo.mmap.mmap = mmap;
         bootinfo.mmap.size = mmapsize;
         bootinfo.mmap.desc_size = descriptorsize;
         bootinfo.mmap.desc_version = descriptorversion;

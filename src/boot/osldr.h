@@ -23,8 +23,8 @@
 	SOFTWARE.
 
 */
-#ifndef INCLUDED_MEGOS_MOE_H
-#define INCLUDED_MEGOS_MOE_H
+#ifndef INCLUDED_OSLDR_H
+#define INCLUDED_OSLDR_H
 
 #include <stdint.h>
 #include <stddef.h>

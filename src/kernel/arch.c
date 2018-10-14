@@ -220,9 +220,10 @@ void apic_init() {
         //  Disable Legacy PIC
         if (madt->Flags & ACPI_MADT_PCAT_COMPAT) {
             __asm__ volatile (
-                "outb %%al, $0x21\n"
+                "movb $0xFF, %%al\n"
                 "outb %%al, $0xA1\n"
-                ::"a"(0xFF));
+                "outb %%al, $0x21\n"
+                :::"%al");
         }
 
         //  Setup Local APIC
@@ -278,8 +279,13 @@ volatile uint64_t hpet_count = 0;
 //     WRITE_PHYSICAL_UINT32(hpet_base + 0x020, v);
 // }
 
+extern moe_video_info_t* video;
 int hpet_irq_handler(int irq, void* context) {
     hpet_count++;
+
+    uint32_t* vram = video->vram;
+    vram[video->pixel_per_scan_line + 1] += 0x010101;
+
     return 0;
 }
 

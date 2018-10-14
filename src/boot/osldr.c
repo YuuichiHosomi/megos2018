@@ -36,10 +36,10 @@
 #define	OS_INDICATIONS_SUPPORTED_NAME	L"OsIndicationsSupported"
 #define	OS_INDICATIONS_NAME	L"OsIndications"
 
-#define EFI_VENDOR_PATH L"\\EFI\\MOE\\"
-CONST CHAR16* KERNEL_PATH = EFI_VENDOR_PATH "KRNL" EFI_SUFFIX ".EFI";
-CONST CHAR16* cp932_bin_path = EFI_VENDOR_PATH "CP932.BIN";
-CONST CHAR16* cp932_fnt_path = EFI_VENDOR_PATH "CP932.FNT";
+#define EFI_VENDOR_PATH "\\EFI\\MOE\\"
+CONST CHAR16* KERNEL_PATH = L"" EFI_VENDOR_PATH "KRNL" EFI_SUFFIX ".EFI";
+CONST CHAR16* cp932_bin_path = L"" EFI_VENDOR_PATH "CP932.BIN";
+CONST CHAR16* cp932_fnt_path = L"" EFI_VENDOR_PATH "CP932.FNT";
 
 CONST EFI_GUID EfiLoadedImageProtocolGuid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
 CONST EFI_GUID EfiSimpleFileSystemProtocolGuid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
@@ -183,7 +183,8 @@ void free(void* p) {
 }
 
 #define EDID_LENGTH 0x80
-EFI_STATUS validate_edid(size_t size, void* _edid) {
+
+int validate_edid(size_t size, void* _edid) {
     if (size < EDID_LENGTH) return 0;
     if (!_edid) return 0;
     uint64_t edid_signature = 0x00FFFFFFFFFFFF00;

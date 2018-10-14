@@ -5,6 +5,7 @@ require 'rake/clean'
 require 'rake/packagetask'
 require 'json'
 require 'base64'
+require 'digest/sha2'
 
 ARCH  = ENV['ARCH'] || case `uname -m`
 when /i[3456789]86/
@@ -210,7 +211,8 @@ def make_efi(cputype, target, src_tokens, options = {})
     end
   end
 
-  srcs = src_tokens.map do |s|
+  srcs = {}
+  src_tokens.each do |s|
     t = nil
     if s !~ /\.\w+/
       s += '.c'
@@ -229,12 +231,13 @@ def make_efi(cputype, target, src_tokens, options = {})
         end
       end
     end
-    t || s
+    srcs[s] = t || s
   end
 
-  objs = srcs.map do |src|
-    mod_name = File.basename(src, '.*')
-    obj = "#{path_obj}#{mod_name}.o"
+  objs = srcs.map do |token, src|
+    mod_name = File.basename(token, '.*')
+    hash = Digest::SHA256.hexdigest(File.dirname(src)).slice(0, 8)
+    obj = "#{path_obj}#{hash}-#{mod_name}.o"
 
     case File.extname(src)
     when '.c'
@@ -268,7 +271,10 @@ namespace :main do
 
   json['targets'].keys.each do |target|
     sources = json['targets'][target]['sources']
-    targets << make_efi(ARCH, target, sources, json['targets'][target])
+    allow = json['targets'][target]['valid_arch']
+    if allow == 'all' || allow.include?(ARCH.to_s) then
+      targets << make_efi(ARCH, target, sources, json['targets'][target])
+    end
   end
 
   desc "Build Main"

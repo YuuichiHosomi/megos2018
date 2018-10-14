@@ -466,7 +466,7 @@ EFI_STATUS
 	IN EFI_STATUS ExitStatus,
 	IN UINTN ExitDataSize,
 	IN CHAR16 *ExitData OPTIONAL
-);
+) __attribute__((noreturn));
 
 typedef
 EFI_STATUS

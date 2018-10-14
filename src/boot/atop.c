@@ -65,9 +65,6 @@ static coords mode_templates[] = {
 uint32_t palette[] = {
     0x000000, 0x0000AA, 0x00AA00, 0x00AAAA, 0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA,
     0x555555, 0x5555FF, 0x55FF55, 0x55FFFF, 0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF
-
-    // 0x000000, 0x000077, 0x007700, 0x007777, 0x770000, 0x770077, 0x777700, 0xBBBBBB,
-    // 0x777777, 0x0000FF, 0x00FF00, 0x00FFFF, 0xFF0000, 0xFF00FF, 0xFFFF00, 0xFFFFFF
 };
 
 
@@ -89,21 +86,21 @@ EFI_STATUS cp932_tbl_init(base_and_size table_bin_ptr) {
 
     const size_t sizeof_unitable = 0x20000;
     uni2ansi_tbl = malloc(sizeof_unitable);
-    if(!uni2ansi_tbl) return EFI_OUT_OF_RESOURCES;
+    if (!uni2ansi_tbl) return EFI_OUT_OF_RESOURCES;
     memset(uni2ansi_tbl, 0, sizeof_unitable);
 
-    uint16_t cp932_code=0x8140;
+    uint16_t cp932_code = 0x8140;
     uint16_t* p = table_bin_ptr.base;
     size_t length = *p++;
-    for(int i=0;i<length;i++,p++){
-        uni2ansi_tbl[*p]=cp932_code;
+    for (int i = 0; i < length; i++, p++){
+        uni2ansi_tbl[*p] = cp932_code;
         cp932_code++;
-        if((cp932_code&0xFF)==0x7F){
+        if ((cp932_code & 0xFF) == 0x7F) {
             cp932_code++;
-        }else if((cp932_code&0xFF)>=0xFD){
-            cp932_code+=(0x140-0xFD);
-            if(cp932_code==0xA040){
-                cp932_code=0xE040;
+        } else if((cp932_code & 0xFF) >= 0xFD) {
+            cp932_code += (0x140-0xFD);
+            if( cp932_code == 0xA040) {
+                cp932_code = 0xE040;
             }
         }
     }
@@ -116,20 +113,20 @@ EFI_STATUS cp932_font_init(base_and_size font_ptr) {
     font_zn.rawPtr	= font_ptr.base;
     font_zn.font_w	= font_zn.rawPtr[0x0E];
     font_zn.font_h	= font_zn.rawPtr[0x0F];
-    font_zn.font_w8 = (font_zn.font_w+7)>>3;
+    font_zn.font_w8 = (font_zn.font_w + 7) >> 3;
     font_zn.tbl_cnt	= font_zn.rawPtr[0x11];
     font_zn.table = malloc(sizeof(fontx2_zn_table) * font_zn.tbl_cnt);
     if(!font_zn.table) return EFI_OUT_OF_RESOURCES;
 
     int sizeof_font = font_zn.font_w8*font_zn.font_h;
 
-    uint32_t base=0x12+font_zn.tbl_cnt*4;
-    for(int i=0;i<font_zn.tbl_cnt;i++) {
-        int a = i*4+0x12;
-        font_zn.table[i].begin	= font_zn.rawPtr[a+1]*256+font_zn.rawPtr[a+0];
-        font_zn.table[i].end	= font_zn.rawPtr[a+3]*256+font_zn.rawPtr[a+2];
+    uint32_t base = 0x12 + font_zn.tbl_cnt * 4;
+    for (int i = 0; i < font_zn.tbl_cnt; i++) {
+        int a = i * 4 + 0x12;
+        font_zn.table[i].begin	= font_zn.rawPtr[a+1]*256+font_zn.rawPtr[a + 0];
+        font_zn.table[i].end	= font_zn.rawPtr[a+3]*256+font_zn.rawPtr[a + 2];
         font_zn.table[i].off	= base;
-        base+= sizeof_font *(font_zn.table[i].end-font_zn.table[i].begin+1);
+        base+= sizeof_font * (font_zn.table[i].end - font_zn.table[i].begin + 1);
     }
 
     return EFI_SUCCESS;
