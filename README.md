@@ -1,6 +1,6 @@
 # Minimal Operating Environment
 
-* A Minimal Step OS using UEFI
+* A Minimal Step UEFI-aware OS
 
 ## Requirements
 
