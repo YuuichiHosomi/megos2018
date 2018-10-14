@@ -182,6 +182,22 @@ void free(void* p) {
     }
 }
 
+#define EDID_LENGTH 0x80
+EFI_STATUS validate_edid(size_t size, void* _edid) {
+    if (size < EDID_LENGTH) return 0;
+    if (!_edid) return 0;
+    uint64_t edid_signature = 0x00FFFFFFFFFFFF00;
+    if (*((uint64_t*)_edid) != edid_signature) return 0;
+
+    uint8_t* edid = (uint8_t*)_edid;
+    uint8_t sum = 0;
+    for (int i = 0; i < EDID_LENGTH; i++) {
+        sum += edid[i];
+    }
+    if (sum != 0) return 0;
+
+    return 1;
+}
 
 EFI_STATUS init_gop(EFI_HANDLE* image) {
     EFI_STATUS status;
@@ -200,13 +216,13 @@ EFI_STATUS init_gop(EFI_HANDLE* image) {
 
     EFI_EDID_ACTIVE_PROTOCOL* edid1;
     status = gBS->LocateProtocol(&EfiEdidActiveProtocolGuid, NULL, (void**)&edid1);
-    if(!EFI_ERROR(status)) {
+    if(!EFI_ERROR(status) && validate_edid(edid1->SizeOfEdid, edid1->Edid)) {
         edid_x = ((edid1->Edid[58]&0xF0)<<4) + edid1->Edid[56];
         edid_y = ((edid1->Edid[61]&0xF0)<<4) + edid1->Edid[59];
     }else{
         EFI_EDID_DISCOVERED_PROTOCOL* edid2;
         status = gBS->LocateProtocol(&EfiEdidDiscoveredProtocolGuid, NULL, (void**)&edid2);
-        if(!EFI_ERROR(status)) {
+        if(!EFI_ERROR(status) && validate_edid(edid2->SizeOfEdid, edid2->Edid)) {
             edid_x = ((edid2->Edid[58]&0xF0)<<4) + edid2->Edid[56];
             edid_y = ((edid2->Edid[61]&0xF0)<<4) + edid2->Edid[59];
         }
