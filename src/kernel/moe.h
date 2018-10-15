@@ -105,3 +105,11 @@ void* mm_alloc_static(size_t n);
 void moe_fifo_init(moe_fifo_t* self, intptr_t* data, uintptr_t capacity);
 intptr_t moe_fifo_read(moe_fifo_t* self, intptr_t default_val);
 int moe_fifo_write(moe_fifo_t* self, intptr_t data);
+
+
+//  Timer Service
+typedef uint64_t moe_timer_t;
+typedef double moe_time_interval_t;
+moe_timer_t moe_create_interval_timer(moe_time_interval_t);
+int moe_wait_for_timer(moe_timer_t*);
+int moe_check_timer(moe_timer_t*);

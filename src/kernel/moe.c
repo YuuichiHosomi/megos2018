@@ -27,7 +27,7 @@
 #include "efi.h"
 
 
-#define VER_SYSTEM_NAME     "Minimal Operaring Environment"
+#define VER_SYSTEM_NAME     "Minimal Operating Environment"
 #define VER_SYSTEM_MAJOR    0
 #define VER_SYSTEM_MINOR    2
 #define VER_SYSTEM_REVISION 1
@@ -172,7 +172,7 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
     mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
     mgs_fill_rect(250, 100, 300, 300, 0x77CCFF);
 
-    printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(memsize >> 20));
+    printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(memsize >> 8));
     // printf("Hello, world!\n");
 
     acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
@@ -189,6 +189,13 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
         // EFI_TIME time;
         // rt->GetTime(&time, NULL);
         // printf("Time: %d-%02d-%02d %02d:%02d:%02d\n", time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second);
+
+        for (int i = 0; i < 5; i++) {
+            moe_timer_t timer = moe_create_interval_timer(1.0);
+            moe_wait_for_timer(&timer);
+            putchar('.');
+        }
+        putchar('\n');
 
         for (;;) {
             printf("C>");
@@ -223,7 +230,7 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
                 {
                     acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
                     if (madt) {
-                        printf("Dump of MADT\n");
+                        printf("Dump of MADT:\n");
                         size_t max_length = madt->Header.length - 44;
                         uint8_t* p = madt->Structure;
                         for (size_t loc = 0; loc < max_length; ) {

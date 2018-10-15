@@ -145,35 +145,43 @@ void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v) {
 /*********************************************************************/
 //  Advanced Programmable Interrupt Controller
 
-#define IRQ_BASE    0x40
-#define MAX_IRQ     24
-
-IRQ_HANDLER irq_handler[MAX_IRQ];
+#define IRQ_BASE                    0x40
+#define MAX_IRQ                     24
+#define MAX_CPU                     8
+#define INVALID_CPUID               0xFF
 
 #define IA32_APIC_BASE_MSR          0x1B
 #define IA32_APIC_BASE_MSR_BSP      0x100
 #define IA32_APIC_BASE_MSR_ENABLE   0x800
 
-#define MAX_CPU 8
-#define INVALID_CPUID   0xFF
+// type 01 I/O APIC
+typedef struct {
+    uint8_t     ioapic_id;
+    uint8_t     RESERVED;
+    uint32_t    ioapic_base;
+    uint32_t    gsi_base;
+} __attribute__((packed)) apic_madt_ioapic_t;
+
+//  type 02 Interrupt Source Override Structure
+typedef struct {
+    uint8_t     bus;
+    uint8_t     irq;
+    uint32_t    gsi;
+    uint16_t    flags;
+} __attribute__((packed)) apic_madt_ovr_t;
+
 typedef uint8_t apic_id_t;
-int n_cpu = 0;
+
+IRQ_HANDLER irq_handler[MAX_IRQ];
+apic_madt_ovr_t gsi_table[MAX_IRQ];
+
 apic_id_t apic_ids[MAX_CPU];
+int n_cpu = 0;
+
 
 MOE_PHYSICAL_ADDRESS lapic_base = 0;
 MOE_PHYSICAL_ADDRESS ioapic_base   = 0;
 
-
-// void apic_write_ioapic(uint8_t addr, uint32_t val) {
-//     WRITE_PHYSICAL_UINT8(ioapic_base, addr);
-//     WRITE_PHYSICAL_UINT32(ioapic_base + 0x10, val);
-// }
-
-// uint32_t apic_read_ioapic(uint8_t addr) {
-//     WRITE_PHYSICAL_UINT8(ioapic_base, addr);
-//     uint32_t retval = READ_PHYSICAL_UINT32(ioapic_base + 0x10);
-//     return retval;
-// }
 
 void apic_set_io_redirect(uint8_t irq, uint8_t vector, uint8_t trigger, int mask, apic_id_t desination) {
     uint32_t redir_lo = vector | ((trigger & 0xA)<<12) | (mask ? 0x10000 : 0);
@@ -187,14 +195,26 @@ void apic_end_of_irq(uint8_t irq) {
     WRITE_PHYSICAL_UINT32(lapic_base + 0x0B0, 0);
 }
 
-void apic_enable_irq(uint8_t irq, uint8_t trigger, IRQ_HANDLER handler) {
-    irq_handler[irq] = handler;
-    apic_set_io_redirect(irq, IRQ_BASE + irq, trigger, 0, apic_ids[0]);
+apic_madt_ovr_t get_madt_ovr(uint8_t irq) {
+    apic_madt_ovr_t retval = gsi_table[irq];
+    if (retval.bus == 0) {
+        return retval;
+    } else { // Default
+        apic_madt_ovr_t def_val = { 0, irq, irq, 0 };
+        return def_val;
+    }
+}
+
+void apic_enable_irq(uint8_t irq, IRQ_HANDLER handler) {
+    apic_madt_ovr_t ovr = get_madt_ovr(irq);
+    irq_handler[ovr.gsi] = handler;
+    apic_set_io_redirect(ovr.gsi, IRQ_BASE + ovr.gsi, ovr.flags, 0, apic_ids[0]);
 }
 
 void apic_disable_irq(uint8_t irq) {
-    apic_set_io_redirect(irq, 0, 0, 1, INVALID_CPUID);
-    irq_handler[irq] = NULL;
+    apic_madt_ovr_t ovr = get_madt_ovr(irq);
+    apic_set_io_redirect(ovr.gsi, 0, 0, 1, INVALID_CPUID);
+    irq_handler[ovr.gsi] = NULL;
 }
 
 void _irq_main(uint8_t irq, void* context) {
@@ -217,14 +237,14 @@ void apic_init() {
     acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
     if (madt) {
 
-        //  Disable Legacy PIC
-        if (madt->Flags & ACPI_MADT_PCAT_COMPAT) {
-            __asm__ volatile (
-                "movb $0xFF, %%al\n"
-                "outb %%al, $0xA1\n"
-                "outb %%al, $0x21\n"
-                :::"%al");
-        }
+        //  Init IRQ table
+        memset(gsi_table, -1, sizeof(gsi_table));
+
+        // apic_madt_ovr_t gsi_irq00 = { 0, 0, 2, 0 };
+        // gsi_table[0] = gsi_irq00;
+
+        apic_madt_ovr_t gsi_irq01 = { 0, 1, 1, 0 };
+        gsi_table[1] = gsi_irq01;
 
         //  Setup Local APIC
         uint64_t msr_lapic = io_rdmsr(IA32_APIC_BASE_MSR);
@@ -239,10 +259,25 @@ void apic_init() {
         uint8_t* p = madt->Structure;
         for (size_t loc = 0; loc < max_length; ) {
             size_t len = p[loc+1];
+            void* madt_structure = (void*)(p+loc+2);
             switch (p[loc]) {
+
             case 0x01: // IO APIC
-                ioapic_base = *((uint32_t*)(p+loc+4));
+            {
+                apic_madt_ioapic_t* ioapic = madt_structure;
+                if (ioapic->gsi_base == 0) {
+                    ioapic_base = ioapic->ioapic_base;
+                }
+            }
                 break;
+
+            case 0x02: // Interrupt Source Override
+            {
+                apic_madt_ovr_t* ovr = madt_structure;
+                gsi_table[ovr->irq] = *ovr;
+            }
+                break;
+
             default:
                 break;
             }
@@ -252,7 +287,7 @@ void apic_init() {
         //  Setup IO APIC
 
         //  Mask all IRQ
-        for (int i = 0; i < 24; i++) {
+        for (int i = 0; i < MAX_IRQ; i++) {
             apic_disable_irq(i);
         }
 
@@ -260,6 +295,17 @@ void apic_init() {
         idt_set_kernel_handler(IRQ_BASE, (uintptr_t)&_irq00, 0);
         idt_set_kernel_handler(IRQ_BASE+1, (uintptr_t)&_irq01, 0);
         idt_set_kernel_handler(IRQ_BASE+2, (uintptr_t)&_irq02, 0);
+
+        //  Disable Legacy PIC
+        if (madt->Flags & ACPI_MADT_PCAT_COMPAT) {
+            __asm__ volatile (
+                // "cli\n"
+                "movb $0xFF, %%al\n"
+                "outb %%al, $0xA1\n"
+                "outb %%al, $0x21\n"
+                :::"%al");
+        }
+        __asm__ volatile("sti");
 
     }
 }
@@ -271,27 +317,28 @@ void apic_init() {
 MOE_PHYSICAL_ADDRESS hpet_base = 0;
 uint32_t hpet_main_cnt_period = 0;
 volatile uint64_t hpet_count = 0;
+static const double timer_div = 0.01;
 
-// void hpet_clear_interrupt(int timer_id) {
-//     uint32_t v = READ_PHYSICAL_UINT32(hpet_base + 0x20);
-//     uint32_t mask = (1 << timer_id);
-//     v |= mask;
-//     WRITE_PHYSICAL_UINT32(hpet_base + 0x020, v);
-// }
-
-extern moe_video_info_t* video;
 int hpet_irq_handler(int irq, void* context) {
     hpet_count++;
-
-    uint32_t* vram = video->vram;
-    vram[video->pixel_per_scan_line + 1] += 0x010101;
-
     return 0;
 }
 
-uint64_t hpet_get_count() {
-    return hpet_count;
+moe_timer_t moe_create_interval_timer(moe_time_interval_t ti) {
+    return (ti / timer_div) + hpet_count + 1;
 }
+
+int moe_wait_for_timer(moe_timer_t* timer) {
+    while (moe_check_timer(timer)) {
+        io_hlt();
+    }
+    return 0;
+}
+
+int moe_check_timer(moe_timer_t* timer) {
+    return ((*timer - hpet_count) > 0);
+}
+
 
 void hpet_init() {
     acpi_hpet_t* hpet = acpi_find_table(ACPI_HPET_SIGNATURE);
@@ -306,7 +353,7 @@ void hpet_init() {
 
         WRITE_PHYSICAL_UINT64(hpet_base + 0x100, 0x4C);
         WRITE_PHYSICAL_UINT64(hpet_base + 0x108, 10000000000000 / hpet_main_cnt_period);
-        apic_enable_irq(0x02, 0x00, &hpet_irq_handler);
+        apic_enable_irq(0, &hpet_irq_handler);
 
     } else {
         //  TODO: impl PIT
@@ -318,6 +365,10 @@ void hpet_init() {
 
 
 /*********************************************************************/
+
+#define PS2_DATA_PORT       0x0060
+#define PS2_STATUS_PORT     0x0064
+#define PS2_COMMAND_PORT    0x0064
 
 #define PS2_STATE_RSHIFT    0x0001
 #define PS2_STATE_LSHIFT    0x0002
@@ -334,35 +385,47 @@ void hpet_init() {
 #define PS2_SCAN_BREAK      0x80
 #define PS2_SCAN_EXTEND     0xE0
 
+#define PS2_TIMEOUT         0.01
 
-static moe_fifo_t ps2_buffer;
-static uintptr_t ps2_state = 0;
+static moe_fifo_t ps2k_buffer;
+static moe_fifo_t ps2m_buffer;
+static volatile uintptr_t ps2k_state = 0;
+
+int ps2_wait_for_write(moe_time_interval_t timeout) {
+    moe_timer_t timer = moe_create_interval_timer(timeout);
+    while (moe_check_timer(&timer)) {
+        if ((io_in8(PS2_STATUS_PORT) & 0x02) == 0x00) {
+            return 0;
+        }
+        io_pause();
+    }
+    return -1;
+}
 
 int ps2_irq_handler(int irq, void* context) {
     while ((io_in8(0x64) & 0x21) == 0x01) {
-        uint8_t data = io_in8(0x60);
-        moe_fifo_write(&ps2_buffer, data);
+        moe_fifo_write(&ps2k_buffer, io_in8(PS2_DATA_PORT));
     }
     return 0;
 }
 
 static void ps2_set_shift(uint32_t state, uint32_t is_break) {
     if (is_break) {
-        ps2_state &= ~state;
+        ps2k_state &= ~state;
     } else {
-        ps2_state |= state;
+        ps2k_state |= state;
     }
 }
 
 uint32_t ps2_parse_scancode(uint32_t scancode) {
     if (scancode == PS2_SCAN_EXTEND) {
-        ps2_state |= PS2_STATE_EXTEND;
+        ps2k_state |= PS2_STATE_EXTEND;
         return 0;
     } else {
         uint32_t is_break = (scancode & PS2_SCAN_BREAK) ? SCANCODE_BREAK : 0;
         uint32_t scan = scancode & 0x7F;
-        if (ps2_state & PS2_STATE_EXTEND) {
-            ps2_state &= ~PS2_STATE_EXTEND;
+        if (ps2k_state & PS2_STATE_EXTEND) {
+            ps2k_state &= ~PS2_STATE_EXTEND;
             scan |= PS2_STATE_EXTEND;
         }
         switch (scan) {
@@ -379,14 +442,14 @@ uint32_t ps2_parse_scancode(uint32_t scancode) {
                 ps2_set_shift(PS2_STATE_ALT, is_break);
                 break;
             default:
-                return is_break | (ps2_state << 16) | scan;
+                return is_break | (ps2k_state << 16) | scan;
         }
         return 0;
     }
 }
 
 int32_t ps2_get_data() {
-    uint8_t data = moe_fifo_read(&ps2_buffer, 0);
+    uint8_t data = moe_fifo_read(&ps2k_buffer, 0);
     if (data) {
         return ps2_parse_scancode(data);
     } else {
@@ -425,13 +488,32 @@ uint32_t ps2_scan_to_unicode(uint32_t scancode) {
 }
 
 void ps2_init() {
+    if (!ps2_wait_for_write(0.5)){
+        io_out8(PS2_COMMAND_PORT, 0xAD);
+        ps2_wait_for_write(0.1);
+        io_out8(PS2_COMMAND_PORT, 0xA7);
 
-    uintptr_t size_of_buffer = 16;
-    intptr_t* buffer = mm_alloc_static(size_of_buffer * sizeof(intptr_t));
-    moe_fifo_init(&ps2_buffer, buffer, size_of_buffer);
+        for (int i = 0; i< 16; i++) {
+            io_in8(PS2_DATA_PORT);
+        }
 
-    apic_enable_irq(1, 0, ps2_irq_handler);
+        ps2_wait_for_write(0.1);
+        io_out8(PS2_COMMAND_PORT, 0x60);
+        ps2_wait_for_write(0.1);
+        io_out8(PS2_DATA_PORT, 0x47);
 
+        // ps2_wait_for_write(0.1);
+        // io_out8(PS2_COMMAND_PORT, 0xED);
+        // ps2_wait_for_write(0.1);
+        // io_out8(PS2_DATA_PORT, 0x00);
+
+        uintptr_t size_of_buffer = 128;
+        intptr_t* buffer = mm_alloc_static(size_of_buffer * sizeof(intptr_t));
+        moe_fifo_init(&ps2k_buffer, buffer, size_of_buffer);
+
+        apic_enable_irq(1, ps2_irq_handler);
+        // apic_enable_irq(12, ps2_irq_handler);
+    }
 }
 
 
@@ -443,7 +525,5 @@ void arch_init() {
     idt_init();
     apic_init();
     hpet_init();
-    __asm__ volatile("sti");
-
     ps2_init();
 }

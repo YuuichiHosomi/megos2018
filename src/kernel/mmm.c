@@ -96,7 +96,7 @@ int moe_fifo_write(moe_fifo_t* self, intptr_t data) {
 
 uintptr_t total_memory = 0;
 
-static int mm_type_conv_to_count_free(uint32_t type) {
+static int mm_type_for_count(uint32_t type) {
     switch (type) {
         case EfiReservedMemoryType:
         case EfiUnusableMemory:
@@ -131,8 +131,8 @@ uintptr_t mm_init(void * efi_rt, moe_bootinfo_mmap_t* mmap) {
         efi_mem->VirtualStart = efi_mem->PhysicalStart;
         if (efi_mem->PhysicalStart >= 0x100000) {
             // moe_mmap mem = { efi_mem->PhysicalStart, efi_mem->NumberOfPages*0x1000, efi_mm_type_convert(efi_mem->Type) };
-            if (mm_type_conv_to_count_free(efi_mem->Type) > 0) {
-                total_memory += efi_mem->NumberOfPages * 0x1000;
+            if (mm_type_for_count(efi_mem->Type) > 0) {
+                total_memory += efi_mem->NumberOfPages;
             }
         }
     }
