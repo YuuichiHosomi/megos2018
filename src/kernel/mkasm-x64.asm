@@ -97,6 +97,23 @@ io_in8:
     ret
 
 
+; void io_out32(uint16_t port, uint32_t val);
+    global io_out32
+io_out32:
+    mov eax, edx
+    mov edx, ecx
+    out dx, eax
+    ret
+
+
+; uint32_t io_in32(uint16_t port);
+    global io_in32
+io_in32:
+    mov edx, ecx
+    in eax, dx
+    ret
+
+
 ; int gdt_init(void);
     global gdt_init
 gdt_init:
@@ -198,7 +215,7 @@ _iretq:
     iretq
 
 
-    global _irq00, _irq01, _irq02
+    global _irq00, _irq01, _irq02, _irq0C
     extern _irq_main
 _irq00:
     push rcx
@@ -213,6 +230,11 @@ _irq01:
 _irq02:
     push rcx
     mov cl, 0x02
+    jmp short _irqXX
+
+_irq0C:
+    push rcx
+    mov cl, 0x0C
     jmp short _irqXX
 
 _irqXX:

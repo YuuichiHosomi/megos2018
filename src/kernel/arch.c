@@ -37,11 +37,14 @@ extern void* _int0E;
 extern void* _irq00;
 extern void* _irq01;
 extern void* _irq02;
+extern void* _irq0C;
 uint64_t io_rdmsr(uint32_t addr);
 void io_wrmsr(uint32_t addr, uint64_t val);
 
 void io_out8(uint16_t port, uint8_t val);
 uint8_t io_in8(uint16_t port);
+void io_out32(uint16_t port, uint32_t val);
+uint32_t io_in32(uint16_t port);
 
 
 /*********************************************************************/
@@ -295,6 +298,7 @@ void apic_init() {
         idt_set_kernel_handler(IRQ_BASE, (uintptr_t)&_irq00, 0);
         idt_set_kernel_handler(IRQ_BASE+1, (uintptr_t)&_irq01, 0);
         idt_set_kernel_handler(IRQ_BASE+2, (uintptr_t)&_irq02, 0);
+        idt_set_kernel_handler(IRQ_BASE+12, (uintptr_t)&_irq0C, 0);
 
         //  Disable Legacy PIC
         if (madt->Flags & ACPI_MADT_PCAT_COMPAT) {
@@ -365,6 +369,33 @@ void hpet_init() {
 
 
 /*********************************************************************/
+//  Peripheral Component Interconnect
+
+#define PCI_CONFIG_ADDRESS  0x0CF8
+#define PCI_CONFIG_DATA     0x0CFC
+#define PCI_ADDRESS_ENABLE  0x80000000
+
+uint32_t pci_get_register_address(uint8_t bus, uint8_t dev, uint8_t func, uint8_t reg) {
+    return (reg & 0xFC) | ((func) << 8) | ((dev) << 11) | (bus << 16);
+}
+
+uint32_t pci_read_config_register(uint32_t base, uint8_t reg) {
+    io_out32(PCI_CONFIG_ADDRESS, PCI_ADDRESS_ENABLE | base | reg);
+    uint32_t retval = io_in32(PCI_CONFIG_DATA);
+    io_out32(PCI_CONFIG_ADDRESS, 0);
+    return retval;
+}
+
+void pci_write_config_register(uint32_t base, uint8_t reg, uint32_t val) {
+    io_out32(PCI_CONFIG_ADDRESS, PCI_ADDRESS_ENABLE | base | reg);
+    io_out32(PCI_CONFIG_DATA, val);
+    io_out32(PCI_CONFIG_ADDRESS, 0);
+}
+
+
+
+/*********************************************************************/
+//  PS/2
 
 #define PS2_DATA_PORT       0x0060
 #define PS2_STATUS_PORT     0x0064
@@ -403,8 +434,14 @@ int ps2_wait_for_write(moe_time_interval_t timeout) {
 }
 
 int ps2_irq_handler(int irq, void* context) {
-    while ((io_in8(0x64) & 0x21) == 0x01) {
-        moe_fifo_write(&ps2k_buffer, io_in8(PS2_DATA_PORT));
+    uint8_t ps2_status;
+    while((ps2_status = io_in8(PS2_STATUS_PORT)) & 0x01) {
+        if (ps2_status & 0x20) {
+            // TODO: mice
+            io_in8(PS2_DATA_PORT);
+        } else {
+            moe_fifo_write(&ps2k_buffer, io_in8(PS2_DATA_PORT));
+        }
     }
     return 0;
 }
@@ -488,7 +525,7 @@ uint32_t ps2_scan_to_unicode(uint32_t scancode) {
 }
 
 void ps2_init() {
-    if (!ps2_wait_for_write(0.5)){
+    if (!ps2_wait_for_write(0.25)){
         io_out8(PS2_COMMAND_PORT, 0xAD);
         ps2_wait_for_write(0.1);
         io_out8(PS2_COMMAND_PORT, 0xA7);
@@ -502,17 +539,17 @@ void ps2_init() {
         ps2_wait_for_write(0.1);
         io_out8(PS2_DATA_PORT, 0x47);
 
-        // ps2_wait_for_write(0.1);
-        // io_out8(PS2_COMMAND_PORT, 0xED);
-        // ps2_wait_for_write(0.1);
-        // io_out8(PS2_DATA_PORT, 0x00);
+        ps2_wait_for_write(0.1);
+        io_out8(PS2_COMMAND_PORT, 0xD4);
+        ps2_wait_for_write(0.1);
+        io_out8(PS2_DATA_PORT, 0xF4);
 
         uintptr_t size_of_buffer = 128;
         intptr_t* buffer = mm_alloc_static(size_of_buffer * sizeof(intptr_t));
         moe_fifo_init(&ps2k_buffer, buffer, size_of_buffer);
 
         apic_enable_irq(1, ps2_irq_handler);
-        // apic_enable_irq(12, ps2_irq_handler);
+        apic_enable_irq(12, ps2_irq_handler);
     }
 }
 

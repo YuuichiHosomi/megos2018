@@ -285,15 +285,18 @@ void change_resolution_menu() {
         gop->QueryMode(gop, i, &sizeOfInfo, &info);
 
         BOOLEAN white = TRUE;
-        if (
+        if (info->HorizontalResolution == edid_x && info->VerticalResolution == edid_y) {
+            white = TRUE;
+        } else if (
             info->HorizontalResolution < 640 ||
             info->VerticalResolution < 400 ||
             (info->HorizontalResolution & 7) != 0 ||
-            (info->VerticalResolution & 7) != 0 ||
-            info->PixelFormat != GOP_STANDARD_RGB
+            (info->VerticalResolution & 7) != 0
         ) {
             white = FALSE;
         }
+        if (info->PixelFormat != GOP_STANDARD_RGB)
+            white = FALSE;
         if (white){
             if(mode->Mode == i) {
                 items->selected_index = items->item_count;

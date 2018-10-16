@@ -190,12 +190,10 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
         // rt->GetTime(&time, NULL);
         // printf("Time: %d-%02d-%02d %02d:%02d:%02d\n", time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second);
 
-        for (int i = 0; i < 5; i++) {
-            moe_timer_t timer = moe_create_interval_timer(1.0);
-            moe_wait_for_timer(&timer);
-            putchar('.');
-        }
-        putchar('\n');
+        printf("Checking Timer...");
+        moe_timer_t timer = moe_create_interval_timer(1.0);
+        moe_wait_for_timer(&timer);
+        printf("Ok\n");
 
         for (;;) {
             printf("C>");
