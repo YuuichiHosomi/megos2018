@@ -24,16 +24,15 @@
 
 */
 #include <stdint.h>
+#include <stddef.h>
 #include "acpi.h"
 
-#ifndef NULL
-#define	NULL (0)
-#endif
 
 int printf(const char* format, ...);
 void* memcpy(void* p, const void* q, size_t n);
 void* memset(void * p, int v, size_t n);
 void memset32(uint32_t* p, uint32_t v, size_t n);
+
 
 typedef struct {
     void* vram;

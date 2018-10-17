@@ -401,10 +401,14 @@ void pci_write_config_register(uint32_t base, uint8_t reg, uint32_t val) {
 #define PS2_STATUS_PORT     0x0064
 #define PS2_COMMAND_PORT    0x0064
 
-#define PS2_STATE_RSHIFT    0x0001
-#define PS2_STATE_LSHIFT    0x0002
-#define PS2_STATE_CTRL      0x0004
-#define PS2_STATE_ALT       0x0008
+#define HID_MOD_LCTRL       0x0001
+#define HID_MOD_LSHIFT      0x0002
+#define HID_MOD_LALT        0x0004
+#define HID_MOD_LGUI        0x0008
+#define HID_MOD_RCTRL       0x0010
+#define HID_MOD_RSHIFT      0x0020
+#define HID_MOD_RALT        0x0040
+#define HID_MOD_RGUI        0x0080
 #define PS2_STATE_EXTEND    0x4000
 
 #define SCANCODE_BREAK      0x80000000
@@ -415,6 +419,11 @@ void pci_write_config_register(uint32_t base, uint8_t reg, uint32_t val) {
 #define PS2_SCAN_RSHIFT     0x36
 #define PS2_SCAN_BREAK      0x80
 #define PS2_SCAN_EXTEND     0xE0
+#define PS2_SCAN_EXT16      0xE000
+#define PS2_SCAN_RCTRL      (PS2_SCAN_EXT16|PS2_SCAN_LCTRL)
+#define PS2_SCAN_RALT       (PS2_SCAN_EXT16|PS2_SCAN_LALT)
+#define PS2_SCAN_LGUI       (PS2_SCAN_EXT16|0x5B)
+#define PS2_SCAN_RGUI       (PS2_SCAN_EXT16|0x5C)
 
 #define PS2_TIMEOUT         0.01
 
@@ -463,20 +472,32 @@ uint32_t ps2_parse_scancode(uint32_t scancode) {
         uint32_t scan = scancode & 0x7F;
         if (ps2k_state & PS2_STATE_EXTEND) {
             ps2k_state &= ~PS2_STATE_EXTEND;
-            scan |= PS2_STATE_EXTEND;
+            scan |= PS2_SCAN_EXT16;
         }
         switch (scan) {
             case PS2_SCAN_LSHIFT:
-                ps2_set_shift(PS2_STATE_LSHIFT, is_break);
+                ps2_set_shift(HID_MOD_LSHIFT, is_break);
                 break;
             case PS2_SCAN_RSHIFT:
-                ps2_set_shift(PS2_STATE_RSHIFT, is_break);
+                ps2_set_shift(HID_MOD_LSHIFT, is_break);
                 break;
             case PS2_SCAN_LCTRL:
-                ps2_set_shift(PS2_STATE_CTRL, is_break);
+                ps2_set_shift(HID_MOD_LCTRL, is_break);
                 break;
             case PS2_SCAN_LALT:
-                ps2_set_shift(PS2_STATE_ALT, is_break);
+                ps2_set_shift(HID_MOD_LALT, is_break);
+                break;
+            case PS2_SCAN_RCTRL:
+                ps2_set_shift(HID_MOD_RCTRL, is_break);
+                break;
+            case PS2_SCAN_RALT:
+                ps2_set_shift(HID_MOD_RALT, is_break);
+                break;
+            case PS2_SCAN_LGUI:
+                ps2_set_shift(HID_MOD_LGUI, is_break);
+                break;
+            case PS2_SCAN_RGUI:
+                ps2_set_shift(HID_MOD_RGUI, is_break);
                 break;
             default:
                 return is_break | (ps2k_state << 16) | scan;
@@ -500,24 +521,26 @@ static uint8_t ps2_scan_table[] = {
     'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '@', '[', '\x0D', 0, 'a', 's',
     'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', ':', '`', 0, ']',
     'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0, '*', 0, ' ', 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    '7', '8', '9', '-', '4', '5', '6', '+', '1', '2', '3', '0', '.',
 };
 
 uint32_t ps2_scan_to_unicode(uint32_t scancode) {
     if (scancode & SCANCODE_BREAK) return 0;
-    uint32_t scan_lo = (scancode & 0x7F);
+    uint32_t scan_lo = (scancode & 0xFFFF);
     uint32_t shift_state = scancode >> 16;
     uint32_t ascii = 0;
     if (scan_lo < sizeof(ps2_scan_table)) {
         ascii = ps2_scan_table[scan_lo];
     }
     if (ascii >= 0x21 && ascii <= 0x3F) {
-        if (shift_state & (PS2_STATE_LSHIFT | PS2_STATE_RSHIFT)) {
+        if (shift_state & (HID_MOD_LSHIFT | HID_MOD_LSHIFT)) {
             ascii ^= 0x10;
         }
     } else if (ascii >= 0x40 && ascii <= 0x7E) {
-        if (shift_state & PS2_STATE_CTRL) {
+        if (shift_state & (HID_MOD_LCTRL | HID_MOD_RCTRL)) {
             ascii &= 0x1F;
-        } else if (shift_state & (PS2_STATE_LSHIFT | PS2_STATE_RSHIFT)) {
+        } else if (shift_state & (HID_MOD_LSHIFT | HID_MOD_LSHIFT)) {
             ascii ^= 0x20;
         }
     }
@@ -525,23 +548,23 @@ uint32_t ps2_scan_to_unicode(uint32_t scancode) {
 }
 
 void ps2_init() {
-    if (!ps2_wait_for_write(0.25)){
+    if (!ps2_wait_for_write(0.1)){
         io_out8(PS2_COMMAND_PORT, 0xAD);
-        ps2_wait_for_write(0.1);
+        ps2_wait_for_write(PS2_TIMEOUT);
         io_out8(PS2_COMMAND_PORT, 0xA7);
 
         for (int i = 0; i< 16; i++) {
             io_in8(PS2_DATA_PORT);
         }
 
-        ps2_wait_for_write(0.1);
+        ps2_wait_for_write(PS2_TIMEOUT);
         io_out8(PS2_COMMAND_PORT, 0x60);
-        ps2_wait_for_write(0.1);
+        ps2_wait_for_write(PS2_TIMEOUT);
         io_out8(PS2_DATA_PORT, 0x47);
 
-        ps2_wait_for_write(0.1);
+        ps2_wait_for_write(PS2_TIMEOUT);
         io_out8(PS2_COMMAND_PORT, 0xD4);
-        ps2_wait_for_write(0.1);
+        ps2_wait_for_write(PS2_TIMEOUT);
         io_out8(PS2_DATA_PORT, 0xF4);
 
         uintptr_t size_of_buffer = 128;

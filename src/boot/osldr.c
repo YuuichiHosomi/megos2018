@@ -498,7 +498,7 @@ EFI_STATUS start_os() {
         }
         status = gBS->HandleProtocol(image, &EfiLoadedImageProtocolGuid, (void**)&li2);
         if(!EFI_ERROR(status)) {
-            li->DeviceHandle = li2->DeviceHandle;
+            li->DeviceHandle = li2->DeviceHandle; // TODO:
         }
     }
     if(!EFI_ERROR(status)) {
