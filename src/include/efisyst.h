@@ -1,5 +1,4 @@
-#ifndef INCLUDED_EFISYST_H
-#define INCLUDED_EFISYST_H
+#pragma once
 
 #include "efidefs.h"
 
@@ -925,6 +924,3 @@ typedef struct _EFI_SYSTEM_TABLE {
 	UINTN NumberOfTableEntries;
 	EFI_CONFIGURATION_TABLE *ConfigurationTable;
 } EFI_SYSTEM_TABLE;
-
-
-#endif

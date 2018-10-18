@@ -1,6 +1,4 @@
-//
 //  x86 Protected Mode Contexts and System Objects
-//
 
 #include <stdint.h>
 

@@ -1,29 +1,6 @@
-/*
-
-    Minimal OS EFI Part
-
-    Copyright (c) 1998,2000,2018 MEG-OS project, All rights reserved.
-
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the "Software"), to deal
-    in the Software without restriction, including without limitation the rights
-    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
-
-    The above copyright notice and this permission notice shall be included in all
-    copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-    SOFTWARE.
-
-*/
-
+// Minimal OS EFI Stub
+// Copyright (c) 1998,2000,2018 MEG-OS project, All rights reserved.
+// License: BSD
 #include "moe.h"
 #include "efi.h"
 
@@ -31,7 +8,6 @@
 
 CONST EFI_GUID EfiGraphicsOutputProtocolGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 CONST EFI_GUID efi_acpi_20_table_guid = EFI_ACPI_20_TABLE_GUID;
-// CONST EFI_GUID efi_acpi_table_guid = EFI_ACPI_TABLE_GUID;
 
 /*********************************************************************/
 
@@ -64,9 +40,6 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
     //	Find ACPI table pointer
     {
         bootinfo.acpi = efi_find_config_table(st, &efi_acpi_20_table_guid);
-        // if (!bootinfo.acpi) {
-        //     bootinfo.acpi = efi_find_config_table(&efi_acpi_table_guid);
-        // }
         if (!bootinfo.acpi) {
             EFI_PRINT("ERROR: ACPI NOT FOUND");
             goto errexit;

@@ -1,6 +1,5 @@
 // ACPI.h
-#ifndef INCLUDED_ACPI_H
-#define INCLUDED_ACPI_H
+#pragma once
 
 
 typedef struct _acpi_rsd_ptr_t {
@@ -118,6 +117,3 @@ typedef struct {
 } __attribute__((packed)) acpi_hpet_t;
 
 #define ACPI_HPET_SIGNATURE         "HPET"
-
-
-#endif
