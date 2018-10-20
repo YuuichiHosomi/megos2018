@@ -242,7 +242,7 @@ def make_efi(cputype, target, src_tokens, options = {})
     case File.extname(src)
     when '.c'
       file obj => [ src, INCS, local_incs, path_obj ].flatten do |t|
-        sh "#{ CC } -target #{ cf_target } #{ CFLAGS} -c -o #{ t.name } #{ src }"
+        sh "#{ CC } -target #{ cf_target } #{ CFLAGS} -DEFI_VENDOR_NAME=\\\"#{VENDOR_NAME}\\\" -c -o #{ t.name } #{ src }"
       end
     when '.asm'
       file obj => [ src, path_obj ] do | t |

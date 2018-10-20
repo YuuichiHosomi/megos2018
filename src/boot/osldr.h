@@ -13,13 +13,13 @@
 #define	ZWNBSP	0xFEFF
 
 #if defined(__x86_64__)
-#define EFI_SUFFIX	"x64"
+#define EFI_SUFFIX	"X64"
 #elif defined(__i386__)
-#define EFI_SUFFIX	"ia32"
+#define EFI_SUFFIX	"IA32"
 #elif defined(__arm__)
-#define EFI_SUFFIX	"arm"
+#define EFI_SUFFIX	"ARM"
 #elif defined(__aarch64__)
-#define EFI_SUFFIX	"aa64"
+#define EFI_SUFFIX	"AA64"
 #endif
 
 extern EFI_SYSTEM_TABLE* gST;

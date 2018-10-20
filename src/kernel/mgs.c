@@ -4,7 +4,7 @@
 #include "moe.h"
 
 #define DEFAULT_BGCOLOR 0xFFFFFF
-#define DEFAULT_FGCOLOR 0x777777
+#define DEFAULT_FGCOLOR 0x555555
 
 moe_video_info_t* video;
 int font_w8, line_height, font_offset, padding_x, padding_y;
