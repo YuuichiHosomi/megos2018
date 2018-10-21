@@ -211,6 +211,8 @@ void _irq_main(uint8_t irq, void* context) {
         regs.intnum = 0x0D;
         default_int_handler(&regs);
     }
+    __asm__ volatile ("sti");
+    moe_next_thread();
 }
 
 
@@ -312,7 +314,7 @@ moe_timer_t moe_create_interval_timer(moe_time_interval_t ti) {
 
 int moe_wait_for_timer(moe_timer_t* timer) {
     while (moe_check_timer(timer)) {
-        io_hlt();
+        moe_next_thread();
     }
     return 0;
 }
@@ -525,7 +527,7 @@ uint32_t ps2_scan_to_unicode(uint32_t scancode) {
     return ascii;
 }
 
-void ps2_init() {
+int ps2_init() {
     if (!ps2_wait_for_write(0.1)){
         io_out8(PS2_COMMAND_PORT, 0xAD);
         ps2_wait_for_write(PS2_TIMEOUT);
@@ -551,7 +553,10 @@ void ps2_init() {
 
         apic_enable_irq(1, ps2_irq_handler);
         apic_enable_irq(12, ps2_irq_handler);
+
+        return 1;
     }
+    return 0;
 }
 
 
@@ -563,5 +568,4 @@ void arch_init() {
     idt_init();
     apic_init();
     hpet_init();
-    ps2_init();
 }

@@ -9,6 +9,62 @@
 [section .text]
 
 
+; void new_jmpbuf(jmp_buf env, uintptr_t new_sp, uintptr_t new_ip);
+    global new_jmpbuf
+new_jmpbuf:
+    mov [rcx     ], rdx
+    mov [rcx+0x48], r8
+    ret
+
+
+; intptr_t _setjmp(jmp_buf env);
+    global _setjmp
+_setjmp:
+    push rbp
+    mov rbp, rsp
+
+    lea rax, [rsp+16]
+    mov [rcx     ], rax
+    mov [rcx+0x08], rbx
+    mov [rcx+0x10], rsi
+    mov [rcx+0x18], rdi
+    mov [rcx+0x20], r12
+    mov [rcx+0x28], r13
+    mov [rcx+0x30], r14
+    mov [rcx+0x38], r15
+
+    mov rax, [rbp]
+    mov rdx, [rbp+ 8]
+    mov [rcx+0x40], rax
+    mov [rcx+0x48], rdx
+
+    xor eax, eax
+    leave
+    ret
+
+
+; void _longjmp(jmp_buf env, intptr_t retval);
+    global _longjmp
+_longjmp:
+    mov rax, rdx
+    mov rsp, [rcx     ]
+    mov rbx, [rcx+0x08]
+    mov rsi, [rcx+0x10]
+    mov rdi, [rcx+0x18]
+    mov r12, [rcx+0x20]
+    mov r13, [rcx+0x28]
+    mov r14, [rcx+0x30]
+    mov r15, [rcx+0x38]
+    mov rbp, [rcx+0x40]
+    mov rdx, [rcx+0x48]
+
+    or rax, rax
+    jnz .nozero
+    inc rax
+.nozero:
+    jmp rdx
+
+
 ; uintptr_t atomic_exchange_add(volatile uintptr_t*, uintptr_t);
     global atomic_exchange_add
 atomic_exchange_add:

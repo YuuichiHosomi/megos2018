@@ -19,6 +19,7 @@
                 "mgs",
                 "mmm",
                 "arch",
+                "hid",
                 "acpi",
                 "stdlib",
                 "mkasm.asm"

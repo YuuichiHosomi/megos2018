@@ -59,7 +59,7 @@ else
   CC      = ENV['CC'] || "clang"
   LD      = ENV['LD'] || "lld-link-6.0"
 end
-CFLAGS  = "-Os -std=c11 -fno-stack-protector -fshort-wchar -mno-red-zone -nostdlibinc -I #{PATH_INC} -I #{PATH_SRC} -Wall -Wpedantic -fno-exceptions"
+CFLAGS  = "-Os -std=c11 -fblocks -fno-stack-protector -fshort-wchar -mno-red-zone -nostdlibinc -I #{PATH_INC} -I #{PATH_SRC} -Wall -Wpedantic -fno-exceptions"
 AS      = ENV['AS'] || "nasm"
 AFLAGS  = "-s -I #{ PATH_SRC }"
 LFLAGS  = "-subsystem:efi_application -nodefaultlib -entry:efi_main"
@@ -96,6 +96,11 @@ end
 desc "Run with QEMU"
 task :run => :install do
   sh "qemu-system-#{QEMU_ARCH} #{QEMU_OPTS} -bios #{PATH_OVMF} -monitor stdio -drive format=raw,file=fat:rw:mnt"
+end
+
+desc "Format"
+task :format do
+  sh "clang-format -i #{ FileList["#{PATH_SRC}**/*.c"] } #{ FileList["#{PATH_SRC}**/*.h"] }"
 end
 
 

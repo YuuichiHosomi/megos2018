@@ -97,11 +97,12 @@ static int mm_type_for_count(uint32_t type) {
     }
 }
 
-uintptr_t mm_init(void * efi_rt, moe_bootinfo_mmap_t* mmap) {
+extern EFI_RUNTIME_SERVICES* gRT;
+
+void mm_init(moe_bootinfo_mmap_t* mmap) {
 
     static_start = ROUNDUP_4K((uintptr_t)static_heap);
 
-    EFI_RUNTIME_SERVICES* rt = (EFI_RUNTIME_SERVICES*)efi_rt;
     uintptr_t mmap_ptr = (uintptr_t)mmap->mmap;
     int n_mmap = mmap->size / mmap->desc_size;
     for (int i = 0; i < n_mmap; i++) {
@@ -114,7 +115,6 @@ uintptr_t mm_init(void * efi_rt, moe_bootinfo_mmap_t* mmap) {
             }
         }
     }
-    rt->SetVirtualAddressMap(mmap->size, mmap->desc_size, mmap->desc_version, mmap->mmap);
+    gRT->SetVirtualAddressMap(mmap->size, mmap->desc_size, mmap->desc_version, mmap->mmap);
 
-    return total_memory;
 }

@@ -98,6 +98,70 @@ void draw_logo_bitmap(moe_video_info_t* video, const uint8_t* bmp, int offset_x,
 
 /*********************************************************************/
 
+#include "setjmp.h"
+extern void new_jmpbuf(jmp_buf env, uintptr_t new_sp, uintptr_t new_ip);
+
+typedef uintptr_t pid_t;
+typedef uintptr_t thid_t;
+
+typedef struct _moe_fiber_t moe_fiber_t;
+
+typedef struct _moe_fiber_t {
+    moe_fiber_t* next;
+    thid_t  thid;
+    pid_t   pid;
+    jmp_buf jmpbuf;
+} moe_fiber_t;
+
+volatile thid_t next_thid = 1;
+moe_fiber_t* current_thread;
+moe_fiber_t root_thread;
+
+void moe_switch_context(moe_fiber_t* next) {
+    if (!next) next = &root_thread;
+    if (!setjmp(current_thread->jmpbuf)) {
+        current_thread = next;
+        longjmp(next->jmpbuf, 0);
+    }
+}
+
+void moe_next_thread() {
+    moe_switch_context(current_thread->next);
+}
+
+void link_thread(moe_fiber_t* parent, moe_fiber_t* child) {
+    child->next = parent->next;
+    parent->next = child;
+}
+
+int moe_create_thread(moe_start_thread start, void* context, uintptr_t reserved1) {
+
+    const uintptr_t stack_count = 0x1000;
+    const uintptr_t stack_size = stack_count * sizeof(uintptr_t);
+    uintptr_t* stack = mm_alloc_static(stack_size);
+    memset(stack, 0, stack_size);
+    uintptr_t* sp = stack + stack_count;
+    *--sp = 0x0000dead0000beef;
+    *--sp = (uintptr_t)context;
+    *--sp = (uintptr_t)start;
+    moe_fiber_t* new_thread = mm_alloc_static(sizeof(moe_fiber_t));
+    memset(new_thread, 0, sizeof(moe_fiber_t));
+    new_thread->thid = atomic_exchange_add(&next_thid, 1);
+
+    moe_fiber_t* current = current_thread;
+    link_thread(current, new_thread);
+
+    new_jmpbuf(new_thread->jmpbuf, (uintptr_t)sp, (uintptr_t)start);
+    moe_switch_context(new_thread);
+
+    return new_thread->thid;
+}
+
+
+/*********************************************************************/
+
+EFI_RUNTIME_SERVICES* gRT;
+
 void dump_madt(uint8_t* p, size_t n) {
     for (int i = 0; i < n; i++) {
         printf(" %02x", p[i]);
@@ -106,17 +170,14 @@ void dump_madt(uint8_t* p, size_t n) {
 }
 
 extern int putchar(char);
-extern int32_t ps2_get_data();
-extern uint32_t ps2_scan_to_unicode(uint32_t);
-extern uint64_t hpet_get_count();
 
 int getchar() {
     for(;;) {
-        int32_t scan = ps2_get_data();
-        if (scan > 0) {
-            return ps2_scan_to_unicode(scan);
+        int c = hid_getchar();
+        if (c >= 0) {
+            return c;
         }
-        io_hlt();
+        moe_next_thread();
     }
 }
 
@@ -159,13 +220,11 @@ int read_cmdline(char* buffer, size_t max_len) {
     return len;
 }
 
+void start_init(void* context)  {
 
-void start_kernel(moe_bootinfo_t* bootinfo) {
+    hid_init();
 
-    mgs_init(&bootinfo->video);
-    uintptr_t memsize = mm_init(bootinfo->efiRT, &bootinfo->mmap);
-    acpi_init(bootinfo->acpi);
-    arch_init();
+    int memsize = 0;
 
     mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
     mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
@@ -174,14 +233,8 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
     printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(memsize >> 8));
     // printf("Hello, world!\n");
 
-    acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
-    if (bgrt) {
-        draw_logo_bitmap(&bootinfo->video, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
-    }
-
     //  Pseudo shell
     {
-        EFI_RUNTIME_SERVICES* rt = bootinfo->efiRT;
         const size_t cmdline_size = 80;
         char* cmdline = mm_alloc_static(cmdline_size);
 
@@ -203,11 +256,11 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
                 break;
 
                 case 'r':
-                    rt->ResetSystem(EfiResetWarm, 0, 0, NULL);
+                    gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
                     break;
 
                 case 'u':
-                    rt->ResetSystem(EfiResetShutdown, 0, 0, NULL);
+                    gRT->ResetSystem(EfiResetShutdown, 0, 0, NULL);
                     break;
 
                 case 'a':
@@ -247,6 +300,24 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
         }
     }
 
-    for (;;) io_hlt();
+}
 
+void start_kernel(moe_bootinfo_t* bootinfo) {
+
+    gRT = bootinfo->efiRT;
+    mgs_init(&bootinfo->video);
+    mm_init(&bootinfo->mmap);
+    acpi_init(bootinfo->acpi);
+    arch_init();
+    acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
+    if (bgrt) {
+        draw_logo_bitmap(&bootinfo->video, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
+    }
+
+    //  Init thread
+    current_thread = &root_thread;
+    moe_create_thread(&start_init, 0, 0);
+
+    //  Do Idle
+    for (;;) io_hlt();
 }

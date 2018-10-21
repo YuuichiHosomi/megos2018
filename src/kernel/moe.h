@@ -80,7 +80,7 @@ void mgs_bsod();
 
 
 //  Minimal Memory Subsystem
-uintptr_t mm_init(void * efi_rt, moe_bootinfo_mmap_t* mmap);
+void mm_init(moe_bootinfo_mmap_t* mmap);
 void* mm_alloc_static_page(size_t n);
 void* mm_alloc_static(size_t n);
 void moe_fifo_init(moe_fifo_t* self, intptr_t* data, uintptr_t capacity);
@@ -94,3 +94,14 @@ typedef double moe_time_interval_t;
 moe_timer_t moe_create_interval_timer(moe_time_interval_t);
 int moe_wait_for_timer(moe_timer_t*);
 int moe_check_timer(moe_timer_t*);
+
+
+//  Thread Service
+typedef void (*moe_start_thread)(void* context);
+int moe_create_thread(moe_start_thread start, void* context, uintptr_t reserved1);
+void moe_next_thread();
+
+
+//  HID Service
+void hid_init();
+int hid_getchar();
