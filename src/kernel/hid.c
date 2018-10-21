@@ -7,8 +7,7 @@ moe_fifo_t hid_fifo;
 extern int ps2_init();
 int ps2_exists = 0;
 
-extern int ps2_get_data(moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* mouse_report);
-extern uint32_t ps2_scan_to_unicode(uint32_t scan, uint32_t modifier);
+extern int ps2_parse_data(moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* mouse_report);
 
 int hid_getchar() {
     const int EOF = -1;
@@ -17,10 +16,50 @@ int hid_getchar() {
 
 int mouse_x, mouse_y;
 
-//  PS2 delete
-#define SCAN_DELETE 0x53
+#define SCAN_DELETE 0x4C
 
 extern void moe_ctrl_alt_del();
+
+int scan_to_uni_table_1E[] = { // regular non alphabet
+    '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 0x0D, 0x1B, 0x08, 0x09, ' ', '-',
+    '^', '@', '[', ']', 0x00, ';', ':', '`', ',', '.', '/',
+};
+
+int scan_tp_uni_table_54[] = { // Numpad
+    '/', '*', '-', '+', 0x0D, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.',
+};
+
+//  JP 109
+uint32_t hid_scan_to_unicode(uint8_t scan, uint8_t modifier) {
+    uint32_t uni = 0;
+
+    if (scan >= 4 && scan <= 0x1D) { // Alphabet
+        uni = scan - 4 + 'a';
+    } else if (scan >= 0x1E && scan <= 0x38) { // Regular non alphabet
+        uni = scan_to_uni_table_1E[scan - 0x1E];
+        if (uni > 0x20 && uni < 0x40 && uni != 0x30 && (modifier & (HID_MOD_LSHIFT | HID_MOD_LSHIFT))) {
+            uni ^= 0x10;
+        }
+    } else if (scan >= 0x54 && scan <= 0x63) { // Numpad
+        uni = scan_tp_uni_table_54[scan - 0x54];
+    } else if (scan == 0x89) { // '\|'
+        uni = '\\';
+    }
+    if (uni >= 0x40 && uni < 0x7F) {
+        if (modifier & (HID_MOD_LCTRL | HID_MOD_RCTRL)) {
+            uni &= 0x1F;
+        } else if (modifier & (HID_MOD_LSHIFT | HID_MOD_LSHIFT)) {
+            uni ^= 0x20;
+        }
+    }
+    if (scan == 0x87) { // '_'
+        uni = '_';
+    } else if (scan == 0x4C) { // Delete
+        uni = 0x7F;
+    }
+
+    return uni;
+}
 
 // HID Thread
 void hid_thread(void *context) {
@@ -32,7 +71,7 @@ void hid_thread(void *context) {
 
             cont = 0;
             if (ps2_exists) {
-                int state = ps2_get_data(&keyreport, &mouse_report);
+                int state = ps2_parse_data(&keyreport, &mouse_report);
 
                 switch(state) {
                     case 1:
@@ -41,7 +80,7 @@ void hid_thread(void *context) {
                                 (keyreport.modifier & (0x11)) != 0 && (keyreport.modifier & (0x44)) != 0) {
                                 moe_ctrl_alt_del();
                             }
-                            moe_fifo_write(&hid_fifo, ps2_scan_to_unicode(keyreport.keydata[0], keyreport.modifier));
+                            moe_fifo_write(&hid_fifo, hid_scan_to_unicode(keyreport.keydata[0], keyreport.modifier));
                         }
                         break;
 

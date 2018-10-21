@@ -29,7 +29,7 @@
 #define VER_SYSTEM_NAME     "Minimal Operating Environment"
 #define VER_SYSTEM_MAJOR    0
 #define VER_SYSTEM_MINOR    3
-#define VER_SYSTEM_REVISION 0
+#define VER_SYSTEM_REVISION 1
 
 
 /*********************************************************************/
@@ -133,6 +133,18 @@ void moe_yield() {
     moe_next_thread();
 }
 
+int moe_wait_for_timer(moe_timer_t* timer) {
+    while (moe_check_timer(timer)) {
+        moe_yield();
+    }
+    return 0;
+}
+
+int moe_usleep(uint64_t us) {
+    moe_timer_t timer = moe_create_interval_timer(us);
+    return moe_wait_for_timer(&timer);
+}
+
 void link_thread(moe_fiber_t* parent, moe_fiber_t* child) {
     child->next = parent->next;
     parent->next = child;
@@ -224,6 +236,7 @@ int read_cmdline(char* buffer, size_t max_len) {
 }
 
 extern uintptr_t total_memory;
+extern moe_video_info_t* video;
 
 void moe_ctrl_alt_del() {
     gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
@@ -231,8 +244,18 @@ void moe_ctrl_alt_del() {
 
 void start_init(void* context)  {
 
+    mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
+    mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
+    mgs_fill_rect(250, 100, 300, 300, 0x77CCFF);
+
+    //  Show BGRT (Boot Graphics Resource Table) from ACPI
+    acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
+    if (bgrt) {
+        draw_logo_bitmap(video, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
+    }
+
     printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(total_memory >> 8));
-    // printf("Hello, world!\n");
+    printf("Hello, world!\n");
 
     hid_init();
 
@@ -241,14 +264,13 @@ void start_init(void* context)  {
         const size_t cmdline_size = 80;
         char* cmdline = mm_alloc_static(cmdline_size);
 
-        // EFI_TIME time;
-        // rt->GetTime(&time, NULL);
-        // printf("Time: %d-%02d-%02d %02d:%02d:%02d\n", time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second);
+        EFI_TIME time;
+        gRT->GetTime(&time, NULL);
+        printf("Current Time: %d-%02d-%02d %02d:%02d:%02d\n", time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second);
 
-        // printf("Checking Timer...");
-        // moe_timer_t timer = moe_create_interval_timer(1000000);
-        // moe_wait_for_timer(&timer);
-        // printf("Ok\n");
+        printf("Checking Timer...");
+        moe_usleep(1000000);
+        printf("Ok\n");
 
         for (;;) {
             printf("C>");
@@ -313,16 +335,6 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
     mm_init(&bootinfo->mmap);
     acpi_init(bootinfo->acpi);
     arch_init();
-
-    mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
-    mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
-    mgs_fill_rect(250, 100, 300, 300, 0x77CCFF);
-
-    //  Show BGRT (Boot Graphics Resource Table) via ACPI
-    acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
-    if (bgrt) {
-        draw_logo_bitmap(&bootinfo->video, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
-    }
 
     moe_create_thread(&start_init, 0, 0);
 

@@ -94,6 +94,7 @@ typedef double moe_time_interval_t;
 moe_timer_t moe_create_interval_timer(uint64_t);
 int moe_wait_for_timer(moe_timer_t*);
 int moe_check_timer(moe_timer_t*);
+int moe_usleep(uint64_t us);
 
 
 //  Threading Service
@@ -104,6 +105,15 @@ void moe_yield();
 
 
 //  HID Service
+#define HID_MOD_LCTRL       0x0001
+#define HID_MOD_LSHIFT      0x0002
+#define HID_MOD_LALT        0x0004
+#define HID_MOD_LGUI        0x0008
+#define HID_MOD_RCTRL       0x0010
+#define HID_MOD_RSHIFT      0x0020
+#define HID_MOD_RALT        0x0040
+#define HID_MOD_RGUI        0x0080
+
 typedef struct {
     union {
         uint8_t buttons;
