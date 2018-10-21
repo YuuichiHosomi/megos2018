@@ -201,7 +201,7 @@ int read_cmdline(char* buffer, size_t max_len) {
     int len = 0, limit = max_len - 1;
 
     while (cont_flag) {
-        char c = getchar();
+        uint32_t c = getchar();
         switch (c) {
             case '\x08': // bs
             case '\x7F': // del
@@ -220,11 +220,15 @@ int read_cmdline(char* buffer, size_t max_len) {
             
             default:
                 if (len < limit) {
-                    buffer[len++] = c;
-                    if (c < 0x20) { // ^X
-                        printf("^%c", c | 0x40);
-                    } else {
-                        putchar(c);
+                    if (c < 0x80) {
+                        buffer[len++] = c;
+                        if (c < 0x20) { // ^X
+                            printf("^%c", c | 0x40);
+                        } else {
+                            putchar(c);
+                        }
+                    } else { // non ascii
+                        printf("?+%04x", c);
                     }
                 }
                 break;

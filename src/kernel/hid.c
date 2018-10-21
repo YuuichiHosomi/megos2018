@@ -6,7 +6,7 @@
 moe_fifo_t hid_fifo;
 extern int ps2_init();
 int ps2_exists = 0;
-
+extern void moe_ctrl_alt_del();
 extern int ps2_parse_data(moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* mouse_report);
 
 int hid_getchar() {
@@ -18,20 +18,20 @@ int mouse_x, mouse_y;
 
 #define SCAN_DELETE 0x4C
 
-extern void moe_ctrl_alt_del();
 
 int scan_to_uni_table_1E[] = { // regular non alphabet
     '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 0x0D, 0x1B, 0x08, 0x09, ' ', '-',
-    '^', '@', '[', ']', 0x00, ';', ':', '`', ',', '.', '/',
+    '^', '@', '[', ']', INVALID_UNICHAR, ';', ':', '`', ',', '.', '/',
 };
 
-int scan_tp_uni_table_54[] = { // Numpad
+int scan_to_uni_table_4F[] = { // Arrows & Numpads
+    0x2191, 0x2190, 0x2193, 0x2192, INVALID_UNICHAR,
     '/', '*', '-', '+', 0x0D, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.',
 };
 
 //  JP 109
 uint32_t hid_scan_to_unicode(uint8_t scan, uint8_t modifier) {
-    uint32_t uni = 0;
+    uint32_t uni = INVALID_UNICHAR;
 
     if (scan >= 4 && scan <= 0x1D) { // Alphabet
         uni = scan - 4 + 'a';
@@ -40,8 +40,10 @@ uint32_t hid_scan_to_unicode(uint8_t scan, uint8_t modifier) {
         if (uni > 0x20 && uni < 0x40 && uni != 0x30 && (modifier & (HID_MOD_LSHIFT | HID_MOD_LSHIFT))) {
             uni ^= 0x10;
         }
-    } else if (scan >= 0x54 && scan <= 0x63) { // Numpad
-        uni = scan_tp_uni_table_54[scan - 0x54];
+    } else if (scan == 0x4C) { // Delete
+        uni = 0x7F;
+    } else if (scan >= 0x4F && scan <= 0x64) { // Arrows & Numpads
+        uni = scan_to_uni_table_4F[scan - 0x4F];
     } else if (scan == 0x89) { // '\|'
         uni = '\\';
     }
@@ -53,9 +55,11 @@ uint32_t hid_scan_to_unicode(uint8_t scan, uint8_t modifier) {
         }
     }
     if (scan == 0x87) { // '_'
-        uni = '_';
-    } else if (scan == 0x4C) { // Delete
-        uni = 0x7F;
+        if (modifier & (HID_MOD_LSHIFT | HID_MOD_LSHIFT)) {
+            uni = '_';
+        } else {
+            uni = '\\';
+        }
     }
 
     return uni;
@@ -80,7 +84,10 @@ void hid_thread(void *context) {
                                 (keyreport.modifier & (0x11)) != 0 && (keyreport.modifier & (0x44)) != 0) {
                                 moe_ctrl_alt_del();
                             }
-                            moe_fifo_write(&hid_fifo, hid_scan_to_unicode(keyreport.keydata[0], keyreport.modifier));
+                            uint32_t uni = hid_scan_to_unicode(keyreport.keydata[0], keyreport.modifier);
+                            if (uni != INVALID_UNICHAR) {
+                                moe_fifo_write(&hid_fifo, uni);
+                            }
                         }
                         break;
 

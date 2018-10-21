@@ -105,6 +105,7 @@ void moe_yield();
 
 
 //  HID Service
+#define INVALID_UNICHAR     0xFFFE
 #define HID_MOD_LCTRL       0x0001
 #define HID_MOD_LSHIFT      0x0002
 #define HID_MOD_LALT        0x0004
