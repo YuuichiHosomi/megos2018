@@ -51,6 +51,7 @@ void idt_set_kernel_handler(uint8_t num, uintptr_t offset, uint8_t ist) {
 }
 
 void default_int_handler(x64_context_t* regs) {
+    __asm__ volatile("cli");
     printf("#### EXCEPTION %02llx-%04llx-%016llx\n", regs->intnum, regs->err, regs->cr2);
     printf("CS:RIP %04llx:%016llx SS:RSP %04llx:%016llx\n", regs->cs, regs->rip, regs->ss, regs->rsp);
     printf(

@@ -119,7 +119,6 @@ moe_fiber_t root_thread;
 
 void moe_switch_context(moe_fiber_t* next) {
     if (!next) next = &root_thread;
-    __asm__ volatile("sti");
     if (!setjmp(current_thread->jmpbuf)) {
         current_thread = next;
         longjmp(next->jmpbuf, 0);
@@ -146,17 +145,17 @@ int moe_create_thread(moe_start_thread start, void* context, uintptr_t reserved1
     uintptr_t* stack = mm_alloc_static(stack_size);
     memset(stack, 0, stack_size);
     uintptr_t* sp = stack + stack_count;
-    *--sp = 0x0000dead0000beef;
+    *--sp = 0x000070dead00beef;
     *--sp = (uintptr_t)context;
     *--sp = (uintptr_t)start;
     moe_fiber_t* new_thread = mm_alloc_static(sizeof(moe_fiber_t));
     memset(new_thread, 0, sizeof(moe_fiber_t));
     new_thread->thid = atomic_exchange_add(&next_thid, 1);
+    new_jmpbuf(new_thread->jmpbuf, (uintptr_t)sp);
 
     moe_fiber_t* current = current_thread;
     link_thread(current, new_thread);
 
-    new_jmpbuf(new_thread->jmpbuf, (uintptr_t)sp);
     // moe_switch_context(new_thread);
 
     return new_thread->thid;
@@ -233,10 +232,10 @@ void moe_ctrl_alt_del() {
 
 void start_init(void* context)  {
 
-    hid_init();
-
     printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(total_memory >> 8));
     // printf("Hello, world!\n");
+
+    hid_init();
 
     //  Pseudo shell
     {
@@ -247,10 +246,10 @@ void start_init(void* context)  {
         // rt->GetTime(&time, NULL);
         // printf("Time: %d-%02d-%02d %02d:%02d:%02d\n", time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second);
 
-        printf("Checking Timer...");
-        moe_timer_t timer = moe_create_interval_timer(1000000);
-        moe_wait_for_timer(&timer);
-        printf("Ok\n");
+        // printf("Checking Timer...");
+        // moe_timer_t timer = moe_create_interval_timer(1000000);
+        // moe_wait_for_timer(&timer);
+        // printf("Ok\n");
 
         for (;;) {
             printf("C>");
@@ -309,6 +308,7 @@ void start_init(void* context)  {
 
 void start_kernel(moe_bootinfo_t* bootinfo) {
 
+    current_thread = &root_thread;
     gRT = bootinfo->efiRT;
     mgs_init(&bootinfo->video);
     mm_init(&bootinfo->mmap);
@@ -325,8 +325,6 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
         draw_logo_bitmap(&bootinfo->video, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
     }
 
-    //  Init thread
-    current_thread = &root_thread;
     moe_create_thread(&start_init, 0, 0);
 
     //  Do Idle
