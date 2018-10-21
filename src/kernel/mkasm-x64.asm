@@ -9,7 +9,7 @@
 [section .text]
 
 
-; void new_jmpbuf(jmp_buf env, uintptr_t new_sp);
+; void new_jmpbuf(jmp_buf env, uintptr_t* new_sp);
     global new_jmpbuf
 new_jmpbuf:
     mov [rcx     ], rdx

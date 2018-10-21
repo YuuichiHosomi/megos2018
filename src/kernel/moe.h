@@ -96,7 +96,7 @@ int moe_wait_for_timer(moe_timer_t*);
 int moe_check_timer(moe_timer_t*);
 
 
-//  Thread Service
+//  Threading Service
 typedef void (*moe_start_thread)(void* context);
 int moe_create_thread(moe_start_thread start, void* context, uintptr_t reserved1);
 void moe_next_thread();
@@ -105,13 +105,21 @@ void moe_yield();
 
 //  HID Service
 typedef struct {
-    uint8_t buttons;
-    int8_t x, y;
+    union {
+        uint8_t buttons;
+        struct {
+            uint8_t l_button:1;
+            uint8_t r_button:1;
+            uint8_t m_button:1;
+        };
+        int32_t PADDING_1;
+    };
+    int16_t x, y;
 } moe_hid_mouse_report_t;
 
 typedef struct {
     uint8_t modifier;
-    uint8_t RESERVED;
+    uint8_t RESERVED_1;
     uint8_t keydata[6];
 } moe_hid_keyboard_report_t;
 

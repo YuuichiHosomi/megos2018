@@ -13,7 +13,7 @@
 ### To Run
 
 * qemu (qemu-system-x86_64)
-* [ovmf](https://github.com/tianocore/tianocore.github.io/wiki/OVMF) to /var/bios64.bin
+* Install [ovmf](https://github.com/tianocore/tianocore.github.io/wiki/OVMF) to /var/bios64.bin
 
 ## License
 

@@ -28,8 +28,8 @@
 
 #define VER_SYSTEM_NAME     "Minimal Operating Environment"
 #define VER_SYSTEM_MAJOR    0
-#define VER_SYSTEM_MINOR    2
-#define VER_SYSTEM_REVISION 1
+#define VER_SYSTEM_MINOR    3
+#define VER_SYSTEM_REVISION 0
 
 
 /*********************************************************************/
@@ -99,7 +99,7 @@ void draw_logo_bitmap(moe_video_info_t* video, const uint8_t* bmp, int offset_x,
 /*********************************************************************/
 
 #include "setjmp.h"
-extern void new_jmpbuf(jmp_buf env, uintptr_t new_sp);
+extern void new_jmpbuf(jmp_buf env, uintptr_t* new_sp);
 
 typedef uintptr_t pid_t;
 typedef uintptr_t thid_t;
@@ -140,21 +140,20 @@ void link_thread(moe_fiber_t* parent, moe_fiber_t* child) {
 
 int moe_create_thread(moe_start_thread start, void* context, uintptr_t reserved1) {
 
+    moe_fiber_t* new_thread = mm_alloc_static(sizeof(moe_fiber_t));
+    memset(new_thread, 0, sizeof(moe_fiber_t));
+    new_thread->thid = atomic_exchange_add(&next_thid, 1);
     const uintptr_t stack_count = 0x1000;
     const uintptr_t stack_size = stack_count * sizeof(uintptr_t);
     uintptr_t* stack = mm_alloc_static(stack_size);
     memset(stack, 0, stack_size);
     uintptr_t* sp = stack + stack_count;
-    *--sp = 0x000070dead00beef;
+    *--sp = 0x00007fffdeadbeef;
     *--sp = (uintptr_t)context;
     *--sp = (uintptr_t)start;
-    moe_fiber_t* new_thread = mm_alloc_static(sizeof(moe_fiber_t));
-    memset(new_thread, 0, sizeof(moe_fiber_t));
-    new_thread->thid = atomic_exchange_add(&next_thid, 1);
-    new_jmpbuf(new_thread->jmpbuf, (uintptr_t)sp);
+    new_jmpbuf(new_thread->jmpbuf, sp);
 
-    moe_fiber_t* current = current_thread;
-    link_thread(current, new_thread);
+    link_thread(current_thread, new_thread);
 
     // moe_switch_context(new_thread);
 

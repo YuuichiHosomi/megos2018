@@ -447,16 +447,6 @@ int ps2_irq_handler(int irq, void* context) {
     return 0;
 }
 
-int8_t ps2_to_hid_xy(int32_t data) {
-    if (data < -127) {
-        return -127;
-    } else if (data > 127) {
-        return 127;
-    } else {
-        return data;
-    }
-}
-
 static void ps2_set_shift(uint32_t state, uint32_t is_break) {
     if (is_break) {
         ps2k_state &= ~state;
@@ -477,10 +467,10 @@ int ps2_get_data(moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* m
                 if ((m &0xC8) == 0x08) {
                     ps2m_packet[ps2m_phase++] = m;
                 }
-                return 8;
+                return 3;
             case ps2m_phase_x:
                 ps2m_packet[ps2m_phase++] = m;
-                return 8;
+                return 3;
             case ps2m_phase_y:
                 ps2m_packet[ps2m_phase] = m;
                 ps2m_phase = ps2m_phase_head;
@@ -496,8 +486,8 @@ int ps2_get_data(moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* m
                     y |= 0xFFFFFF00;
                 }
                 y = 0 - y;
-                mouse_report->x = ps2_to_hid_xy(x);
-                mouse_report->y = ps2_to_hid_xy(y);
+                mouse_report->x = x;
+                mouse_report->y = y;
 
                 return 2;
         }
@@ -506,7 +496,7 @@ int ps2_get_data(moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* m
     uint8_t data = moe_fifo_read(&ps2k_buffer, 0);
     if (data == PS2_SCAN_EXTEND) {
         ps2k_state |= PS2_STATE_EXTEND;
-        return 8;
+        return 3;
     } else if (data) {
         memset(keyreport->keydata, 0, 6);
         uint32_t is_break = (data & PS2_SCAN_BREAK) ? SCANCODE_BREAK : 0;

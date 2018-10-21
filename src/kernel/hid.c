@@ -34,23 +34,27 @@ void hid_thread(void *context) {
             if (ps2_exists) {
                 int state = ps2_get_data(&keyreport, &mouse_report);
 
-                if (state & 1) {
-                    if (keyreport.keydata[0]) {
-                        if ((keyreport.keydata[0] & 0x7F) == SCAN_DELETE) {
-                            if ((keyreport.modifier & (0x11)) != 0 && (keyreport.modifier & (0x44)) != 0) {
+                switch(state) {
+                    case 1:
+                        if (keyreport.keydata[0]) {
+                            if ((keyreport.keydata[0] & 0x7F) == SCAN_DELETE &&
+                                (keyreport.modifier & (0x11)) != 0 && (keyreport.modifier & (0x44)) != 0) {
                                 moe_ctrl_alt_del();
                             }
+                            moe_fifo_write(&hid_fifo, ps2_scan_to_unicode(keyreport.keydata[0], keyreport.modifier));
                         }
-                        moe_fifo_write(&hid_fifo, ps2_scan_to_unicode(keyreport.keydata[0], keyreport.modifier));
-                    }
-                } else if (state & 2) {
-                    mouse_x += mouse_report.x;
-                    mouse_y += mouse_report.y;
-                    const int cursor_r = 10;
-                    mgs_fill_rect(mouse_x - cursor_r / 2, mouse_y - cursor_r / 2, cursor_r, cursor_r, 0xFFFFFF);
-                    mgs_fill_rect(mouse_x - cursor_r / 2 + 2, mouse_y - cursor_r / 2 + 2, cursor_r - 4, cursor_r - 4, 0x007700);
-                } else if (state & 8) {
-                    cont = 1;
+                        break;
+
+                    case 2:
+                        mouse_x += mouse_report.x;
+                        mouse_y += mouse_report.y;
+                        const int cursor_r = 10;
+                        mgs_fill_rect(mouse_x - cursor_r / 2, mouse_y - cursor_r / 2, cursor_r, cursor_r, 0xFFFFFF);
+                        mgs_fill_rect(mouse_x - cursor_r / 2 + 2, mouse_y - cursor_r / 2 + 2, cursor_r - 4, cursor_r - 4, 0x007700);
+                        break;
+
+                    case 3:
+                        cont = 1;
                 }
             }
         } while (cont);
