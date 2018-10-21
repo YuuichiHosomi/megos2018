@@ -211,7 +211,7 @@ void _irq_main(uint8_t irq, void* context) {
         regs.intnum = 0x0D;
         default_int_handler(&regs);
     }
-    __asm__ volatile ("sti");
+    __asm__ volatile ("sti"); // TODO:
     moe_next_thread();
 }
 
@@ -301,26 +301,26 @@ void apic_init() {
 MOE_PHYSICAL_ADDRESS hpet_base = 0;
 uint32_t hpet_main_cnt_period = 0;
 volatile uint64_t hpet_count = 0;
-static const double timer_div = 0.01;
+static const uint64_t timer_div = 10000;
 
 int hpet_irq_handler(int irq, void* context) {
     hpet_count++;
     return 0;
 }
 
-moe_timer_t moe_create_interval_timer(moe_time_interval_t ti) {
-    return (ti / timer_div) + hpet_count + 1;
+moe_timer_t moe_create_interval_timer(uint64_t us) {
+    return (us / timer_div) + hpet_count + 1;
 }
 
 int moe_wait_for_timer(moe_timer_t* timer) {
     while (moe_check_timer(timer)) {
-        moe_next_thread();
+        moe_yield();
     }
     return 0;
 }
 
 int moe_check_timer(moe_timer_t* timer) {
-    return ((*timer - hpet_count) > 0);
+    return ((intptr_t)(*timer - hpet_count) > 0);
 }
 
 
@@ -375,7 +375,7 @@ void pci_write_config_register(uint32_t base, uint8_t reg, uint32_t val) {
 
 
 /*********************************************************************/
-//  PS/2
+//  PS/2 Keyboard and Mouse
 
 #define PS2_DATA_PORT       0x0060
 #define PS2_STATUS_PORT     0x0064
@@ -399,19 +399,30 @@ void pci_write_config_register(uint32_t base, uint8_t reg, uint32_t val) {
 #define PS2_SCAN_RSHIFT     0x36
 #define PS2_SCAN_BREAK      0x80
 #define PS2_SCAN_EXTEND     0xE0
-#define PS2_SCAN_EXT16      0xE000
+#define PS2_SCAN_EXT16      0x80
 #define PS2_SCAN_RCTRL      (PS2_SCAN_EXT16|PS2_SCAN_LCTRL)
 #define PS2_SCAN_RALT       (PS2_SCAN_EXT16|PS2_SCAN_LALT)
 #define PS2_SCAN_LGUI       (PS2_SCAN_EXT16|0x5B)
 #define PS2_SCAN_RGUI       (PS2_SCAN_EXT16|0x5C)
 
-#define PS2_TIMEOUT         0.01
+#define PS2_TIMEOUT         1000
 
 static moe_fifo_t ps2k_buffer;
 static moe_fifo_t ps2m_buffer;
+
 static volatile uintptr_t ps2k_state = 0;
 
-int ps2_wait_for_write(moe_time_interval_t timeout) {
+typedef enum {
+    ps2m_phase_ack = 0,
+    ps2m_phase_head,
+    ps2m_phase_x,
+    ps2m_phase_y,
+} ps2m_packet_phase;
+
+ps2m_packet_phase ps2m_phase;
+uint8_t ps2m_packet[4];
+
+int ps2_wait_for_write(uint64_t timeout) {
     moe_timer_t timer = moe_create_interval_timer(timeout);
     while (moe_check_timer(&timer)) {
         if ((io_in8(PS2_STATUS_PORT) & 0x02) == 0x00) {
@@ -426,13 +437,23 @@ int ps2_irq_handler(int irq, void* context) {
     uint8_t ps2_status;
     while((ps2_status = io_in8(PS2_STATUS_PORT)) & 0x01) {
         if (ps2_status & 0x20) {
-            // TODO: mice
-            io_in8(PS2_DATA_PORT);
+            uint8_t m = io_in8(PS2_DATA_PORT);
+            moe_fifo_write(&ps2m_buffer, m);
         } else {
             moe_fifo_write(&ps2k_buffer, io_in8(PS2_DATA_PORT));
         }
     }
     return 0;
+}
+
+int8_t ps2_to_hid_xy(int32_t data) {
+    if (data < -127) {
+        return -127;
+    } else if (data > 127) {
+        return 127;
+    } else {
+        return data;
+    }
 }
 
 static void ps2_set_shift(uint32_t state, uint32_t is_break) {
@@ -443,13 +464,52 @@ static void ps2_set_shift(uint32_t state, uint32_t is_break) {
     }
 }
 
-uint32_t ps2_parse_scancode(uint32_t scancode) {
-    if (scancode == PS2_SCAN_EXTEND) {
+int ps2_get_data(moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* mouse_report) {
+
+    int m = moe_fifo_read(&ps2m_buffer, -1);
+    if (m >= 0) {
+        switch(ps2m_phase) {
+            case ps2m_phase_ack:
+                if (m == 0xFA) ps2m_phase++;
+                return 0;
+            case ps2m_phase_head:
+                if ((m &0xC8) == 0x08) {
+                    ps2m_packet[ps2m_phase++] = m;
+                }
+                return 8;
+            case ps2m_phase_x:
+                ps2m_packet[ps2m_phase++] = m;
+                return 8;
+            case ps2m_phase_y:
+                ps2m_packet[ps2m_phase] = m;
+                ps2m_phase = ps2m_phase_head;
+
+                mouse_report->buttons = ps2m_packet[1] & 0x07;
+                int32_t x, y;
+                x = ps2m_packet[2];
+                y = ps2m_packet[3];
+                if (ps2m_packet[1] & 0x10) {
+                    x |= 0xFFFFFF00;
+                }
+                if (ps2m_packet[1] & 0x20) {
+                    y |= 0xFFFFFF00;
+                }
+                y = 0 - y;
+                mouse_report->x = ps2_to_hid_xy(x);
+                mouse_report->y = ps2_to_hid_xy(y);
+
+                return 2;
+        }
+    }
+
+    uint8_t data = moe_fifo_read(&ps2k_buffer, 0);
+    if (data == PS2_SCAN_EXTEND) {
         ps2k_state |= PS2_STATE_EXTEND;
-        return 0;
-    } else {
-        uint32_t is_break = (scancode & PS2_SCAN_BREAK) ? SCANCODE_BREAK : 0;
-        uint32_t scan = scancode & 0x7F;
+        return 8;
+    } else if (data) {
+        memset(keyreport->keydata, 0, 6);
+        uint32_t is_break = (data & PS2_SCAN_BREAK) ? SCANCODE_BREAK : 0;
+        uint32_t scan = data & 0x7F;
         if (ps2k_state & PS2_STATE_EXTEND) {
             ps2k_state &= ~PS2_STATE_EXTEND;
             scan |= PS2_SCAN_EXT16;
@@ -480,19 +540,15 @@ uint32_t ps2_parse_scancode(uint32_t scancode) {
                 ps2_set_shift(HID_MOD_RGUI, is_break);
                 break;
             default:
-                return is_break | (ps2k_state << 16) | scan;
+                if (!is_break) {
+                    keyreport->keydata[0] = scan;
+                }
         }
-        return 0;
+        keyreport->modifier = ps2k_state & 0xFF;
+        return 1;
     }
-}
 
-int32_t ps2_get_data() {
-    uint8_t data = moe_fifo_read(&ps2k_buffer, 0);
-    if (data) {
-        return ps2_parse_scancode(data);
-    } else {
-        return 0;
-    }
+    return 0;
 }
 
 //  TODO: jp109 only
@@ -505,22 +561,19 @@ static uint8_t ps2_scan_table[] = {
     '7', '8', '9', '-', '4', '5', '6', '+', '1', '2', '3', '0', '.',
 };
 
-uint32_t ps2_scan_to_unicode(uint32_t scancode) {
-    if (scancode & SCANCODE_BREAK) return 0;
-    uint32_t scan_lo = (scancode & 0xFFFF);
-    uint32_t shift_state = scancode >> 16;
+uint32_t ps2_scan_to_unicode(uint32_t scan, uint32_t modifier) {
     uint32_t ascii = 0;
-    if (scan_lo < sizeof(ps2_scan_table)) {
-        ascii = ps2_scan_table[scan_lo];
+    if (scan < sizeof(ps2_scan_table)) {
+        ascii = ps2_scan_table[scan];
     }
     if (ascii >= 0x21 && ascii <= 0x3F) {
-        if (shift_state & (HID_MOD_LSHIFT | HID_MOD_LSHIFT)) {
+        if (modifier & (HID_MOD_LSHIFT | HID_MOD_LSHIFT)) {
             ascii ^= 0x10;
         }
     } else if (ascii >= 0x40 && ascii <= 0x7E) {
-        if (shift_state & (HID_MOD_LCTRL | HID_MOD_RCTRL)) {
+        if (modifier & (HID_MOD_LCTRL | HID_MOD_RCTRL)) {
             ascii &= 0x1F;
-        } else if (shift_state & (HID_MOD_LSHIFT | HID_MOD_LSHIFT)) {
+        } else if (modifier & (HID_MOD_LSHIFT | HID_MOD_LSHIFT)) {
             ascii ^= 0x20;
         }
     }
@@ -528,7 +581,7 @@ uint32_t ps2_scan_to_unicode(uint32_t scancode) {
 }
 
 int ps2_init() {
-    if (!ps2_wait_for_write(0.1)){
+    if (!ps2_wait_for_write(100000)){
         io_out8(PS2_COMMAND_PORT, 0xAD);
         ps2_wait_for_write(PS2_TIMEOUT);
         io_out8(PS2_COMMAND_PORT, 0xA7);
@@ -550,6 +603,8 @@ int ps2_init() {
         uintptr_t size_of_buffer = 128;
         intptr_t* buffer = mm_alloc_static(size_of_buffer * sizeof(intptr_t));
         moe_fifo_init(&ps2k_buffer, buffer, size_of_buffer);
+        buffer = mm_alloc_static(size_of_buffer * sizeof(intptr_t));
+        moe_fifo_init(&ps2m_buffer, buffer, size_of_buffer);
 
         apic_enable_irq(1, ps2_irq_handler);
         apic_enable_irq(12, ps2_irq_handler);

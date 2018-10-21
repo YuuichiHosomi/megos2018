@@ -9,15 +9,21 @@
 [section .text]
 
 
-; void new_jmpbuf(jmp_buf env, uintptr_t new_sp, uintptr_t new_ip);
+; void new_jmpbuf(jmp_buf env, uintptr_t new_sp);
     global new_jmpbuf
 new_jmpbuf:
     mov [rcx     ], rdx
-    mov [rcx+0x48], r8
+    lea rax, [rel _new_thread]
+    mov [rcx+0x48], rax
     ret
 
+_new_thread:
+    pop rax
+    pop rcx
+    jmp rax
 
-; intptr_t _setjmp(jmp_buf env);
+
+; int _setjmp(jmp_buf env);
     global _setjmp
 _setjmp:
     push rbp
@@ -43,10 +49,10 @@ _setjmp:
     ret
 
 
-; void _longjmp(jmp_buf env, intptr_t retval);
+; void _longjmp(jmp_buf env, int retval);
     global _longjmp
 _longjmp:
-    mov rax, rdx
+    mov eax, edx
     mov rsp, [rcx     ]
     mov rbx, [rcx+0x08]
     mov rsi, [rcx+0x10]
@@ -58,9 +64,9 @@ _longjmp:
     mov rbp, [rcx+0x40]
     mov rdx, [rcx+0x48]
 
-    or rax, rax
+    or eax, eax
     jnz .nozero
-    inc rax
+    inc eax
 .nozero:
     jmp rdx
 

@@ -99,7 +99,7 @@ void draw_logo_bitmap(moe_video_info_t* video, const uint8_t* bmp, int offset_x,
 /*********************************************************************/
 
 #include "setjmp.h"
-extern void new_jmpbuf(jmp_buf env, uintptr_t new_sp, uintptr_t new_ip);
+extern void new_jmpbuf(jmp_buf env, uintptr_t new_sp);
 
 typedef uintptr_t pid_t;
 typedef uintptr_t thid_t;
@@ -119,6 +119,7 @@ moe_fiber_t root_thread;
 
 void moe_switch_context(moe_fiber_t* next) {
     if (!next) next = &root_thread;
+    __asm__ volatile("sti");
     if (!setjmp(current_thread->jmpbuf)) {
         current_thread = next;
         longjmp(next->jmpbuf, 0);
@@ -127,6 +128,10 @@ void moe_switch_context(moe_fiber_t* next) {
 
 void moe_next_thread() {
     moe_switch_context(current_thread->next);
+}
+
+void moe_yield() {
+    moe_next_thread();
 }
 
 void link_thread(moe_fiber_t* parent, moe_fiber_t* child) {
@@ -151,8 +156,8 @@ int moe_create_thread(moe_start_thread start, void* context, uintptr_t reserved1
     moe_fiber_t* current = current_thread;
     link_thread(current, new_thread);
 
-    new_jmpbuf(new_thread->jmpbuf, (uintptr_t)sp, (uintptr_t)start);
-    moe_switch_context(new_thread);
+    new_jmpbuf(new_thread->jmpbuf, (uintptr_t)sp);
+    // moe_switch_context(new_thread);
 
     return new_thread->thid;
 }
@@ -177,7 +182,7 @@ int getchar() {
         if (c >= 0) {
             return c;
         }
-        moe_next_thread();
+        moe_yield();
     }
 }
 
@@ -220,17 +225,17 @@ int read_cmdline(char* buffer, size_t max_len) {
     return len;
 }
 
+extern uintptr_t total_memory;
+
+void moe_ctrl_alt_del() {
+    gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
+}
+
 void start_init(void* context)  {
 
     hid_init();
 
-    int memsize = 0;
-
-    mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
-    mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
-    mgs_fill_rect(250, 100, 300, 300, 0x77CCFF);
-
-    printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(memsize >> 8));
+    printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(total_memory >> 8));
     // printf("Hello, world!\n");
 
     //  Pseudo shell
@@ -243,7 +248,7 @@ void start_init(void* context)  {
         // printf("Time: %d-%02d-%02d %02d:%02d:%02d\n", time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second);
 
         printf("Checking Timer...");
-        moe_timer_t timer = moe_create_interval_timer(1.0);
+        moe_timer_t timer = moe_create_interval_timer(1000000);
         moe_wait_for_timer(&timer);
         printf("Ok\n");
 
@@ -309,6 +314,12 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
     mm_init(&bootinfo->mmap);
     acpi_init(bootinfo->acpi);
     arch_init();
+
+    mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
+    mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
+    mgs_fill_rect(250, 100, 300, 300, 0x77CCFF);
+
+    //  Show BGRT (Boot Graphics Resource Table) via ACPI
     acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
     if (bgrt) {
         draw_logo_bitmap(&bootinfo->video, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
@@ -320,4 +331,5 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
 
     //  Do Idle
     for (;;) io_hlt();
+
 }

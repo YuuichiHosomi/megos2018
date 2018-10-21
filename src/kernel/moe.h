@@ -91,7 +91,7 @@ int moe_fifo_write(moe_fifo_t* self, intptr_t data);
 //  Timer Service
 typedef uint64_t moe_timer_t;
 typedef double moe_time_interval_t;
-moe_timer_t moe_create_interval_timer(moe_time_interval_t);
+moe_timer_t moe_create_interval_timer(uint64_t);
 int moe_wait_for_timer(moe_timer_t*);
 int moe_check_timer(moe_timer_t*);
 
@@ -100,8 +100,20 @@ int moe_check_timer(moe_timer_t*);
 typedef void (*moe_start_thread)(void* context);
 int moe_create_thread(moe_start_thread start, void* context, uintptr_t reserved1);
 void moe_next_thread();
+void moe_yield();
 
 
 //  HID Service
+typedef struct {
+    uint8_t buttons;
+    int8_t x, y;
+} moe_hid_mouse_report_t;
+
+typedef struct {
+    uint8_t modifier;
+    uint8_t RESERVED;
+    uint8_t keydata[6];
+} moe_hid_keyboard_report_t;
+
 void hid_init();
 int hid_getchar();
