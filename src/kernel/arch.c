@@ -10,6 +10,7 @@ extern void idt_load(volatile void*, size_t);
 extern void* _int00;
 extern void* _int03;
 extern void* _int06;
+extern void* _int07;
 extern void* _int0D;
 extern void* _int0E;
 extern void* _irq00;
@@ -74,6 +75,7 @@ void idt_init() {
     SET_SYSTEM_INT_HANDLER(00); // #DE
     SET_SYSTEM_INT_HANDLER(03); // #DB
     SET_SYSTEM_INT_HANDLER(06); // #UD
+    SET_SYSTEM_INT_HANDLER(07); // #NM
     SET_SYSTEM_INT_HANDLER(0D); // #GP
     SET_SYSTEM_INT_HANDLER(0E); // #PF
 

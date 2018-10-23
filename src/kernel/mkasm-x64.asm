@@ -9,6 +9,53 @@
 [section .text]
 
 
+; void io_set_lazy_fpu_switch();
+    global io_set_lazy_fpu_switch
+io_set_lazy_fpu_switch:
+    mov rax, cr0
+    bts eax, 3 ; TS
+    mov cr0, rax
+    ret
+
+
+; void io_finit(void);
+    global io_finit
+io_finit:
+    fninit
+;    ret
+    pxor xmm0, xmm0
+    movq xmm1, xmm0
+    movq xmm2, xmm0
+    movq xmm3, xmm0
+    movq xmm4, xmm0
+    movq xmm5, xmm0
+    movq xmm6, xmm0
+    movq xmm7, xmm0
+    movq xmm8, xmm0
+    movq xmm9, xmm0
+    movq xmm10, xmm0
+    movq xmm11, xmm0
+    movq xmm12, xmm0
+    movq xmm13, xmm0
+    movq xmm14, xmm0
+    movq xmm15, xmm0
+    ret
+
+
+; void io_fsave(void*);
+    global io_fsave
+io_fsave:
+    fxsave64 [rcx]
+    ret
+
+
+; void io_fload(void*);
+    global io_fload
+io_fload:
+    fxrstor64 [rcx]
+    ret
+
+
 ; void new_jmpbuf(jmp_buf env, uintptr_t* new_sp);
     global new_jmpbuf
 new_jmpbuf:
@@ -254,6 +301,31 @@ _intXX:
     pop rax
     add rsp, BYTE 16 ; err/intnum
 _iretq:
+    iretq
+
+
+    global _int07
+    extern moe_switch_fpu_context
+_int07: ; #NM
+    push rax
+    push rcx
+    push rdx
+    push r8
+    push r9
+    push r10
+    push r11
+    clts
+
+    mov ecx, 512
+    call moe_switch_fpu_context
+
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdx
+    pop rcx
+    pop rax
     iretq
 
 

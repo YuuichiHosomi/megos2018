@@ -110,18 +110,58 @@ typedef struct _moe_fiber_t {
     moe_fiber_t* next;
     thid_t  thid;
     pid_t   pid;
+    union {
+        uintptr_t flags;
+        struct {
+            uint8_t hoge;
+        };
+    };
+    void* fpu_context;
     jmp_buf jmpbuf;
 } moe_fiber_t;
 
 volatile thid_t next_thid = 1;
 moe_fiber_t* current_thread;
+moe_fiber_t* fpu_owner = 0;
 moe_fiber_t root_thread;
 
+int moe_get_current_thread() {
+    return current_thread->thid;
+}
+
+void io_set_lazy_fpu_switch();
+void io_finit();
+void io_fsave(void*);
+void io_fload(void*);
+
+//  Main Context Swicth
 void moe_switch_context(moe_fiber_t* next) {
     if (!next) next = &root_thread;
     if (!setjmp(current_thread->jmpbuf)) {
         current_thread = next;
+        if (fpu_owner != current_thread) {
+            io_set_lazy_fpu_switch();
+        }
         longjmp(next->jmpbuf, 0);
+    }
+}
+
+//  Lazy FPU Context Switch
+void moe_switch_fpu_context(uintptr_t delta) {
+    if (fpu_owner == current_thread) {
+        ;
+    } else if (!fpu_owner){
+        current_thread->fpu_context = mm_alloc_static(delta);
+        fpu_owner = current_thread;
+    } else {
+        io_fsave(fpu_owner->fpu_context);
+        fpu_owner = current_thread;
+        if (current_thread->fpu_context) {
+            io_fload(current_thread->fpu_context);
+        } else {
+            io_finit();
+            current_thread->fpu_context = mm_alloc_static(delta);
+        }
     }
 }
 
@@ -246,6 +286,18 @@ void moe_ctrl_alt_del() {
     gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
 }
 
+void fpu_thread(void* context) {
+    double count = 0.0;
+    double pi = 3.14;
+    int pid = moe_get_current_thread();
+    for (;;) {
+        count += pi * pid;
+        int b = (int)count;
+        mgs_fill_rect(pid * 10, 2, 8, 8, b);
+        moe_yield();
+    }
+}
+
 void start_init(void* context)  {
 
     mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
@@ -283,6 +335,11 @@ void start_init(void* context)  {
             switch (cmdline[0]) {
                 case 0:
                 break;
+
+                case 'f':
+                    moe_create_thread(&fpu_thread, 0, 0);
+                    printf("FPU Thread started\n");
+                    break;
 
                 case 'r':
                     gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
