@@ -136,7 +136,6 @@ void io_fload(void*);
 
 //  Main Context Swicth
 void moe_switch_context(moe_fiber_t* next) {
-    if (!next) next = &root_thread;
     if (!setjmp(current_thread->jmpbuf)) {
         current_thread = next;
         if (fpu_owner != current_thread) {
@@ -150,11 +149,10 @@ void moe_switch_context(moe_fiber_t* next) {
 void moe_switch_fpu_context(uintptr_t delta) {
     if (fpu_owner == current_thread) {
         ;
-    } else if (!fpu_owner){
-        current_thread->fpu_context = mm_alloc_static(delta);
-        fpu_owner = current_thread;
     } else {
-        io_fsave(fpu_owner->fpu_context);
+        if (fpu_owner) {
+            io_fsave(fpu_owner->fpu_context);
+        }
         fpu_owner = current_thread;
         if (current_thread->fpu_context) {
             io_fload(current_thread->fpu_context);
@@ -166,7 +164,9 @@ void moe_switch_fpu_context(uintptr_t delta) {
 }
 
 void moe_next_thread() {
-    moe_switch_context(current_thread->next);
+    moe_fiber_t* next = current_thread->next;
+    if (!next) next = &root_thread;
+    moe_switch_context(next);
 }
 
 void moe_yield() {
@@ -311,22 +311,26 @@ void start_init(void* context)  {
     }
 
     printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(total_memory >> 8));
-    printf("Hello, world!\n");
+    // printf("Hello, world!\n");
 
     hid_init();
+
+    for (int i = 0; i < 5; i++){
+        moe_create_thread(&fpu_thread, 0, 0);
+    }
 
     //  Pseudo shell
     {
         const size_t cmdline_size = 80;
         char* cmdline = mm_alloc_static(cmdline_size);
 
-        EFI_TIME time;
-        gRT->GetTime(&time, NULL);
-        printf("Current Time: %d-%02d-%02d %02d:%02d:%02d\n", time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second);
+        // EFI_TIME time;
+        // gRT->GetTime(&time, NULL);
+        // printf("Current Time: %d-%02d-%02d %02d:%02d:%02d\n", time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second);
 
-        printf("Checking Timer...");
-        moe_usleep(1000000);
-        printf("Ok\n");
+        // printf("Checking Timer...");
+        // moe_usleep(1000000);
+        // printf("Ok\n");
 
         for (;;) {
             printf("C>");
