@@ -121,6 +121,20 @@ void mgs_draw_font(int x, int y, uint32_t c, uint32_t color) {
 }
 
 void putchar32(uint32_t c) {
+    if (cursor_y >= rows) {
+        if (rotate) {
+            cursor_y = 0;
+        } else {
+            cursor_y = rows - 1;
+            uintptr_t lh = line_height * video->pixel_per_scan_line;
+            int left = col_to_x(0), top = row_to_y(0);
+            uint32_t* p = video->vram;
+            uint32_t* p0 = p + left + top * video->pixel_per_scan_line;
+            uintptr_t th = (rows - 1) * lh;
+            memcpy(p0, p0 + lh, th * sizeof(uint32_t));
+            memset32(p0 + th, bgcolor, lh);
+        }
+    }
     switch (c) {
         default:
             mgs_fill_block(cursor_x, cursor_y, 1, 1, bgcolor);
