@@ -29,7 +29,7 @@
 #define VER_SYSTEM_NAME     "Minimal Operating Environment"
 #define VER_SYSTEM_MAJOR    0
 #define VER_SYSTEM_MINOR    3
-#define VER_SYSTEM_REVISION 1
+#define VER_SYSTEM_REVISION 2
 
 
 /*********************************************************************/
@@ -99,7 +99,7 @@ void draw_logo_bitmap(moe_video_info_t* video, const uint8_t* bmp, int offset_x,
 /*********************************************************************/
 
 #include "setjmp.h"
-extern void new_jmpbuf(jmp_buf env, uintptr_t* new_sp);
+extern void setjmp_new_thread(jmp_buf env, uintptr_t* new_sp);
 
 typedef uintptr_t pid_t;
 typedef uintptr_t thid_t;
@@ -109,15 +109,15 @@ typedef struct _moe_fiber_t moe_fiber_t;
 typedef struct _moe_fiber_t {
     moe_fiber_t* next;
     thid_t  thid;
-    pid_t   pid;
+    uintptr_t lock;
     union {
         uintptr_t flags;
         struct {
-            uint8_t hoge;
+            uint8_t sleep:1;
         };
     };
-    void* fpu_context;
     jmp_buf jmpbuf;
+    void *fpu_context;
 } moe_fiber_t;
 
 volatile thid_t next_thid = 1;
@@ -136,13 +136,28 @@ void io_fload(void*);
 
 //  Main Context Swicth
 void moe_switch_context(moe_fiber_t* next) {
+    MOE_ASSERT(current_thread != next, "CONTEXT SWITCH SKIPPING (%zx %zx)\n", current_thread, current_thread->thid);
+    if (current_thread == next) return;
+
+    if (!atomic_compare_and_swap(&current_thread->lock, 0, 1)) {
+        // MOE_ASSERT(false, "CONTEXT SWITCH LOCKED (%zx %zx)\n", current_thread, current_thread->thid);
+        return;
+    }
+
+    MOE_ASSERT(current_thread->sleep == 0, "SLEEP FLAG EXCEEDED (%zx %zx)\n", current_thread, current_thread->thid);
+    if (current_thread->sleep) return;
     if (!setjmp(current_thread->jmpbuf)) {
-        current_thread = next;
-        if (fpu_owner != current_thread) {
+        MOE_ASSERT(current_thread->sleep == 0, "SETJMP EXCEEDED (%zx %zx)\n", current_thread, current_thread->thid);
+        if (current_thread->sleep) { for (;;) io_hlt(); }
+        current_thread->sleep = 1;
+        if (fpu_owner != next) {
             io_set_lazy_fpu_switch();
         }
+        current_thread = next;
         longjmp(next->jmpbuf, 0);
     }
+    current_thread->sleep = 0;
+    atomic_compare_and_swap(&current_thread->lock, 1, 0);
 }
 
 //  Lazy FPU Context Switch
@@ -185,11 +200,6 @@ int moe_usleep(uint64_t us) {
     return moe_wait_for_timer(&timer);
 }
 
-void link_thread(moe_fiber_t* parent, moe_fiber_t* child) {
-    child->next = parent->next;
-    parent->next = child;
-}
-
 int moe_create_thread(moe_start_thread start, void* context, uintptr_t reserved1) {
 
     moe_fiber_t* new_thread = mm_alloc_static(sizeof(moe_fiber_t));
@@ -203,13 +213,30 @@ int moe_create_thread(moe_start_thread start, void* context, uintptr_t reserved1
     *--sp = 0x00007fffdeadbeef;
     *--sp = (uintptr_t)context;
     *--sp = (uintptr_t)start;
-    new_jmpbuf(new_thread->jmpbuf, sp);
+    setjmp_new_thread(new_thread->jmpbuf, sp);
 
-    link_thread(current_thread, new_thread);
+    moe_fiber_t* p = &root_thread;
+    for (; p->next; p = p->next) {}
+    p->next = new_thread;
 
-    // moe_switch_context(new_thread);
+    moe_switch_context(new_thread);
 
     return new_thread->thid;
+}
+
+int vprintf(const char *format, va_list args);
+void moe_assert(const char* file, uintptr_t line, ...) {
+    // mgs_bsod();
+	va_list list;
+	va_start(list, line);
+
+    printf("ASSERT(File %s Line %zu):", file, line);
+    const char* msg = va_arg(list, const char*);
+    vprintf(msg, list);
+
+	va_end(list);
+    // __asm__ volatile("int3");
+    // for (;;) io_hlt();
 }
 
 
@@ -298,6 +325,14 @@ void fpu_thread(void* context) {
     }
 }
 
+
+void display_threads() {
+    moe_fiber_t* p = &root_thread;
+    for (; p; p = p->next) {
+        printf("Thread: %d %08zx %08zx %08zx %08zx %08zx\n", (int)p->thid, (uintptr_t)p, (uintptr_t)p->fpu_context, p->flags, p->jmpbuf[0], p->jmpbuf[1]);
+    }
+}
+
 void start_init(void* context)  {
 
     mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
@@ -311,13 +346,15 @@ void start_init(void* context)  {
     }
 
     printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(total_memory >> 8));
-    // printf("Hello, world!\n");
+    printf("Hello, world!\n");
 
     hid_init();
 
-    for (int i = 0; i < 5; i++){
+    for (int i = 0; i < 10; i++){
         moe_create_thread(&fpu_thread, 0, 0);
     }
+
+    // display_threads();
 
     //  Pseudo shell
     {
@@ -333,12 +370,41 @@ void start_init(void* context)  {
         // printf("Ok\n");
 
         for (;;) {
-            printf("C>");
+            printf("# ");
             read_cmdline(cmdline, cmdline_size);
 
             switch (cmdline[0]) {
                 case 0:
                 break;
+
+                case '!':
+                {
+                    volatile uintptr_t* p = (uintptr_t*)0x7777deadbeef;
+                    *p = *p;
+                }
+                    break;
+
+                case 'h':
+                    printf("mini shell commands:\n");
+                    printf("  v   display Version\n");
+                    printf("  t   display Thread list\n");
+                    printf("  c   Clear screen\n");
+                    printf("  f   add FPU test thread (experimental)\n");
+                    printf("  a   display Acpi table (experimental)\n");
+                    printf("  m   display Madt table (experimental)\n");
+                    break;
+
+                case 'v':
+                    printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(total_memory >> 8));
+                    break;
+
+                case 'c':
+                    mgs_cls();
+                    break;
+
+                case 't':
+                    display_threads();
+                    break;
 
                 case 'f':
                     moe_create_thread(&fpu_thread, 0, 0);
@@ -349,7 +415,7 @@ void start_init(void* context)  {
                     gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
                     break;
 
-                case 'u':
+                case 'q':
                     gRT->ResetSystem(EfiResetShutdown, 0, 0, NULL);
                     break;
 

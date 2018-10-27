@@ -22,8 +22,7 @@ io_set_lazy_fpu_switch:
     global io_finit
 io_finit:
     fninit
-;    ret
-    pxor xmm0, xmm0
+    xorps xmm0, xmm0
     movq xmm1, xmm0
     movq xmm2, xmm0
     movq xmm3, xmm0
@@ -56,12 +55,13 @@ io_fload:
     ret
 
 
-; void new_jmpbuf(jmp_buf env, uintptr_t* new_sp);
-    global new_jmpbuf
-new_jmpbuf:
-    mov [rcx     ], rdx
+; void setjmp_new_thread(jmp_buf env, uintptr_t* new_sp);
+    global setjmp_new_thread
+setjmp_new_thread:
     lea rax, [rel _new_thread]
-    mov [rcx+0x48], rax
+    mov [rcx     ], rax
+    mov [rcx+0x08], rdx
+    ; mov [rcx+0x10], rdx
     ret
 
 _new_thread:
@@ -73,23 +73,24 @@ _new_thread:
 ; int _setjmp(jmp_buf env);
     global _setjmp
 _setjmp:
+    ; cli
     push rbp
     mov rbp, rsp
 
-    lea rax, [rsp+16]
+    mov rax, [rbp+ 8] ; return address
+    lea rdx, [rbp+16] ; old rsp
     mov [rcx     ], rax
-    mov [rcx+0x08], rbx
-    mov [rcx+0x10], rsi
-    mov [rcx+0x18], rdi
-    mov [rcx+0x20], r12
-    mov [rcx+0x28], r13
-    mov [rcx+0x30], r14
-    mov [rcx+0x38], r15
+    mov [rcx+0x08], rdx
+    mov rax, [rbp] ; old rbp
+    mov [rcx+0x10], rax
 
-    mov rax, [rbp]
-    mov rdx, [rbp+ 8]
-    mov [rcx+0x40], rax
-    mov [rcx+0x48], rdx
+    mov [rcx+0x18], rbx
+    mov [rcx+0x20], rsi
+    mov [rcx+0x28], rdi
+    mov [rcx+0x30], r12
+    mov [rcx+0x38], r13
+    mov [rcx+0x40], r14
+    mov [rcx+0x48], r15
 
     xor eax, eax
     leave
@@ -99,22 +100,36 @@ _setjmp:
 ; void _longjmp(jmp_buf env, int retval);
     global _longjmp
 _longjmp:
+    cli
     mov eax, edx
-    mov rsp, [rcx     ]
-    mov rbx, [rcx+0x08]
-    mov rsi, [rcx+0x10]
-    mov rdi, [rcx+0x18]
-    mov r12, [rcx+0x20]
-    mov r13, [rcx+0x28]
-    mov r14, [rcx+0x30]
-    mov r15, [rcx+0x38]
-    mov rbp, [rcx+0x40]
-    mov rdx, [rcx+0x48]
+    mov rsp, [rcx+0x08]
+    mov rbp, [rcx+0x10]
+
+    mov rbx, [rcx+0x18]
+    mov rsi, [rcx+0x20]
+    mov rdi, [rcx+0x28]
+    mov r12, [rcx+0x30]
+    mov r13, [rcx+0x38]
+    mov r14, [rcx+0x40]
+    mov r15, [rcx+0x48]
+
+    ; mov rdx, [rcx+0x08]
+    ; push byte 0
+    ; push rdx
+    ; pushfq
+    ; push byte LOADER_CS64
+    mov rdx, [rcx     ]
+    ; push rdx
+    ; bts dword [rsp+0x10], 9
 
     or eax, eax
+    ; lea ecx, [rax+1]
+    ; cmovz eax, ecx
     jnz .nozero
     inc eax
 .nozero:
+    ; iretq
+    sti
     jmp rdx
 
 
@@ -261,7 +276,6 @@ _int0E: ; #PF
     ; jmp short _intXX
 
 _intXX:
-    cld
     push rax
     push rcx
     push rdx
@@ -279,6 +293,7 @@ _intXX:
     push r15
     mov rax, cr2
     push rax
+    cld
 
     mov rcx, rsp
     call default_int_handler
@@ -314,11 +329,12 @@ _int07: ; #NM
     push r9
     push r10
     push r11
+    cld
     clts
 
     mov ecx, 512
     call moe_switch_fpu_context
-
+ 
     pop r11
     pop r10
     pop r9
@@ -352,15 +368,14 @@ _irq0C:
     jmp short _irqXX
 
 _irqXX:
-    cld
     push rax
     push rdx
     push r8
     push r9
     push r10
     push r11
+    cld
 
-    mov rdx, rsp
     call _irq_main
 
     pop r11

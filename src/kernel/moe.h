@@ -43,6 +43,10 @@ typedef volatile struct {
 } moe_fifo_t;
 
 
+void moe_assert(const char* file, uintptr_t line, ...);
+#define MOE_ASSERT(cond, ...) if (!(cond)) { moe_assert(__FILE__, __LINE__, __VA_ARGS__); }
+
+
 //  Architecture Specific
 extern void start_kernel(moe_bootinfo_t* bootinfo) __attribute__((__noreturn__));
 void arch_init();
@@ -88,20 +92,20 @@ intptr_t moe_fifo_read(moe_fifo_t* self, intptr_t default_val);
 int moe_fifo_write(moe_fifo_t* self, intptr_t data);
 
 
-//  Timer Service
+//  Threading Service
+typedef void (*moe_start_thread)(void* context);
+int moe_create_thread(moe_start_thread start, void* context, uintptr_t reserved1);
+void moe_next_thread();
+void moe_yield_if_needs();
+void moe_yield();
+int moe_usleep(uint64_t us);
+int moe_get_current_thread();
+
 typedef uint64_t moe_timer_t;
 typedef double moe_time_interval_t;
 moe_timer_t moe_create_interval_timer(uint64_t);
 int moe_wait_for_timer(moe_timer_t*);
 int moe_check_timer(moe_timer_t*);
-int moe_usleep(uint64_t us);
-
-
-//  Threading Service
-typedef void (*moe_start_thread)(void* context);
-int moe_create_thread(moe_start_thread start, void* context, uintptr_t reserved1);
-void moe_next_thread();
-void moe_yield();
 
 
 //  HID Service

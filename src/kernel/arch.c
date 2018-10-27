@@ -52,9 +52,8 @@ void idt_set_kernel_handler(uint8_t num, uintptr_t offset, uint8_t ist) {
 }
 
 void default_int_handler(x64_context_t* regs) {
-    __asm__ volatile("cli");
-    printf("#### EXCEPTION %02llx-%04llx-%016llx\n", regs->intnum, regs->err, regs->cr2);
-    printf("CS:RIP %04llx:%016llx SS:RSP %04llx:%016llx\n", regs->cs, regs->rip, regs->ss, regs->rsp);
+    printf("#### EXCEPTION %02llx ERR %04llx-%016llx\n", regs->intnum, regs->err, regs->cr2);
+    printf("ThreadID %d IP %04llx:%016llx SP %04llx:%016llx FL %08llx\n", moe_get_current_thread(), regs->cs, regs->rip, regs->ss, regs->rsp, regs->rflags);
     printf(
         "ABCD %016llx %016llx %016llx %016llx\n"
         "BPSD %016llx %016llx %016llx\n"
@@ -201,10 +200,10 @@ void apic_disable_irq(uint8_t irq) {
     irq_handler[ovr.gsi] = NULL;
 }
 
-void _irq_main(uint8_t irq, void* context) {
+void _irq_main(uint8_t irq, void* p) {
     IRQ_HANDLER handler = irq_handler[irq];
     if (handler) {
-        handler(irq, context);
+        handler(irq, p);
         apic_end_of_irq(irq);
     } else {
         apic_disable_irq(irq);
@@ -214,10 +213,10 @@ void _irq_main(uint8_t irq, void* context) {
         regs.intnum = 0x0D;
         default_int_handler(&regs);
     }
-    __asm__ volatile ("sti"); // TODO:
-    moe_next_thread();
+    if (irq == 2) {
+        moe_next_thread();
+    }
 }
-
 
 void apic_init() {
     acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
@@ -301,10 +300,11 @@ void apic_init() {
 /*********************************************************************/
 //  High Precision Event Timer
 
+#define HPET_DIV    1
 MOE_PHYSICAL_ADDRESS hpet_base = 0;
 uint32_t hpet_main_cnt_period = 0;
 volatile uint64_t hpet_count = 0;
-static const uint64_t timer_div = 10000;
+static const uint64_t timer_div = 1000 * HPET_DIV;
 
 int hpet_irq_handler(int irq, void* context) {
     hpet_count++;
@@ -319,7 +319,6 @@ int moe_check_timer(moe_timer_t* timer) {
     return ((intptr_t)(*timer - hpet_count) > 0);
 }
 
-
 void hpet_init() {
     acpi_hpet_t* hpet = acpi_find_table(ACPI_HPET_SIGNATURE);
     if (hpet) {
@@ -332,7 +331,7 @@ void hpet_init() {
         WRITE_PHYSICAL_UINT64(hpet_base + 0x10, 0x03); // LEG_RT_CNF | ENABLE_CNF
 
         WRITE_PHYSICAL_UINT64(hpet_base + 0x100, 0x4C);
-        WRITE_PHYSICAL_UINT64(hpet_base + 0x108, 10000000000000 / hpet_main_cnt_period);
+        WRITE_PHYSICAL_UINT64(hpet_base + 0x108, HPET_DIV * 1000000000000 / hpet_main_cnt_period);
         apic_enable_irq(0, &hpet_irq_handler);
 
     } else {

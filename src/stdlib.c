@@ -2,6 +2,7 @@
 // Copyright (c) 1998,2000,2018 MEG-OS project, All rights reserved.
 // License: BSD
 #include <stdarg.h>
+#include <stdlib.h>
 #include "efi.h"
 
 int putchar(char c);
@@ -233,17 +234,20 @@ int snprintf(char* buffer, size_t n, const char* format, ...) {
 #define PRINTF_BUFFER_SIZE 0x1000
 static char printf_buffer[PRINTF_BUFFER_SIZE];
 
-int printf(const char* format, ...) {
-	va_list list;
-	va_start(list, format);
-
-	int count = vsnprintf(printf_buffer, PRINTF_BUFFER_SIZE, format, list);
+int vprintf(const char *format, va_list args) {
+	int count = vsnprintf(printf_buffer, PRINTF_BUFFER_SIZE, format, args);
 	int retval = 0;
 	char* p = printf_buffer;
 	for(int i=0; i<count; i++) {
 		retval += putchar(*p++);
 	}
+	return retval;
+}
 
+int printf(const char* format, ...) {
+	va_list list;
+	va_start(list, format);
+	int retval = vprintf(format, list);
 	va_end(list);
 	return retval;
 }

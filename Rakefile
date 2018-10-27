@@ -59,7 +59,7 @@ else
   CC      = ENV['CC'] || "clang"
   LD      = ENV['LD'] || "lld-link-6.0"
 end
-CFLAGS  = "-Os -std=c11 -fblocks -fno-stack-protector -fshort-wchar -mno-red-zone -nostdlibinc -I #{PATH_INC} -I #{PATH_SRC} -Wall -Wpedantic -fno-exceptions"
+CFLAGS  = "-Os -std=c11 -fno-stack-protector -fshort-wchar -mno-red-zone -nostdlibinc -I #{PATH_INC} -I #{PATH_SRC} -Wall -Wpedantic -fno-exceptions"
 AS      = ENV['AS'] || "nasm"
 AFLAGS  = "-s -I #{ PATH_SRC }"
 LFLAGS  = "-subsystem:efi_application -nodefaultlib -entry:efi_main"
