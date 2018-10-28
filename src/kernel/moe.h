@@ -36,13 +36,6 @@ typedef struct {
 } moe_bootinfo_t;
 
 
-typedef volatile struct {
-    volatile intptr_t* data;
-    volatile uintptr_t read, write, free, count;
-    uintptr_t mask, flags;
-} moe_fifo_t;
-
-
 void moe_assert(const char* file, uintptr_t line, ...);
 #define MOE_ASSERT(cond, ...) if (!(cond)) { moe_assert(__FILE__, __LINE__, __VA_ARGS__); }
 
@@ -53,10 +46,8 @@ void arch_init();
 
 typedef int (*IRQ_HANDLER)(int irq, void* context);
 
-uintptr_t atomic_exchange_add(volatile uintptr_t*, uintptr_t);
-int atomic_compare_and_swap(volatile uintptr_t* p, uintptr_t expected, uintptr_t new_value);
-void io_hlt();
-void io_pause();
+static inline void io_hlt() { __asm__ volatile("hlt"); }
+static inline void io_pause() { __asm__ volatile("pause"); }
 
 typedef uintptr_t MOE_PHYSICAL_ADDRESS;
 void* PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(MOE_PHYSICAL_ADDRESS va);
@@ -87,9 +78,6 @@ void mgs_bsod();
 void mm_init(moe_bootinfo_mmap_t* mmap);
 void* mm_alloc_static_page(size_t n);
 void* mm_alloc_static(size_t n);
-void moe_fifo_init(moe_fifo_t* self, intptr_t* data, uintptr_t capacity);
-intptr_t moe_fifo_read(moe_fifo_t* self, intptr_t default_val);
-int moe_fifo_write(moe_fifo_t* self, intptr_t data);
 
 
 //  Threading Service
@@ -106,6 +94,11 @@ typedef double moe_time_interval_t;
 moe_timer_t moe_create_interval_timer(uint64_t);
 int moe_wait_for_timer(moe_timer_t*);
 int moe_check_timer(moe_timer_t*);
+
+typedef struct _moe_fifo_t moe_fifo_t;
+void moe_fifo_init(moe_fifo_t** result, uintptr_t capacity);
+intptr_t moe_fifo_read(moe_fifo_t* self, intptr_t default_val);
+int moe_fifo_write(moe_fifo_t* self, intptr_t data);
 
 
 //  HID Service

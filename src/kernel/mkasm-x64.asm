@@ -133,38 +133,6 @@ _longjmp:
     jmp rdx
 
 
-; uintptr_t atomic_exchange_add(volatile uintptr_t*, uintptr_t);
-    global atomic_exchange_add
-atomic_exchange_add:
-    mov rax, rdx
-    lock xadd [rcx], rax
-    ret
-
-
-; int atomic_compare_and_swap(volatile uintptr_t* p, uintptr_t expected, uintptr_t new_value);
-    global atomic_compare_and_swap
-atomic_compare_and_swap:
-    mov rax, rdx
-    lock cmpxchg [rcx], r8
-    setz al
-    movzx eax, al
-    ret
-
-
-; void io_pause();
-    global io_pause
-io_pause:
-    pause
-    ret
-
-
-; void io_hlt();
-    global io_hlt
-io_hlt:
-    hlt
-    ret
-
-
 ; uint64_t io_rdmsr(uint32_t addr);
     global io_rdmsr
 io_rdmsr:

@@ -22,6 +22,7 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
+#include <stdatomic.h>
 #include "moe.h"
 #include "efi.h"
 
@@ -101,26 +102,25 @@ void draw_logo_bitmap(moe_video_info_t* video, const uint8_t* bmp, int offset_x,
 #include "setjmp.h"
 extern void setjmp_new_thread(jmp_buf env, uintptr_t* new_sp);
 
-typedef uintptr_t pid_t;
-typedef uintptr_t thid_t;
+typedef int thid_t;
 
 typedef struct _moe_fiber_t moe_fiber_t;
 
 typedef struct _moe_fiber_t {
     moe_fiber_t* next;
-    thid_t  thid;
-    uintptr_t lock;
+    thid_t      thid;
+    atomic_flag lock;
     union {
         uintptr_t flags;
         struct {
-            uint8_t sleep:1;
+            uintptr_t hoge:1;
         };
     };
     jmp_buf jmpbuf;
     void *fpu_context;
 } moe_fiber_t;
 
-volatile thid_t next_thid = 1;
+atomic_int next_thid = 1;
 moe_fiber_t* current_thread;
 moe_fiber_t* fpu_owner = 0;
 moe_fiber_t root_thread;
@@ -139,25 +139,17 @@ void moe_switch_context(moe_fiber_t* next) {
     MOE_ASSERT(current_thread != next, "CONTEXT SWITCH SKIPPING (%zx %zx)\n", current_thread, current_thread->thid);
     if (current_thread == next) return;
 
-    if (!atomic_compare_and_swap(&current_thread->lock, 0, 1)) {
-        // MOE_ASSERT(false, "CONTEXT SWITCH LOCKED (%zx %zx)\n", current_thread, current_thread->thid);
-        return;
-    }
+    if (atomic_flag_test_and_set(&current_thread->lock)) return;
 
-    MOE_ASSERT(current_thread->sleep == 0, "SLEEP FLAG EXCEEDED (%zx %zx)\n", current_thread, current_thread->thid);
-    if (current_thread->sleep) return;
     if (!setjmp(current_thread->jmpbuf)) {
-        MOE_ASSERT(current_thread->sleep == 0, "SETJMP EXCEEDED (%zx %zx)\n", current_thread, current_thread->thid);
-        if (current_thread->sleep) { for (;;) io_hlt(); }
-        current_thread->sleep = 1;
         if (fpu_owner != next) {
             io_set_lazy_fpu_switch();
         }
         current_thread = next;
         longjmp(next->jmpbuf, 0);
     }
-    current_thread->sleep = 0;
-    atomic_compare_and_swap(&current_thread->lock, 1, 0);
+
+    atomic_flag_clear(&current_thread->lock);
 }
 
 //  Lazy FPU Context Switch
@@ -204,7 +196,8 @@ int moe_create_thread(moe_start_thread start, void* context, uintptr_t reserved1
 
     moe_fiber_t* new_thread = mm_alloc_static(sizeof(moe_fiber_t));
     memset(new_thread, 0, sizeof(moe_fiber_t));
-    new_thread->thid = atomic_exchange_add(&next_thid, 1);
+    // new_thread->lock = ATOMIC_FLAG_INIT;
+    new_thread->thid = atomic_fetch_add(&next_thid, 1);
     const uintptr_t stack_count = 0x1000;
     const uintptr_t stack_size = stack_count * sizeof(uintptr_t);
     uintptr_t* stack = mm_alloc_static(stack_size);
@@ -239,6 +232,55 @@ void moe_assert(const char* file, uintptr_t line, ...) {
     // for (;;) io_hlt();
 }
 
+
+/*********************************************************************/
+
+typedef struct _moe_fifo_t {
+    volatile intptr_t* data;
+    atomic_uintptr_t read, write, free, count;
+    uintptr_t mask, flags;
+} moe_fifo_t;
+
+
+void moe_fifo_init(moe_fifo_t** result, uintptr_t capacity) {
+    moe_fifo_t* self = mm_alloc_static(sizeof(moe_fifo_t));
+    self->data = mm_alloc_static(capacity * sizeof(uintptr_t));
+    self->read = self->write = self->count = self->flags = 0;
+    self->free = self->mask = capacity - 1;
+    *result = self;
+}
+
+intptr_t moe_fifo_read(moe_fifo_t* self, intptr_t default_val) {
+    uintptr_t count = self->count;
+    while (count > 0) {
+        if (atomic_compare_exchange_weak(&self->count, &count, count - 1)) {
+            uintptr_t read_ptr = atomic_fetch_add(&self->read, 1);
+            intptr_t retval = self->data[read_ptr & self->mask];
+            atomic_fetch_add(&self->free, 1);
+            return retval;
+        } else {
+            io_pause();
+            count = self->count;
+        }
+    }
+    return default_val;
+}
+
+int moe_fifo_write(moe_fifo_t* self, intptr_t data) {
+    uintptr_t free = self->free;
+    while (free > 0) {
+        if (atomic_compare_exchange_strong(&self->free, &free, free - 1)) {
+            uintptr_t write_ptr = atomic_fetch_add(&self->write, 1);
+            self->data[write_ptr & self->mask] = data;
+            atomic_fetch_add(&self->count, 1);
+            return 0;
+        } else {
+            io_pause();
+            free = self->free;
+        }
+    }
+    return -1;
+}
 
 /*********************************************************************/
 
@@ -333,6 +375,18 @@ void display_threads() {
     }
 }
 
+void io_out8(uint16_t port, uint8_t val);
+void acpi_enable(int enabled) {
+    acpi_fadt_t* fadt = acpi_enum_table_entry(0);
+    if (fadt->SMI_CMD) {
+        if (enabled) {
+            io_out8(fadt->SMI_CMD, fadt->ACPI_ENABLE);
+        } else {
+            io_out8(fadt->SMI_CMD, fadt->ACPI_DISABLE);
+        }
+    }
+}
+
 void start_init(void* context)  {
 
     mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
@@ -421,13 +475,23 @@ void start_init(void* context)  {
 
                 case 'a':
                 {
-                    int n = acpi_get_number_of_table_entries();
-                    printf("ACPI Tables: %d\n", n);
-                    for (int i = 0; i < n; i++) {
-                        acpi_header_t* table = acpi_enum_table_entry(i);
-                        if (table) {
-                            printf("%p: %.4s %d\n", (void*)table, table->signature, table->length);
-                        }
+                    switch(cmdline[1]) {
+                        case '0':
+                            acpi_enable(0);
+                            break;
+                        case '1':
+                            acpi_enable(1);
+                            break;
+                        default:
+                            int n = acpi_get_number_of_table_entries();
+                            printf("ACPI Tables: %d\n", n);
+                            for (int i = 0; i < n; i++) {
+                                acpi_header_t* table = acpi_enum_table_entry(i);
+                                if (table) {
+                                    printf("%p: %.4s %d\n", (void*)table, table->signature, table->length);
+                                }
+                            }
+                            break;
                     }
                     break;
                 }

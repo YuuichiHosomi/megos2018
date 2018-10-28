@@ -3,7 +3,7 @@
 // License: BSD
 #include "moe.h"
 
-moe_fifo_t hid_fifo;
+moe_fifo_t* hid_fifo;
 extern int ps2_init();
 int ps2_exists = 0;
 extern void moe_ctrl_alt_del();
@@ -11,7 +11,7 @@ extern int ps2_parse_data(moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_re
 
 int hid_getchar() {
     const int EOF = -1;
-    return moe_fifo_read(&hid_fifo, EOF);
+    return moe_fifo_read(hid_fifo, EOF);
 }
 
 int mouse_x, mouse_y;
@@ -86,7 +86,7 @@ void hid_thread(void *context) {
                             }
                             uint32_t uni = hid_scan_to_unicode(keyreport.keydata[0], keyreport.modifier);
                             if (uni != INVALID_UNICHAR) {
-                                moe_fifo_write(&hid_fifo, uni);
+                                moe_fifo_write(hid_fifo, uni);
                             }
                         }
                         break;
@@ -111,8 +111,7 @@ void hid_thread(void *context) {
 void hid_init() {
 
     const uintptr_t fifo_size = 256;
-    intptr_t* buffer = mm_alloc_static(fifo_size * sizeof(intptr_t));
-    moe_fifo_init(&hid_fifo, buffer, fifo_size);
+    moe_fifo_init(&hid_fifo, fifo_size);
 
     moe_create_thread(hid_thread, 0, 0);
     ps2_exists = ps2_init();

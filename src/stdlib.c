@@ -2,7 +2,7 @@
 // Copyright (c) 1998,2000,2018 MEG-OS project, All rights reserved.
 // License: BSD
 #include <stdarg.h>
-#include <stdlib.h>
+#include <stddef.h>
 #include "efi.h"
 
 int putchar(char c);

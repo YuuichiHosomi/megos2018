@@ -394,8 +394,8 @@ void pci_write_config_register(uint32_t base, uint8_t reg, uint32_t val) {
 
 #define PS2_TIMEOUT         1000
 
-static moe_fifo_t ps2k_buffer;
-static moe_fifo_t ps2m_buffer;
+static moe_fifo_t* ps2k_buffer;
+static moe_fifo_t* ps2m_buffer;
 
 static volatile uintptr_t ps2k_state = 0;
 
@@ -444,9 +444,9 @@ int ps2_irq_handler(int irq, void* context) {
     uint8_t ps2_status;
     while((ps2_status = io_in8(PS2_STATUS_PORT)) & 0x01) {
         if (ps2_status & 0x20) {
-            moe_fifo_write(&ps2m_buffer, io_in8(PS2_DATA_PORT));
+            moe_fifo_write(ps2m_buffer, io_in8(PS2_DATA_PORT));
         } else {
-            moe_fifo_write(&ps2k_buffer, io_in8(PS2_DATA_PORT));
+            moe_fifo_write(ps2k_buffer, io_in8(PS2_DATA_PORT));
         }
     }
     return 0;
@@ -462,7 +462,7 @@ static void ps2_set_modifier(uint32_t state, uint32_t is_break) {
 
 int ps2_parse_data(moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* mouse_report) {
 
-    int m = moe_fifo_read(&ps2m_buffer, -1);
+    int m = moe_fifo_read(ps2m_buffer, -1);
     if (m >= 0) {
         switch(ps2m_phase) {
             case ps2m_phase_ack:
@@ -501,7 +501,7 @@ int ps2_parse_data(moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t*
         }
     }
 
-    uint8_t data = moe_fifo_read(&ps2k_buffer, 0);
+    uint8_t data = moe_fifo_read(ps2k_buffer, 0);
     if (data == PS2_SCAN_EXTEND) {
         ps2k_state |= PS2_STATE_EXTEND;
         return 3;
@@ -571,10 +571,8 @@ int ps2_init() {
         io_out8(PS2_DATA_PORT, 0xF4);
 
         uintptr_t size_of_buffer = 128;
-        intptr_t* buffer = mm_alloc_static(size_of_buffer * sizeof(intptr_t));
-        moe_fifo_init(&ps2k_buffer, buffer, size_of_buffer);
-        buffer = mm_alloc_static(size_of_buffer * sizeof(intptr_t));
-        moe_fifo_init(&ps2m_buffer, buffer, size_of_buffer);
+        moe_fifo_init(&ps2k_buffer, size_of_buffer);
+        moe_fifo_init(&ps2m_buffer, size_of_buffer);
 
         apic_enable_irq(1, ps2_irq_handler);
         apic_enable_irq(12, ps2_irq_handler);
