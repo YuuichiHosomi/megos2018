@@ -41,9 +41,6 @@ void moe_assert(const char* file, uintptr_t line, ...);
 
 
 //  Architecture Specific
-extern void start_kernel(moe_bootinfo_t* bootinfo) __attribute__((__noreturn__));
-void arch_init();
-
 typedef int (*IRQ_HANDLER)(int irq, void* context);
 
 static inline void io_hlt() { __asm__ volatile("hlt"); }
@@ -60,14 +57,12 @@ void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v);
 
 
 //  ACPI
-void acpi_init(acpi_rsd_ptr_t* rsd);
 void* acpi_find_table(const char* signature);
 int acpi_get_number_of_table_entries();
 void* acpi_enum_table_entry(int index);
 
 
 //  Minimal Graphics Subsystem
-void mgs_init(moe_video_info_t* _video);
 void mgs_fill_rect(int x, int y, int width, int height, uint32_t color);
 void mgs_fill_block(int x, int y, int width, int height, uint32_t color);
 void mgs_cls();
@@ -75,17 +70,15 @@ void mgs_bsod();
 
 
 //  Minimal Memory Subsystem
-void mm_init(moe_bootinfo_mmap_t* mmap);
 void* mm_alloc_static_page(size_t n);
 void* mm_alloc_static(size_t n);
 
 
 //  Threading Service
-typedef void (*moe_start_thread)(void* context);
-int moe_create_thread(moe_start_thread start, void* context, uintptr_t reserved1);
-void moe_next_thread();
-void moe_yield_if_needs();
+typedef void (*moe_start_thread)(void* args);
+int moe_create_thread(moe_start_thread start, void* args, const char* name);
 void moe_yield();
+void moe_consume_quantum();
 int moe_usleep(uint64_t us);
 int moe_get_current_thread();
 
@@ -94,6 +87,7 @@ typedef double moe_time_interval_t;
 moe_timer_t moe_create_interval_timer(uint64_t);
 int moe_wait_for_timer(moe_timer_t*);
 int moe_check_timer(moe_timer_t*);
+uint64_t moe_get_measure();
 
 typedef struct _moe_fifo_t moe_fifo_t;
 void moe_fifo_init(moe_fifo_t** result, uintptr_t capacity);
@@ -131,5 +125,4 @@ typedef struct {
     uint8_t keydata[6];
 } moe_hid_keyboard_report_t;
 
-void hid_init();
 int hid_getchar();

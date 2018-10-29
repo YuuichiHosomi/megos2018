@@ -4,6 +4,8 @@
 #include "moe.h"
 #include "efi.h"
 
+extern _Noreturn void start_kernel(moe_bootinfo_t* bootinfo);
+
 #define	EFI_PRINT(s)	st->ConOut->OutputString(st->ConOut, L ## s)
 
 CONST EFI_GUID EfiGraphicsOutputProtocolGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;

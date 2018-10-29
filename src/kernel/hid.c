@@ -66,7 +66,7 @@ uint32_t hid_scan_to_unicode(uint8_t scan, uint8_t modifier) {
 }
 
 // HID Thread
-void hid_thread(void *context) {
+void hid_thread(void *args) {
     for (;;) {
         int cont;
         do {
@@ -113,6 +113,6 @@ void hid_init() {
     const uintptr_t fifo_size = 256;
     moe_fifo_init(&hid_fifo, fifo_size);
 
-    moe_create_thread(hid_thread, 0, 0);
+    moe_create_thread(hid_thread, 0, "HID");
     ps2_exists = ps2_init();
 }

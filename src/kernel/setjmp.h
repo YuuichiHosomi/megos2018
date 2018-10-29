@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdnoreturn.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -12,7 +13,7 @@ typedef long long jmp_buf[16];
 #define longjmp _longjmp
 
 int _setjmp(jmp_buf);
-void _longjmp(jmp_buf, int) __attribute__((noreturn));
+noreturn void _longjmp(jmp_buf, int);
 
 #ifdef __cplusplus
 }

@@ -214,7 +214,7 @@ void _irq_main(uint8_t irq, void* p) {
         default_int_handler(&regs);
     }
     if (irq == 2) {
-        moe_next_thread();
+        moe_consume_quantum();
     }
 }
 
@@ -305,6 +305,7 @@ MOE_PHYSICAL_ADDRESS hpet_base = 0;
 uint32_t hpet_main_cnt_period = 0;
 volatile uint64_t hpet_count = 0;
 static const uint64_t timer_div = 1000 * HPET_DIV;
+uint64_t measure_div;
 
 int hpet_irq_handler(int irq, void* context) {
     hpet_count++;
@@ -319,6 +320,11 @@ int moe_check_timer(moe_timer_t* timer) {
     return ((intptr_t)(*timer - hpet_count) > 0);
 }
 
+uint64_t moe_get_measure() {
+    uint64_t main_cnt = READ_PHYSICAL_UINT64(hpet_base + 0xF0);
+    return main_cnt / measure_div;
+}
+
 void hpet_init() {
     acpi_hpet_t* hpet = acpi_find_table(ACPI_HPET_SIGNATURE);
     if (hpet) {
@@ -330,15 +336,14 @@ void hpet_init() {
         WRITE_PHYSICAL_UINT64(hpet_base + 0xF0, 0); // Reset MAIN_COUNTER_VALUE
         WRITE_PHYSICAL_UINT64(hpet_base + 0x10, 0x03); // LEG_RT_CNF | ENABLE_CNF
 
+        measure_div = 1000000000 / hpet_main_cnt_period;
         WRITE_PHYSICAL_UINT64(hpet_base + 0x100, 0x4C);
         WRITE_PHYSICAL_UINT64(hpet_base + 0x108, HPET_DIV * 1000000000000 / hpet_main_cnt_period);
         apic_enable_irq(0, &hpet_irq_handler);
 
     } else {
         //  TODO: impl PIT
-        mgs_bsod();
-        printf("PANIC: HPET_NOT_AVAILABLE\n");
-        for (;;) io_hlt();
+        MOE_ASSERT(false, "FATAL: HPET_NOT_AVAILABLE\n");
     }
 }
 

@@ -33,6 +33,13 @@
 #define VER_SYSTEM_REVISION 2
 
 
+void arch_init();
+void acpi_init(acpi_rsd_ptr_t* rsd);
+void mgs_init(moe_video_info_t* _video);
+void mm_init(moe_bootinfo_mmap_t* mmap);
+void hid_init();
+
+
 /*********************************************************************/
 
 void memset32(uint32_t* p, uint32_t v, size_t n) {
@@ -100,15 +107,21 @@ void draw_logo_bitmap(moe_video_info_t* video, const uint8_t* bmp, int offset_x,
 /*********************************************************************/
 
 #include "setjmp.h"
+
+#define DEFAULT_QUANTUM 5;
+
 extern void setjmp_new_thread(jmp_buf env, uintptr_t* new_sp);
 
 typedef int thid_t;
 
 typedef struct _moe_fiber_t moe_fiber_t;
 
+#define THREAD_NAME_SIZE    32
 typedef struct _moe_fiber_t {
     moe_fiber_t* next;
     thid_t      thid;
+    uint8_t quantum_base;
+    atomic_char quantum_left;
     atomic_flag lock;
     union {
         uintptr_t flags;
@@ -116,13 +129,16 @@ typedef struct _moe_fiber_t {
             uintptr_t hoge:1;
         };
     };
-    jmp_buf jmpbuf;
     void *fpu_context;
+    uint64_t measure0;
+    uint32_t load;
+    jmp_buf jmpbuf;
+    const char name[THREAD_NAME_SIZE];
 } moe_fiber_t;
 
 atomic_int next_thid = 1;
-moe_fiber_t* current_thread;
-moe_fiber_t* fpu_owner = 0;
+moe_fiber_t *current_thread;
+moe_fiber_t *fpu_owner = 0;
 moe_fiber_t root_thread;
 
 int moe_get_current_thread() {
@@ -141,11 +157,13 @@ void moe_switch_context(moe_fiber_t* next) {
 
     if (atomic_flag_test_and_set(&current_thread->lock)) return;
 
+    current_thread->load = moe_get_measure() - current_thread->measure0;
     if (!setjmp(current_thread->jmpbuf)) {
         if (fpu_owner != next) {
             io_set_lazy_fpu_switch();
         }
         current_thread = next;
+        current_thread->measure0 = moe_get_measure();
         longjmp(next->jmpbuf, 0);
     }
 
@@ -176,7 +194,18 @@ void moe_next_thread() {
     moe_switch_context(next);
 }
 
+void moe_consume_quantum() {
+    // atomic_fetch_add(&current_thread->load, 1);
+    if (atomic_fetch_add(&current_thread->quantum_left, -1) <= 0) {
+        atomic_fetch_add(&current_thread->quantum_left, current_thread->quantum_base);
+        moe_next_thread();
+    }
+}
+
 void moe_yield() {
+    if (current_thread->quantum_left > current_thread->quantum_base) {
+        current_thread->quantum_left = current_thread->quantum_base;
+    }
     moe_next_thread();
 }
 
@@ -192,19 +221,24 @@ int moe_usleep(uint64_t us) {
     return moe_wait_for_timer(&timer);
 }
 
-int moe_create_thread(moe_start_thread start, void* context, uintptr_t reserved1) {
+int moe_create_thread(moe_start_thread start, void* args, const char* name) {
 
     moe_fiber_t* new_thread = mm_alloc_static(sizeof(moe_fiber_t));
     memset(new_thread, 0, sizeof(moe_fiber_t));
     // new_thread->lock = ATOMIC_FLAG_INIT;
     new_thread->thid = atomic_fetch_add(&next_thid, 1);
+    new_thread->quantum_base = DEFAULT_QUANTUM;
+    new_thread->quantum_left = 3 * DEFAULT_QUANTUM;
+    if (name) {
+        snprintf(&new_thread->name, THREAD_NAME_SIZE-1, "%s", name);
+    }
     const uintptr_t stack_count = 0x1000;
     const uintptr_t stack_size = stack_count * sizeof(uintptr_t);
     uintptr_t* stack = mm_alloc_static(stack_size);
     memset(stack, 0, stack_size);
     uintptr_t* sp = stack + stack_count;
     *--sp = 0x00007fffdeadbeef;
-    *--sp = (uintptr_t)context;
+    *--sp = (uintptr_t)args;
     *--sp = (uintptr_t)start;
     setjmp_new_thread(new_thread->jmpbuf, sp);
 
@@ -212,9 +246,15 @@ int moe_create_thread(moe_start_thread start, void* context, uintptr_t reserved1
     for (; p->next; p = p->next) {}
     p->next = new_thread;
 
-    moe_switch_context(new_thread);
+    // moe_switch_context(new_thread);
 
     return new_thread->thid;
+}
+
+void thread_init() {
+    root_thread.quantum_base = 1;
+    snprintf(&root_thread.name, THREAD_NAME_SIZE, "%s", "System Idle Thread");
+    current_thread = &root_thread;
 }
 
 int vprintf(const char *format, va_list args);
@@ -355,7 +395,7 @@ void moe_ctrl_alt_del() {
     gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
 }
 
-void fpu_thread(void* context) {
+void fpu_thread(void* args) {
     double count = 0.0;
     double pi = 3.14;
     int pid = moe_get_current_thread();
@@ -370,8 +410,9 @@ void fpu_thread(void* context) {
 
 void display_threads() {
     moe_fiber_t* p = &root_thread;
+    printf("ID context  sse_ctx  flags   quantum load   rsp      name\n");
     for (; p; p = p->next) {
-        printf("Thread: %d %08zx %08zx %08zx %08zx %08zx\n", (int)p->thid, (uintptr_t)p, (uintptr_t)p->fpu_context, p->flags, p->jmpbuf[0], p->jmpbuf[1]);
+        printf("%2d %08zx %08zx %08zx %2d/%2d %7u %08zx %s\n", (int)p->thid, (uintptr_t)p, (uintptr_t)p->fpu_context, p->flags, p->quantum_left, p->quantum_base, p->load, p->jmpbuf[1], p->name);
     }
 }
 
@@ -387,7 +428,7 @@ void acpi_enable(int enabled) {
     }
 }
 
-void start_init(void* context)  {
+void start_init(void* args) {
 
     mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
     mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
@@ -405,7 +446,7 @@ void start_init(void* context)  {
     hid_init();
 
     for (int i = 0; i < 10; i++){
-        moe_create_thread(&fpu_thread, 0, 0);
+        moe_create_thread(&fpu_thread, 0, "FPU DEMO");
     }
 
     // display_threads();
@@ -461,7 +502,7 @@ void start_init(void* context)  {
                     break;
 
                 case 'f':
-                    moe_create_thread(&fpu_thread, 0, 0);
+                    moe_create_thread(&fpu_thread, 0, "FPU");
                     printf("FPU Thread started\n");
                     break;
 
@@ -524,14 +565,14 @@ void start_init(void* context)  {
 
 void start_kernel(moe_bootinfo_t* bootinfo) {
 
-    current_thread = &root_thread;
     gRT = bootinfo->efiRT;
     mgs_init(&bootinfo->video);
     mm_init(&bootinfo->mmap);
+    thread_init();
     acpi_init(bootinfo->acpi);
     arch_init();
 
-    moe_create_thread(&start_init, 0, 0);
+    moe_create_thread(&start_init, 0, "Main");
 
     //  Do Idle
     for (;;) io_hlt();
