@@ -83,49 +83,6 @@ void idt_init() {
 
 
 /*********************************************************************/
-//  Paging
-
-void page_init() {
-    //  TODO: nothing
-}
-
-void* PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(MOE_PHYSICAL_ADDRESS pa) {
-    // TODO:
-    return (void*)(pa);
-}
-
-uint8_t READ_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p) {
-    volatile uint8_t* p = PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(_p);
-    return *p;
-}
-
-void WRITE_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p, uint8_t v) {
-    volatile uint8_t* p = PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(_p);
-    *p = v;
-}
-
-uint32_t READ_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p) {
-    volatile uint32_t* p = PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(_p);
-    return *p;
-}
-
-void WRITE_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p, uint32_t v) {
-    volatile uint32_t* p = PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(_p);
-    *p = v;
-}
-
-uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p) {
-    volatile uint64_t* p = PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(_p);
-    return *p;
-}
-
-void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v) {
-    volatile uint64_t* p = PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(_p);
-    *p = v;
-}
-
-
-/*********************************************************************/
 //  Advanced Programmable Interrupt Controller
 
 #define IRQ_BASE                    0x40
@@ -591,7 +548,6 @@ int ps2_init() {
 /*********************************************************************/
 
 void arch_init() {
-    page_init();
     cs_sel = gdt_init();
     idt_init();
     apic_init();

@@ -129,9 +129,10 @@ typedef struct _moe_fiber_t {
             uintptr_t hoge:1;
         };
     };
+    _Atomic uint64_t measure0;
+    _Atomic uint64_t cputime;
+    _Atomic uint32_t load0, load;
     void *fpu_context;
-    uint64_t measure0;
-    uint32_t load;
     jmp_buf jmpbuf;
     const char name[THREAD_NAME_SIZE];
 } moe_fiber_t;
@@ -150,6 +151,10 @@ void io_finit();
 void io_fsave(void*);
 void io_fload(void*);
 
+uint64_t moe_get_current_load() {
+    return moe_get_measure() - current_thread->measure0;
+}
+
 //  Main Context Swicth
 void moe_switch_context(moe_fiber_t* next) {
     MOE_ASSERT(current_thread != next, "CONTEXT SWITCH SKIPPING (%zx %zx)\n", current_thread, current_thread->thid);
@@ -157,7 +162,9 @@ void moe_switch_context(moe_fiber_t* next) {
 
     if (atomic_flag_test_and_set(&current_thread->lock)) return;
 
-    current_thread->load = moe_get_measure() - current_thread->measure0;
+    uint64_t load = moe_get_current_load();
+    atomic_fetch_add(&current_thread->cputime, load);
+    atomic_fetch_add(&current_thread->load0, load);
     if (!setjmp(current_thread->jmpbuf)) {
         if (fpu_owner != next) {
             io_set_lazy_fpu_switch();
@@ -194,11 +201,15 @@ void moe_next_thread() {
     moe_switch_context(next);
 }
 
+#define CONSUME_QUANTUM_THRESHOLD 100
 void moe_consume_quantum() {
-    // atomic_fetch_add(&current_thread->load, 1);
-    if (atomic_fetch_add(&current_thread->quantum_left, -1) <= 0) {
-        atomic_fetch_add(&current_thread->quantum_left, current_thread->quantum_base);
-        moe_next_thread();
+    // uint64_t load = moe_get_current_load();
+    // current_thread->load = load;
+    if (moe_get_current_load() > CONSUME_QUANTUM_THRESHOLD) {
+        if (atomic_fetch_add(&current_thread->quantum_left, -1) <= 0) {
+            atomic_fetch_add(&current_thread->quantum_left, current_thread->quantum_base);
+            moe_next_thread();
+        }
     }
 }
 
@@ -253,9 +264,30 @@ int moe_create_thread(moe_start_thread start, void* args, const char* name) {
 
 void thread_init() {
     root_thread.quantum_base = 1;
-    snprintf(&root_thread.name, THREAD_NAME_SIZE, "%s", "System Idle Thread");
+    snprintf(&root_thread.name, THREAD_NAME_SIZE, "%s", "(idle)");
     current_thread = &root_thread;
 }
+
+
+_Noreturn void scheduler() {
+    const int64_t CLEANUP_LOAD_TIME = 1000000;
+    int64_t last_cleanup_load_measure = 0;
+    for (;;) {
+        int64_t measure = moe_get_measure();
+        if ((measure - last_cleanup_load_measure) >= CLEANUP_LOAD_TIME) {
+            moe_fiber_t* thread = &root_thread;
+            for (; thread; thread = thread->next) {
+                int load = thread->load0;
+                thread->load = load;
+                atomic_fetch_add(&thread->load0, -load);
+            }
+            last_cleanup_load_measure = moe_get_measure();
+        }
+        moe_yield();
+    }
+}
+
+
 
 int vprintf(const char *format, va_list args);
 void moe_assert(const char* file, uintptr_t line, ...) {
@@ -410,9 +442,12 @@ void fpu_thread(void* args) {
 
 void display_threads() {
     moe_fiber_t* p = &root_thread;
-    printf("ID context  sse_ctx  flags   quantum load   rsp      name\n");
+    printf("ID context  sse_ctx  flags         usage name\n");
     for (; p; p = p->next) {
-        printf("%2d %08zx %08zx %08zx %2d/%2d %7u %08zx %s\n", (int)p->thid, (uintptr_t)p, (uintptr_t)p->fpu_context, p->flags, p->quantum_left, p->quantum_base, p->load, p->jmpbuf[1], p->name);
+        printf("%2d %08zx %08zx %08zx %2d/%2d %4u %s\n",
+            (int)p->thid, (uintptr_t)p, (uintptr_t)p->fpu_context, p->flags,
+            p->quantum_left, p->quantum_base, p->load / 1000,
+            p->name);
     }
 }
 
@@ -430,22 +465,22 @@ void acpi_enable(int enabled) {
 
 void start_init(void* args) {
 
-    mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
-    mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
-    mgs_fill_rect(250, 100, 300, 300, 0x77CCFF);
+    // mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
+    // mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
+    // mgs_fill_rect(250, 100, 300, 300, 0x77CCFF);
 
     //  Show BGRT (Boot Graphics Resource Table) from ACPI
     acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
     if (bgrt) {
-        draw_logo_bitmap(video, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
+        // draw_logo_bitmap(video, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
     }
 
     printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(total_memory >> 8));
-    printf("Hello, world!\n");
+    // printf("Hello, world!\n");
 
     hid_init();
 
-    for (int i = 0; i < 10; i++){
+    for (int i = 0; i < 5; i++){
         moe_create_thread(&fpu_thread, 0, "FPU DEMO");
     }
 
@@ -458,10 +493,10 @@ void start_init(void* args) {
 
         // EFI_TIME time;
         // gRT->GetTime(&time, NULL);
-        // printf("Current Time: %d-%02d-%02d %02d:%02d:%02d\n", time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second);
+        // printf("Current Time: %d-%02d-%02d %02d:%02d:%02d %04d\n", time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second, time.TimeZone);
 
         // printf("Checking Timer...");
-        // moe_usleep(1000000);
+        moe_usleep(1000000);
         // printf("Ok\n");
 
         for (;;) {
@@ -572,7 +607,8 @@ void start_kernel(moe_bootinfo_t* bootinfo) {
     acpi_init(bootinfo->acpi);
     arch_init();
 
-    moe_create_thread(&start_init, 0, "Main");
+    moe_create_thread(&scheduler, 0, "(scheduler)");
+    moe_create_thread(&start_init, 0, "main");
 
     //  Do Idle
     for (;;) io_hlt();
