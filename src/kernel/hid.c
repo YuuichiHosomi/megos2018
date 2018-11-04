@@ -94,6 +94,8 @@ void hid_thread(void *args) {
                     case 2:
                         mouse_x += mouse_report.x;
                         mouse_y += mouse_report.y;
+                        if (mouse_x < 0) mouse_x = 0;
+                        if (mouse_y < 0) mouse_y = 0;
                         const int cursor_r = 10;
                         mgs_fill_rect(mouse_x - cursor_r / 2, mouse_y - cursor_r / 2, cursor_r, cursor_r, 0xFFFFFF);
                         mgs_fill_rect(mouse_x - cursor_r / 2 + 2, mouse_y - cursor_r / 2 + 2, cursor_r - 4, cursor_r - 4, 0x007700);
