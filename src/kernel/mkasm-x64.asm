@@ -1,5 +1,5 @@
 ; Minimal Operating Environment - Assembly part for x64
-; Copyright (c) 1998,2000,2018 MEG-OS project, All rights reserved.
+; Copyright (c) 1998,2018 MEG-OS project, All rights reserved.
 ; License: BSD
 
 %define LOADER_CS64 0x10
@@ -7,6 +7,42 @@
 
 [BITS 64]
 [section .text]
+
+
+; int atomic_bit_test(void *p, uintptr_t bit);
+    global atomic_bit_test
+atomic_bit_test:
+    mov rax, rdx
+    shr rax, 3
+    and edx, 7
+    bt [rcx+rax], edx
+    sbb eax, eax
+    neg eax
+    ret
+
+
+; int atomic_bit_test_and_set(void *p, uintptr_t bit);
+    global atomic_bit_test_and_set
+atomic_bit_test_and_set:
+    mov rax, rdx
+    shr rax, 3
+    and edx, 7
+    lock bts [rcx+rax], edx
+    sbb eax, eax
+    neg eax
+    ret
+
+
+; int atomic_bit_test_and_clear(void *p, uintptr_t bit);
+    global atomic_bit_test_and_clear
+atomic_bit_test_and_clear:
+    mov rax, rdx
+    shr rax, 3
+    and edx, 7
+    lock btr [rcx+rax], edx
+    sbb eax, eax
+    neg eax
+    ret
 
 
 ; void io_set_lazy_fpu_switch();

@@ -1,5 +1,5 @@
 // Minimal OS EFI Stub
-// Copyright (c) 1998,2000,2018 MEG-OS project, All rights reserved.
+// Copyright (c) 1998,2018 MEG-OS project, All rights reserved.
 // License: BSD
 #include "moe.h"
 #include "efi.h"
