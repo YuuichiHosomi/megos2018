@@ -18,6 +18,7 @@
 CONST CHAR16* KERNEL_PATH = L"" EFI_VENDOR_PATH "KRNL" EFI_SUFFIX ".EFI";
 CONST CHAR16* cp932_bin_path = L"" EFI_VENDOR_PATH "CP932.BIN";
 CONST CHAR16* cp932_fnt_path = L"" EFI_VENDOR_PATH "CP932.FNT";
+CONST CHAR16* SHELL_PATH = L"\\SHELL" EFI_SUFFIX ".EFI";
 
 CONST EFI_GUID EfiLoadedImageProtocolGuid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
 CONST EFI_GUID EfiSimpleFileSystemProtocolGuid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
@@ -45,6 +46,8 @@ typedef enum {
     menu_item_reset,
     menu_item_shutdown,
     menu_item_bios,
+    menu_item_shell,
+    menu_item_max
 } menu_ids;
 
 
@@ -70,6 +73,7 @@ CHAR16 *devicePathToText(EFI_DEVICE_PATH_PROTOCOL* path) {
         return NULL;
     }
 }
+EFI_STATUS exec(CONST CHAR16* path);
 
 
 BOOLEAN rsrc_ja_enabled = FALSE;
@@ -366,6 +370,10 @@ void option_menu() {
         // menu_add(items, "Other Devices", menu_item_device);
         // menu_add_separator(items);
         {
+            menu_add(items, get_string(rsrc_shell), menu_item_shell);
+            menu_add_separator(items);
+        }
+        {
             uint32_t attributes = 0;
             uint64_t os_indications_supported = 0;
             UINTN data_size = sizeof(uint64_t);
@@ -405,6 +413,12 @@ void option_menu() {
                 if(!EFI_ERROR(status)) {
                     gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
                 }
+            }
+                break;
+
+            case menu_item_shell:
+            {
+                exec(SHELL_PATH);
             }
                 break;
 
@@ -456,16 +470,15 @@ error:
     return status;
 }
 
-
-EFI_STATUS start_os() {
+EFI_STATUS exec(CONST CHAR16* path) {
     EFI_STATUS status;
     cout->ClearScreen(cout);
     EFI_HANDLE child = NULL;
-    EFI_DEVICE_PATH_PROTOCOL* path = NULL;
+    EFI_DEVICE_PATH_PROTOCOL* dpath = NULL;
     base_and_size exe_ptr;
-    status = efi_get_file_content(sysdrv, KERNEL_PATH, &exe_ptr);
+    status = efi_get_file_content(sysdrv, path, &exe_ptr);
     if(!EFI_ERROR(status)) {
-        status = gBS->LoadImage(FALSE, image, path, exe_ptr.base, exe_ptr.size, &child);
+        status = gBS->LoadImage(FALSE, image, dpath, exe_ptr.base, exe_ptr.size, &child);
     }
     if(!EFI_ERROR(status)) {
         EFI_LOADED_IMAGE_PROTOCOL* li = NULL;
@@ -492,6 +505,9 @@ EFI_STATUS start_os() {
     return status;
 }
 
+EFI_STATUS start_os() {
+    return exec(KERNEL_PATH);
+}
 
 
 EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE _image, IN EFI_SYSTEM_TABLE *st) {
@@ -550,7 +566,7 @@ cp932_exit:
     cout->ClearScreen(cout);
     printf("%d %d", edid_x, edid_y);
     print_center(-5, get_string(rsrc_starting));
-    for(int t=5; t>0; t--) {
+    for(int t = 2; t>0; t--) {
         char buffer[256];
         snprintf(buffer, 256, get_string(rsrc_press_esc_to_menu), t);
         print_center(-2, buffer);
