@@ -6,20 +6,15 @@
 
 #define PAGE_SIZE   0x1000
 
-static MOE_PHYSICAL_ADDRESS master_cr3;
+// static MOE_PHYSICAL_ADDRESS master_cr3;
+// void page_init() {
+//     master_cr3 = mm_alloc_static_page(PAGE_SIZE);
+//     memset(master_cr3, 0, PAGE_SIZE);
 
-void page_init() {
-    //  TODO: nothing
-
-    master_cr3 = mm_alloc_static_page(PAGE_SIZE);
-    memset(master_cr3, 0, PAGE_SIZE);
-
-    MOE_PHYSICAL_ADDRESS pdpt0 = mm_alloc_static_page(PAGE_SIZE);
-    memset(pdpt0, 0, PAGE_SIZE);
-    WRITE_PHYSICAL_UINT64(master_cr3, pdpt0 | PTE_GLOBAL | PTE_WRITE | PTE_PRESENT);
-
-
-}
+//     MOE_PHYSICAL_ADDRESS pdpt0 = mm_alloc_static_page(PAGE_SIZE);
+//     memset(pdpt0, 0, PAGE_SIZE);
+//     WRITE_PHYSICAL_UINT64(master_cr3, pdpt0 | PTE_GLOBAL | PTE_WRITE | PTE_PRESENT);
+// }
 
 void* PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(MOE_PHYSICAL_ADDRESS pa) {
     // TODO:

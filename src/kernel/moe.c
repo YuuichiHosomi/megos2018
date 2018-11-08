@@ -121,7 +121,7 @@ typedef struct _moe_fiber_t {
     moe_fiber_t* next;
     thid_t      thid;
     uint8_t quantum_base;
-    atomic_char quantum_left;
+    _Atomic uint8_t quantum_left;
     atomic_flag lock;
     union {
         uintptr_t flags;
@@ -137,7 +137,7 @@ typedef struct _moe_fiber_t {
     const char name[THREAD_NAME_SIZE];
 } moe_fiber_t;
 
-atomic_int next_thid = 1;
+_Atomic thid_t next_thid = 1;
 moe_fiber_t *current_thread;
 moe_fiber_t *fpu_owner = 0;
 moe_fiber_t root_thread;
@@ -201,7 +201,7 @@ void moe_next_thread() {
     moe_switch_context(next);
 }
 
-#define CONSUME_QUANTUM_THRESHOLD 100
+#define CONSUME_QUANTUM_THRESHOLD 500
 void moe_consume_quantum() {
     // uint64_t load = moe_get_current_load();
     // current_thread->load = load;
@@ -215,7 +215,7 @@ void moe_consume_quantum() {
 
 void moe_yield() {
     if (current_thread->quantum_left > current_thread->quantum_base) {
-        current_thread->quantum_left = current_thread->quantum_base;
+        atomic_store(&current_thread->quantum_left, current_thread->quantum_base);
     }
     moe_next_thread();
 }
@@ -270,17 +270,36 @@ void thread_init() {
 
 
 _Noreturn void scheduler() {
+    int pid = moe_get_current_thread();
     const int64_t CLEANUP_LOAD_TIME = 1000000;
     int64_t last_cleanup_load_measure = 0;
     for (;;) {
         int64_t measure = moe_get_measure();
         if ((measure - last_cleanup_load_measure) >= CLEANUP_LOAD_TIME) {
+
+            //  Update load
             moe_fiber_t* thread = &root_thread;
             for (; thread; thread = thread->next) {
-                int load = thread->load0;
-                thread->load = load;
+                int load = atomic_load(&thread->load0);
+                atomic_store(&thread->load, load);
                 atomic_fetch_add(&thread->load0, -load);
             }
+
+            //  usage icon
+            {
+                int left = pid * 10 + 1, width = 6;
+                int load = (1000000 - root_thread.load) / 200000;
+                if (load < 0) load = 0;
+                if (load > 3) {
+                    mgs_fill_rect(left, 2, width, 8, 0xFF0000);
+                } else {
+                    int ux = load * 2;
+                    int lx = (4 - load) * 2;
+                    mgs_fill_rect(left, 2, width, lx, 0x555555);
+                    mgs_fill_rect(left, 2 + lx, width, ux, 0x00FF00);
+                }
+            }
+
             last_cleanup_load_measure = moe_get_measure();
         }
         moe_yield();
@@ -427,7 +446,7 @@ void moe_ctrl_alt_del() {
     gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
 }
 
-void fpu_thread(void* args) {
+_Noreturn void fpu_thread(void* args) {
     double count = 0.0;
     double pi = 3.14;
     int pid = moe_get_current_thread();
@@ -463,16 +482,17 @@ void acpi_enable(int enabled) {
     }
 }
 
-void start_init(void* args) {
 
-    // mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
-    // mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
-    // mgs_fill_rect(250, 100, 300, 300, 0x77CCFF);
+_Noreturn void start_init(void* args) {
+
+    mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
+    mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
+    mgs_fill_rect(250, 100, 300, 300, 0x77CCFF);
 
     //  Show BGRT (Boot Graphics Resource Table) from ACPI
     acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
     if (bgrt) {
-        // draw_logo_bitmap(video, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
+        draw_logo_bitmap(video, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
     }
 
     printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(total_memory >> 8));

@@ -5,6 +5,8 @@
 #include "moe.h"
 #include "efi.h"
 
+#define ROUNDUP_4K(n) ((n + 0xFFF) & ~0xFFF)
+
 typedef struct {
     uintptr_t base;
     uintptr_t size;
@@ -15,7 +17,6 @@ typedef struct {
 static uint8_t static_heap[HEAP_SIZE] __attribute__((aligned(4096)));
 static atomic_uintptr_t static_start;
 
-#define ROUNDUP_4K(n) ((n + 0xFFF) & ~0xFFF)
 
 void* mm_alloc_static_page(size_t n) {
     uintptr_t result = atomic_fetch_add(&static_start, ROUNDUP_4K(n));
@@ -68,12 +69,15 @@ void mm_init(moe_bootinfo_mmap_t* mmap) {
         EFI_MEMORY_DESCRIPTOR* efi_mem = (EFI_MEMORY_DESCRIPTOR*)(mmap_ptr + i * mmap->desc_size);
         efi_mem->VirtualStart = efi_mem->PhysicalStart;
         if (efi_mem->PhysicalStart >= 0x100000) {
-            // moe_mmap mem = { efi_mem->PhysicalStart, efi_mem->NumberOfPages*0x1000, efi_mm_type_convert(efi_mem->Type) };
+            // moe_mmap mem = { efi_mem->PhysicalStart, efi_mem->NumberOfPages*0x1000, mm_type_for_count(efi_mem->Type) };
+            // printf("%016llx %08zx %08zx\n", mem.base, mem.size, mem.type);
             if (mm_type_for_count(efi_mem->Type) > 0) {
                 total_memory += efi_mem->NumberOfPages;
             }
         }
     }
     gRT->SetVirtualAddressMap(mmap->size, mmap->desc_size, mmap->desc_version, mmap->mmap);
+
+    // printf("mm: %08zx %08zx\n", mmap->size, mmap->desc_size);
 
 }

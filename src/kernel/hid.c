@@ -66,7 +66,7 @@ uint32_t hid_scan_to_unicode(uint8_t scan, uint8_t modifier) {
 }
 
 // HID Thread
-void hid_thread(void *args) {
+_Noreturn void hid_thread(void *args) {
     for (;;) {
         int cont;
         do {
