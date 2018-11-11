@@ -435,8 +435,11 @@ EFI_STATUS efi_get_file_content(IN EFI_FILE_HANDLE fs, IN CONST CHAR16* path, OU
     void* buff = NULL;
     uint64_t fsize = UINT64_MAX;
 
+    //  Open file
     status = fs->Open(fs, &handle, path, EFI_FILE_MODE_READ, 0);
     if(EFI_ERROR(status)) return status;
+
+    //  Get file size
     status = handle->SetPosition(handle, fsize);
     if(EFI_ERROR(status)) goto error;
     status = handle->GetPosition(handle, &fsize);
@@ -444,19 +447,26 @@ EFI_STATUS efi_get_file_content(IN EFI_FILE_HANDLE fs, IN CONST CHAR16* path, OU
     status = handle->SetPosition(handle, 0);
     if(EFI_ERROR(status)) goto error;
 
+    //  Allocate memory
+    if ((sizeof(UINTN) < sizeof(uint64_t)) && fsize > UINT32_MAX) {
+        status = EFI_OUT_OF_RESOURCES;
+        goto error;
+    }
     buff = malloc(fsize);
     if(!buff){
         status = EFI_OUT_OF_RESOURCES;
         goto error;
     }
 
-    status = handle->Read(handle, &fsize, buff);
+    //  Read
+    UINTN read_count = fsize;
+    status = handle->Read(handle, &read_count, buff);
     if(EFI_ERROR(status)) goto error;
     status = handle->Close(handle);
     if(EFI_ERROR(status)) goto error;
 
     result->base = buff;
-    result->size = fsize;
+    result->size = read_count;
 
     return EFI_SUCCESS;
 

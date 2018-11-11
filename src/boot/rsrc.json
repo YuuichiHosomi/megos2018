@@ -15,13 +15,13 @@
 			"advanced_option": "Advanced Option Menu",
 			"return_to_previous": "Return to Previous Screen",
 			"shell": "Launch UEFI Shell",
-			"reset": "Restart",
+			"reset": "Restart Computer",
 			"shutdown": "Shutdown",
 			"boot_to_fw_ui": "UEFI BIOS Setup",
 			"display_settings": "Display Settings"
 		},
 		"ja": {
-			"starting": "操作系統を起動中...",
+			"starting": "起動中...",
 			"press_esc_to_menu": "メニューを表示するには ESC キーを押してください...",
 			"load_error": "システムのロード中にエラーが発生しました",
 			"error_code": "エラーコード",
@@ -31,7 +31,7 @@
 			"advanced_option": "拡張オプションメニュー",
 			"return_to_previous": "前の画面に戻る",
 			"shell": "UEFI シェルを起動",
-			"reset": "再起動",
+			"reset": "コンピューターを再起動",
 			"shutdown": "シャットダウン",
 			"boot_to_fw_ui": "UEFI BIOS セットアップ",
 			"display_settings": "画面の設定"

@@ -489,7 +489,6 @@ static EFI_STATUS EFIAPI ATOP_ENABLE_CURSOR (
 }
 
 
-// TODO: dynamic
 static EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL static_stop;
 static ATOP_Context static_context;
 
