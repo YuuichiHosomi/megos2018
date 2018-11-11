@@ -1,11 +1,12 @@
 // Subset of Standard C Library
-// Copyright (c) 1998,2000,2018 MEG-OS project, All rights reserved.
+// Copyright (c) 1998,2018 MEG-OS project, All rights reserved.
 // License: BSD
 #include <stdarg.h>
 #include <stddef.h>
 #include "efi.h"
 
 int putchar(char c);
+int snprintf(char* buffer, size_t n, const char* format, ...);
 
 
 /*********************************************************************/
@@ -85,6 +86,11 @@ static int sprintf_num(char** _buffer, uintptr_t val, unsigned base, size_t widt
 	*_buffer = buffer + content_size;
 	*_count = count + content_size;
 	return content_size;
+}
+
+char *strncpy(char *s1, const char *s2, size_t n) {
+	snprintf(s1, n, "%s", s2);
+	return s1;
 }
 
 int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {

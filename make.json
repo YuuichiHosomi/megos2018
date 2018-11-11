@@ -15,9 +15,11 @@
             "base_dir": "kernel",
             "sources": [
                 "moeldr",
+                "kernel",
                 "moe",
                 "mgs",
                 "mmm",
+                "mwm",
                 "arch",
                 "page",
                 "hid",

@@ -1,20 +1,21 @@
 //  Human Interface Device Service
-// Copyright (c) 1998,2018 MEG-OS project, All rights reserved.
+// Copyright (c) 2018 MEG-OS project, All rights reserved.
 // License: BSD
 #include "moe.h"
+
 
 moe_fifo_t* hid_fifo;
 extern int ps2_init();
 int ps2_exists = 0;
 extern void moe_ctrl_alt_del();
 extern int ps2_parse_data(moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* mouse_report);
+extern void move_mouse(int x, int y);
+
 
 int hid_getchar() {
     const int EOF = -1;
     return moe_fifo_read(hid_fifo, EOF);
 }
-
-int mouse_x, mouse_y;
 
 #define SCAN_DELETE 0x4C
 
@@ -92,13 +93,7 @@ _Noreturn void hid_thread(void *args) {
                         break;
 
                     case 2:
-                        mouse_x += mouse_report.x;
-                        mouse_y += mouse_report.y;
-                        if (mouse_x < 0) mouse_x = 0;
-                        if (mouse_y < 0) mouse_y = 0;
-                        const int cursor_r = 10;
-                        mgs_fill_rect(mouse_x - cursor_r / 2, mouse_y - cursor_r / 2, cursor_r, cursor_r, 0xFFFFFF);
-                        mgs_fill_rect(mouse_x - cursor_r / 2 + 2, mouse_y - cursor_r / 2 + 2, cursor_r - 4, cursor_r - 4, 0x007700);
+                        move_mouse(mouse_report.x, mouse_report.y);
                         break;
 
                     case 3:

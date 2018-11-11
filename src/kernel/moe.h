@@ -14,6 +14,9 @@ int printf(const char* format, ...);
 void* memcpy(void* p, const void* q, size_t n);
 void* memset(void * p, int v, size_t n);
 void memset32(uint32_t* p, uint32_t v, size_t n);
+int atomic_bit_test_and_set(void *p, uintptr_t bit);
+int atomic_bit_test_and_clear(void *p, uintptr_t bit);
+int atomic_bit_test(void *p, uintptr_t bit);
 
 
 typedef struct {
@@ -63,10 +66,39 @@ void* acpi_enum_table_entry(int index);
 
 
 //  Minimal Graphics Subsystem
-void mgs_fill_rect(int x, int y, int width, int height, uint32_t color);
-void mgs_fill_block(int x, int y, int width, int height, uint32_t color);
 void mgs_cls();
-void mgs_bsod();
+void mgs_fill_rect(int x, int y, int width, int height, uint32_t color);
+
+typedef struct moe_point_t {
+    int x, y;
+} moe_point_t;
+
+typedef struct moe_size_t {
+    int width, height;
+} moe_size_t;
+
+typedef struct moe_rect_t {
+    moe_point_t origin;
+    moe_size_t size;
+} moe_rect_t;
+
+typedef struct {
+    uint32_t* dib;
+    uint32_t flags, color_key;
+    int width, height, delta;
+} moe_dib_t;
+
+#define MOE_DIB_COLOR_KEY   0x0001
+#define MOE_DIB_ROTATE      0x0002
+
+extern moe_point_t *moe_point_zero;
+extern moe_size_t *moe_size_zero;
+extern moe_rect_t *moe_rect_zero;
+
+moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color);
+void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect, uint32_t options);
+void moe_blt_fill(moe_dib_t* dest, moe_rect_t *rect, uint32_t color);
+void moe_invalidate_screen(moe_rect_t *rect);
 
 
 //  Minimal Memory Subsystem
