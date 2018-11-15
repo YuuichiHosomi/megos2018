@@ -43,6 +43,9 @@ extern void mwm_init();
 
 extern void display_threads();
 
+extern uintptr_t total_memory;
+extern int n_active_cpu;
+
 EFI_RUNTIME_SERVICES* gRT;
 
 
@@ -166,9 +169,6 @@ int read_cmdline(char* buffer, size_t max_len) {
     return len;
 }
 
-extern uintptr_t total_memory;
-extern moe_video_info_t* video;
-
 void moe_ctrl_alt_del() {
     gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
 }
@@ -214,7 +214,9 @@ _Noreturn void start_init(void* args) {
         draw_logo_bitmap(desktop_dib, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
     }
 
-    printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(total_memory >> 8));
+    printf("%s v%d.%d.%d [%d Processors, Memory %dMB]\n",
+        VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION,
+        n_active_cpu, (int)(total_memory >> 8));
     // printf("Hello, world!\n");
 
     for (int i = 0; i < 5; i++){

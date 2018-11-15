@@ -392,9 +392,29 @@ _irqXX:
     iretq
 
 
-; [BITS 32]
-; _hoge32:
-;     ret
+    global mp_startup_init
+mp_startup_init:
+    push rdi
+    movzx edi, cl
+    shl edi, 10
+    lea rsi, [rel _mp_rm_payload]
+    mov ecx, _end_mp_rm_payload - _mp_rm_payload
+    rep movsb
+
+    mov eax, 0x00000FF0
+
+    pop rdi
+    ret
+
+[BITS 16]
+_mp_rm_payload:
+    xor ax, ax
+    mov ds, ax
+    inc dword [ds:0xFF0]
+
+    hlt
+    jmp $-1
+_end_mp_rm_payload:
 
 
 [section .data]

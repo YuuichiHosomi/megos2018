@@ -6,6 +6,7 @@
 #include "x86.h"
 
 
+extern uint32_t *mp_startup_init(uint8_t);
 extern uint16_t gdt_init(void);
 extern void idt_load(volatile void*, size_t);
 extern void* _int00;
@@ -88,12 +89,19 @@ void idt_init() {
 
 #define IRQ_BASE                    0x40
 #define MAX_IRQ                     24
-#define MAX_CPU                     8
+#define MAX_CPU                     16
 #define INVALID_CPUID               0xFF
 
 #define IA32_APIC_BASE_MSR          0x1B
 #define IA32_APIC_BASE_MSR_BSP      0x100
 #define IA32_APIC_BASE_MSR_ENABLE   0x800
+
+// type 00 Processor Local APIC
+typedef struct {
+    uint8_t     acpi_uid;
+    uint8_t     apic_id;
+    uint32_t    flags;
+} __attribute__((packed)) apic_madt_lapic_t;
 
 // type 01 I/O APIC
 typedef struct {
@@ -118,6 +126,7 @@ apic_madt_ovr_t gsi_table[MAX_IRQ];
 
 apic_id_t apic_ids[MAX_CPU];
 int n_cpu = 0;
+int n_active_cpu = 0;
 
 
 MOE_PHYSICAL_ADDRESS lapic_base = 0;
@@ -205,6 +214,17 @@ void apic_init() {
             void* madt_structure = (void*)(p+loc+2);
             switch (p[loc]) {
 
+            case 0x00: // Processor Local APIC
+            {
+                if (n_cpu < MAX_CPU) {
+                    apic_madt_lapic_t* lapic = madt_structure;
+                    if ((lapic->flags & 1) && apic_ids[0] != lapic->apic_id) {
+                        apic_ids[n_cpu++] = lapic->apic_id;
+                    }
+                }
+            }
+                break;
+
             case 0x01: // IO APIC
             {
                 apic_madt_ioapic_t* ioapic = madt_structure;
@@ -251,6 +271,34 @@ void apic_init() {
         }
         __asm__ volatile("sti");
 
+    }
+}
+
+
+//  because to initialize AP needs Timer
+void apic_init_mp() {
+    if (n_cpu > 1) {
+        uint8_t vector_sipi = 0x10;
+        volatile uint32_t* wait_p = mp_startup_init(vector_sipi);
+        *wait_p = 1;
+        for (int i = 1; i < n_cpu; i++) {
+            uint32_t dest = apic_ids[i] << 24;
+            uint32_t low = 0x00000500; // INIT
+            WRITE_PHYSICAL_UINT32(lapic_base + 0x310, dest);
+            WRITE_PHYSICAL_UINT32(lapic_base + 0x300, low);
+        }
+        moe_usleep(10000);
+        for (int i = 1; i < n_cpu; i++) {
+            uint32_t dest = apic_ids[i] << 24;
+            uint32_t low = 0x000600 + vector_sipi; // Startup IPI
+            WRITE_PHYSICAL_UINT32(lapic_base + 0x310, dest);
+            WRITE_PHYSICAL_UINT32(lapic_base + 0x300, low);
+        }
+        moe_timer_t timeout = moe_create_interval_timer(1000000);
+        while ((*wait_p != n_cpu) && moe_check_timer(&timeout)) {
+            moe_yield();
+        }
+        n_active_cpu = *wait_p;
     }
 }
 
@@ -553,4 +601,5 @@ void arch_init() {
     idt_init();
     apic_init();
     hpet_init();
+    apic_init_mp();
 }
