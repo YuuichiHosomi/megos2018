@@ -6,10 +6,15 @@
 
 
 typedef struct moe_view_t {
-    moe_rect_t frame;
-    moe_dib_t *dib;
     void *context;
+
+    moe_view_t *parent;
+    moe_view_t *firstchild, *sibling;
+
+    moe_dib_t *dib;
+    moe_rect_t frame;
     uint32_t bgColor;
+
 } moe_view_t;
 
 
@@ -25,10 +30,10 @@ moe_view_t *desktop;
 moe_view_t *mouse_cursor;
 moe_dib_t *desktop_dib = NULL;
 
-moe_rect_t rect_zero = {{0, 0}, {0, 0}};
-moe_point_t *moe_point_zero = &rect_zero.origin;
-moe_size_t *moe_size_zero = &rect_zero.size;
-moe_rect_t *moe_rect_zero = &rect_zero;
+const moe_rect_t rect_zero = {{0, 0}, {0, 0}};
+const moe_point_t *moe_point_zero = &rect_zero.origin;
+const moe_size_t *moe_size_zero = &rect_zero.size;
+const moe_rect_t *moe_rect_zero = &rect_zero;
 
 #define MOUSE_CURSOR_WIDTH  12
 #define MOUSE_CURSOR_HEIGHT  20
@@ -83,7 +88,7 @@ void draw_view(moe_view_t* view, moe_rect_t *rect) {
         }
         moe_blt(main_screen->dib, view->dib, &dp, rect, 0);
     } else {
-        moe_blt_fill(main_screen->dib, rect ? rect: &view->frame, view->bgColor);
+        moe_fill_rect(main_screen->dib, rect ? rect: &view->frame, view->bgColor);
     }
 }
 
@@ -165,8 +170,8 @@ _Noreturn void window_thread(void* args) {
 
     // Init mouse
     {
-        moe_size_t mouse_size = { MOUSE_CURSOR_WIDTH, MOUSE_CURSOR_HEIGHT };
-        moe_dib_t *dib = moe_create_dib(&mouse_size, MOE_DIB_COLOR_KEY, mouse_cursor_palette[0]);
+        moe_size_t size = { MOUSE_CURSOR_WIDTH, MOUSE_CURSOR_HEIGHT };
+        moe_dib_t *dib = moe_create_dib(&size, MOE_DIB_COLOR_KEY, mouse_cursor_palette[0]);
         for (int i = 0; i < MOUSE_CURSOR_WIDTH * MOUSE_CURSOR_HEIGHT; i++) {
             dib->dib[i] = mouse_cursor_palette[mouse_cursor_source[0][i]];
         }

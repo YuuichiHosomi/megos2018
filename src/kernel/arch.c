@@ -2,6 +2,7 @@
 // Copyright (c) 1998,2018 MEG-OS project, All rights reserved.
 // License: BSD
 #include "moe.h"
+#include "kernel.h"
 #include "x86.h"
 
 
@@ -299,7 +300,7 @@ void hpet_init() {
         apic_enable_irq(0, &hpet_irq_handler);
 
     } else {
-        //  TODO: impl PIT
+        //  TODO: impl APIC timer?
         MOE_ASSERT(false, "FATAL: HPET_NOT_AVAILABLE\n");
     }
 }
@@ -533,8 +534,8 @@ int ps2_init() {
         io_out8(PS2_DATA_PORT, 0xF4);
 
         uintptr_t size_of_buffer = 128;
-        moe_fifo_init(&ps2k_buffer, size_of_buffer);
-        moe_fifo_init(&ps2m_buffer, size_of_buffer);
+        ps2k_buffer = moe_fifo_init(size_of_buffer);
+        ps2m_buffer = moe_fifo_init(size_of_buffer);
 
         apic_enable_irq(1, ps2_irq_handler);
         apic_enable_irq(12, ps2_irq_handler);

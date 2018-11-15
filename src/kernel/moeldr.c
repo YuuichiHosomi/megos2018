@@ -2,6 +2,7 @@
 // Copyright (c) 1998,2018 MEG-OS project, All rights reserved.
 // License: BSD
 #include "moe.h"
+#include "kernel.h"
 #include "efi.h"
 
 extern _Noreturn void start_kernel(moe_bootinfo_t* bootinfo);

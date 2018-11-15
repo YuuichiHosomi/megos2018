@@ -1,5 +1,5 @@
 ; Minimal Operating Environment - Assembly part for x64
-; Copyright (c) 1998,2018 MEG-OS project, All rights reserved.
+; Copyright (c) 2018 MEG-OS project, All rights reserved.
 ; License: BSD
 
 %define LOADER_CS64 0x10

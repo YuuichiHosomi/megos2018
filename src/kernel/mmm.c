@@ -1,8 +1,9 @@
 // Minimal Memory Management Subsystem
-// Copyright (c) 1998,2000,2018 MEG-OS project, All rights reserved.
+// Copyright (c) 2018 MEG-OS project, All rights reserved.
 // License: BSD
 #include <stdatomic.h>
 #include "moe.h"
+#include "kernel.h"
 #include "efi.h"
 
 #define ROUNDUP_PAGE(n) ((n + 0xFFF) & ~0xFFF)
@@ -13,17 +14,8 @@ typedef struct {
     uintptr_t type;
 } moe_mmap;
 
-// Memory List
-typedef struct _mblist mblist;
-typedef struct _mblist {
-    mblist *next;
-    void *objects;
-    atomic_uint  free;
-    uint32_t bitmap[1];
-} mblist;
 
 static atomic_uintptr_t static_start;
-
 
 void* mm_alloc_static_page(size_t n) {
     uintptr_t result = atomic_fetch_add(&static_start, ROUNDUP_PAGE(n));
@@ -91,8 +83,6 @@ static int mm_type_for_count(uint32_t type) {
 extern EFI_RUNTIME_SERVICES* gRT;
 
 void mm_init(moe_bootinfo_mmap_t* mmap) {
-
-    // static_start = ROUNDUP_PAGE((uintptr_t)static_heap);
 
     uint64_t mabase = 0, masize = 0x1000;
 

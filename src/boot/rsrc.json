@@ -23,7 +23,7 @@
 		"ja": {
 			"starting": "起動中...",
 			"press_esc_to_menu": "メニューを表示するには ESC キーを押してください...",
-			"load_error": "システムのロード中にエラーが発生しました",
+			"load_error": "エラーが発生したため停止しました",
 			"error_code": "エラーコード",
 			"press_any_key": "何かキーを押すと続行します...",
 			"choose_an_option": "オプションを選択してください",

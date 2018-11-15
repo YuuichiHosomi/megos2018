@@ -7,7 +7,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "acpi.h"
 
 
 int printf(const char* format, ...);
@@ -19,50 +18,8 @@ int atomic_bit_test_and_clear(void *p, uintptr_t bit);
 int atomic_bit_test(void *p, uintptr_t bit);
 
 
-typedef struct {
-    void* vram;
-    int res_x, res_y, pixel_per_scan_line;
-} moe_video_info_t;
-
-typedef struct {
-    void* mmap; // EFI_MEMORY_DESCRIPTOR
-    uintptr_t size, desc_size;
-    uint32_t desc_version;
-} moe_bootinfo_mmap_t;
-
-typedef struct {
-    moe_video_info_t video;
-    acpi_rsd_ptr_t* acpi;
-
-    void* efiRT; // EFI_RUNTIME_SERVICES
-    moe_bootinfo_mmap_t mmap;
-} moe_bootinfo_t;
-
-
 void moe_assert(const char* file, uintptr_t line, ...);
 #define MOE_ASSERT(cond, ...) if (!(cond)) { moe_assert(__FILE__, __LINE__, __VA_ARGS__); }
-
-
-//  Architecture Specific
-typedef int (*IRQ_HANDLER)(int irq, void* context);
-
-static inline void io_hlt() { __asm__ volatile("hlt"); }
-static inline void io_pause() { __asm__ volatile("pause"); }
-
-typedef uintptr_t MOE_PHYSICAL_ADDRESS;
-void* PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(MOE_PHYSICAL_ADDRESS va);
-uint8_t READ_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p);
-void WRITE_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p, uint8_t v);
-uint32_t READ_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p);
-void WRITE_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p, uint32_t v);
-uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p);
-void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v);
-
-
-//  ACPI
-void* acpi_find_table(const char* signature);
-int acpi_get_number_of_table_entries();
-void* acpi_enum_table_entry(int index);
 
 
 //  Minimal Graphics Subsystem
@@ -82,22 +39,24 @@ typedef struct moe_rect_t {
     moe_size_t size;
 } moe_rect_t;
 
-typedef struct {
+typedef struct moe_dib_t {
     uint32_t* dib;
-    uint32_t flags, color_key;
-    int width, height, delta;
+    int width, height;
+    uint32_t flags, delta, color_key;
 } moe_dib_t;
+
+typedef struct moe_view_t moe_view_t;
 
 #define MOE_DIB_COLOR_KEY   0x0001
 #define MOE_DIB_ROTATE      0x0002
 
-extern moe_point_t *moe_point_zero;
-extern moe_size_t *moe_size_zero;
-extern moe_rect_t *moe_rect_zero;
+extern const moe_point_t *moe_point_zero;
+extern const moe_size_t *moe_size_zero;
+extern const moe_rect_t *moe_rect_zero;
 
 moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color);
 void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect, uint32_t options);
-void moe_blt_fill(moe_dib_t* dest, moe_rect_t *rect, uint32_t color);
+void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color);
 void moe_invalidate_screen(moe_rect_t *rect);
 
 
@@ -121,8 +80,8 @@ int moe_wait_for_timer(moe_timer_t*);
 int moe_check_timer(moe_timer_t*);
 uint64_t moe_get_measure();
 
-typedef struct _moe_fifo_t moe_fifo_t;
-void moe_fifo_init(moe_fifo_t** result, uintptr_t capacity);
+typedef struct moe_fifo_t moe_fifo_t;
+moe_fifo_t* moe_fifo_init(uintptr_t capacity);
 intptr_t moe_fifo_read(moe_fifo_t* self, intptr_t default_val);
 int moe_fifo_write(moe_fifo_t* self, intptr_t data);
 

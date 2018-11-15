@@ -2,6 +2,7 @@
 // Copyright (c) 2018 MEG-OS project, All rights reserved.
 // License: BSD
 #include "moe.h"
+#include "kernel.h"
 
 #define DEFAULT_BGCOLOR 0xFFFFFF
 #define DEFAULT_FGCOLOR 0x555555
@@ -65,7 +66,6 @@ void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *r
 
     // Clipping
     {
-        // if (dx >= dest->width || dy >= dest->height) return;
         if (dx < 0) {
             sx -= dx;
             w += dx;
@@ -76,12 +76,10 @@ void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *r
             h += dy;
             dy = 0;
         }
-        // if (sx >= src->width || sy >= src->height) return;
         if (w > src->width) w = src->width;
         if (h > src->height) h = src->height;
         int r = dx + w;
         int b = dy + h;
-        // if (r < 0 || b < 0) return;
         if (r >= dest->width) w = dest->width - dx;
         if (b >= dest->height) h = dest->height - dy;
         // printf("\r{%5d %5d %5d %5d %5d %5d %5d %5d}", dx, dy, sx, sy, w, h, r, b);
@@ -93,28 +91,54 @@ void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *r
     p += dx + dy * dest->delta;
     uint32_t *q = src->dib;
     q += sx + sy * src->delta;
+    uintptr_t dd = dest->delta - w, sd = src->delta - w;
 
     if (src->flags & MOE_DIB_COLOR_KEY) { // Blt with color key
         uint32_t k = src->color_key;
-        for (int i = 0; i < h; i++) {
+        for (uintptr_t i = 0; i < h; i++) {
             #pragma clang loop vectorize(enable) interleave(enable)
-            for (int j = 0; j < w; j++) {
-                uint32_t c = q[j];
+            for (uintptr_t j = 0; j < w; j++) {
+                uint32_t c = *q++;
                 if (c != k) {
-                    p[j] = c;
+                    *p = c;
                 }
+                p++;
             }
-            p += dest->delta;
-            q += src->delta;
+            p += dd;
+            q += sd;
         }
     } else {
-        for (int i = 0; i < h; i++) {
+        if (dd == 0 && sd == 0) {
+            uintptr_t limit = w * h;
             #pragma clang loop vectorize(enable) interleave(enable)
-            for (int j = 0; j < w; j++) {
-                p[j] = q[j];
+            for (uintptr_t i = 0; i < limit; i++) {
+                *p++ = *q++;
             }
-            p += dest->delta;
-            q += src->delta;
+        } else if (dd == 0) {
+            for (uintptr_t i = 0; i < h; i++) {
+                #pragma clang loop vectorize(enable) interleave(enable)
+                for (uintptr_t j = 0; j < w; j++) {
+                    *p++ = *q++;
+                }
+                q += sd;
+            }
+        } else if (sd == 0) {
+            for (uintptr_t i = 0; i < h; i++) {
+                #pragma clang loop vectorize(enable) interleave(enable)
+                for (uintptr_t j = 0; j < w; j++) {
+                    *p++ = *q++;
+                }
+                p += dd;
+            }
+        } else {
+            for (uintptr_t i = 0; i < h; i++) {
+                #pragma clang loop vectorize(enable) interleave(enable)
+                for (uintptr_t j = 0; j < w; j++) {
+                    *p++ = *q++;
+                }
+                p += dd;
+                q += sd;
+            }
         }
     }
 
@@ -123,11 +147,11 @@ void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *r
 // TODO:
 void mgs_fill_rect(int x, int y, int width, int height, uint32_t color) {
     moe_rect_t rect = {{x, y}, {width, height}};
-    moe_blt_fill(current_screen_dib, &rect, color);
+    moe_fill_rect(current_screen_dib, &rect, color);
     moe_invalidate_screen(&rect);
 }
 
-void moe_blt_fill(moe_dib_t* dest, moe_rect_t *rect, uint32_t color) {
+void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color) {
 
     int dx, dy, w, h;
     if (rect) {
@@ -159,13 +183,22 @@ void moe_blt_fill(moe_dib_t* dest, moe_rect_t *rect, uint32_t color) {
 
     uint32_t *p = dest->dib;
     p += dx + dy * dest->delta;
+    uintptr_t dd = dest->delta - w;
 
-    for (int i = 0; i < h; i++) {
+    if (dd == 0) {
+        uintptr_t limit = w * h;
         #pragma clang loop vectorize(enable) interleave(enable)
-        for (int j = 0; j < w; j++) {
-            p[j] = color;
+        for (int i = 0; i < limit; i++) {
+            *p++ = color;
         }
-        p += dest->delta;
+    } else {
+        for (int i = 0; i < h; i++) {
+            #pragma clang loop vectorize(enable) interleave(enable)
+            for (int j = 0; j < w; j++) {
+                *p++ = color;
+            }
+            p += dd;
+        }
     }
 
 }
@@ -211,7 +244,7 @@ void mgs_cls() {
     cursor_x = 0;
     cursor_y = 0;
 
-    moe_blt_fill(current_screen_dib, NULL, bgcolor);
+    moe_fill_rect(current_screen_dib, NULL, bgcolor);
     moe_invalidate_screen(NULL);
 }
 
@@ -222,7 +255,7 @@ void putchar32(uint32_t c) {
         moe_rect_t rect = {{ col_to_x(0), row_to_y(1) }, { cols * font_w, (rows - 1) * line_height }};
         moe_blt(current_screen_dib, current_screen_dib, &origin, &rect, 0);
         moe_rect_t rect_last_line = { {col_to_x(0), row_to_y(cursor_y) }, { cols * font_w, line_height } };
-        moe_blt_fill(current_screen_dib, &rect_last_line, bgcolor);
+        moe_fill_rect(current_screen_dib, &rect_last_line, bgcolor);
         moe_invalidate_screen(NULL);
     }
     switch (c) {
@@ -231,7 +264,7 @@ void putchar32(uint32_t c) {
                 moe_rect_t rect = { { col_to_x(cursor_x), row_to_y(cursor_y) }, { font_w, line_height } };
                 moe_rect_t rect_f = { { col_to_x(cursor_x), row_to_y(cursor_y) + font_offset }, { font_w, font_h } };
                 const uint8_t* font_p = font_data + (c - 0x20) * font_w8 * font_h;
-                moe_blt_fill(current_screen_dib, &rect, bgcolor);
+                moe_fill_rect(current_screen_dib, &rect, bgcolor);
                 mgs_draw_pattern(current_screen_dib, &rect_f, font_p, fgcolor);
                 moe_invalidate_screen(&rect);
             }

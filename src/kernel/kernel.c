@@ -23,13 +23,14 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 #include "moe.h"
+#include "kernel.h"
 #include "efi.h"
 
 
 #define VER_SYSTEM_NAME     "Minimal Operating Environment"
 #define VER_SYSTEM_MAJOR    0
 #define VER_SYSTEM_MINOR    4
-#define VER_SYSTEM_REVISION 0
+#define VER_SYSTEM_REVISION 1
 
 
 extern void arch_init();
@@ -349,7 +350,7 @@ void moe_assert(const char* file, uintptr_t line, ...) {
     // for (;;) io_hlt();
 }
 
-void start_kernel(moe_bootinfo_t* bootinfo) {
+_Noreturn void start_kernel(moe_bootinfo_t* bootinfo) {
 
     gRT = bootinfo->efiRT;
     mgs_init(&bootinfo->video);

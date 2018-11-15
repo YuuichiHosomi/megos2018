@@ -2,6 +2,7 @@
 // Copyright (c) 2018 MEG-OS project, All rights reserved.
 // License: BSD
 #include "moe.h"
+#include "kernel.h"
 #include "x86.h"
 
 #define PAGE_SIZE   0x1000

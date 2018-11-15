@@ -3,55 +3,52 @@
 // License: BSD
 #include <stdatomic.h>
 #include "moe.h"
+#include "kernel.h"
 #include "efi.h"
 #include "setjmp.h"
 
 #define DEFAULT_QUANTUM     5
 #define CLEANUP_LOAD_TIME   1000000
 #define CONSUME_QUANTUM_THRESHOLD 1000
-
-char *strncpy(char *s1, const char *s2, size_t n);
-
-extern void setjmp_new_thread(jmp_buf env, uintptr_t* new_sp);
+#define THREAD_NAME_SIZE    32
 
 typedef int thid_t;
+typedef struct moe_fiber_t moe_fiber_t;
 
-typedef struct _moe_fiber_t moe_fiber_t;
-
-#define THREAD_NAME_SIZE    32
-typedef struct _moe_fiber_t {
+typedef struct moe_fiber_t {
     moe_fiber_t* next;
-    thid_t      thid;
-    uint8_t quantum_base;
-    _Atomic uint8_t quantum_left;
-    atomic_flag lock;
-    union {
-        uintptr_t flags;
-        struct {
-            uintptr_t hoge:1;
-        };
-    };
+    uintptr_t flags;
+    thid_t thid;
     _Atomic uint64_t measure0;
     _Atomic uint64_t cputime;
     _Atomic uint32_t load00, load0, load;
+    uint32_t affinity;
+    uint8_t quantum_base;
+    _Atomic uint8_t quantum_left;
+    atomic_flag lock;
     void *fpu_context;
     jmp_buf jmpbuf;
     char name[THREAD_NAME_SIZE];
 } moe_fiber_t;
+
+
+extern void io_set_lazy_fpu_switch();
+extern void io_finit();
+extern void io_fsave(void*);
+extern void io_fload(void*);
+extern void setjmp_new_thread(jmp_buf env, uintptr_t* new_sp);
+char *strncpy(char *s1, const char *s2, size_t n);
+
 
 _Atomic thid_t next_thid = 1;
 moe_fiber_t *current_thread;
 moe_fiber_t *fpu_owner = 0;
 moe_fiber_t root_thread;
 
+
 int moe_get_current_thread() {
     return current_thread->thid;
 }
-
-void io_set_lazy_fpu_switch();
-void io_finit();
-void io_fsave(void*);
-void io_fload(void*);
 
 uint64_t moe_get_current_load() {
     return moe_get_measure() - current_thread->measure0;
@@ -141,7 +138,7 @@ int moe_create_thread(moe_start_thread start, void* args, const char* name) {
     // new_thread->lock = ATOMIC_FLAG_INIT;
     new_thread->thid = atomic_fetch_add(&next_thid, 1);
     new_thread->quantum_base = DEFAULT_QUANTUM;
-    new_thread->quantum_left = 3 * DEFAULT_QUANTUM;
+    new_thread->quantum_left = 3 * DEFAULT_QUANTUM; // quantum boost
     if (name) {
         strncpy(&new_thread->name[0], name, THREAD_NAME_SIZE - 1);
     }
@@ -166,7 +163,7 @@ int moe_create_thread(moe_start_thread start, void* args, const char* name) {
 
 
 _Noreturn void scheduler() {
-    int pid = moe_get_current_thread();
+    // int pid = moe_get_current_thread();
     int64_t last_cleanup_load_measure = 0;
     for (;;) {
         int64_t measure = moe_get_measure();
@@ -195,7 +192,7 @@ _Noreturn void scheduler() {
             //     }
             // }
 
-            last_cleanup_load_measure = moe_get_measure();
+            last_cleanup_load_measure = measure;
         }
         moe_yield();
     }
@@ -212,19 +209,19 @@ void thread_init() {
 
 /*********************************************************************/
 
-typedef struct _moe_fifo_t {
+typedef struct moe_fifo_t {
     volatile intptr_t* data;
     atomic_uintptr_t read, write, free, count;
     uintptr_t mask, flags;
 } moe_fifo_t;
 
 
-void moe_fifo_init(moe_fifo_t** result, uintptr_t capacity) {
+moe_fifo_t* moe_fifo_init(uintptr_t capacity) {
     moe_fifo_t* self = mm_alloc_static(sizeof(moe_fifo_t));
     self->data = mm_alloc_static(capacity * sizeof(uintptr_t));
     self->read = self->write = self->count = self->flags = 0;
     self->free = self->mask = capacity - 1;
-    *result = self;
+    return self;
 }
 
 intptr_t moe_fifo_read(moe_fifo_t* self, intptr_t default_val) {
