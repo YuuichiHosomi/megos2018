@@ -1,12 +1,13 @@
 // Minimal Architecture Specific Initialization
 // Copyright (c) 1998,2018 MEG-OS project, All rights reserved.
 // License: BSD
+#include <stdatomic.h>
 #include "moe.h"
 #include "kernel.h"
 #include "x86.h"
 
 
-extern uint32_t *mp_startup_init(uint8_t);
+extern _Atomic uint32_t *mp_startup_init(uint8_t);
 extern uint16_t gdt_init(void);
 extern void idt_load(volatile void*, size_t);
 extern void* _int00;
@@ -278,27 +279,31 @@ void apic_init() {
 //  because to initialize AP needs Timer
 void apic_init_mp() {
     if (n_cpu > 1) {
-        uint8_t vector_sipi = 0x10;
-        volatile uint32_t* wait_p = mp_startup_init(vector_sipi);
-        *wait_p = 1;
-        for (int i = 1; i < n_cpu; i++) {
-            uint32_t dest = apic_ids[i] << 24;
-            uint32_t low = 0x00000500; // INIT
-            WRITE_PHYSICAL_UINT32(lapic_base + 0x310, dest);
-            WRITE_PHYSICAL_UINT32(lapic_base + 0x300, low);
-        }
+        uint8_t vector_sipi = 0x80;
+        _Atomic uint32_t* wait_p = mp_startup_init(vector_sipi);
+        // for (int i = 1; i < n_cpu; i++) {
+        //     uint32_t dest = apic_ids[i] << 24;
+        //     uint32_t low = 0x00000500; // INIT
+        //     WRITE_PHYSICAL_UINT32(lapic_base + 0x310, dest);
+        //     WRITE_PHYSICAL_UINT32(lapic_base + 0x300, low);
+        // }
+        WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4500);
         moe_usleep(10000);
-        for (int i = 1; i < n_cpu; i++) {
-            uint32_t dest = apic_ids[i] << 24;
-            uint32_t low = 0x000600 + vector_sipi; // Startup IPI
-            WRITE_PHYSICAL_UINT32(lapic_base + 0x310, dest);
-            WRITE_PHYSICAL_UINT32(lapic_base + 0x300, low);
-        }
-        moe_timer_t timeout = moe_create_interval_timer(1000000);
-        while ((*wait_p != n_cpu) && moe_check_timer(&timeout)) {
-            moe_yield();
-        }
-        n_active_cpu = *wait_p;
+        // for (int i = 1; i < n_cpu; i++) {
+        //     uint32_t dest = apic_ids[i] << 24;
+        //     uint32_t low = 0x000600 + vector_sipi; // Startup IPI
+        //     WRITE_PHYSICAL_UINT32(lapic_base + 0x310, dest);
+        //     WRITE_PHYSICAL_UINT32(lapic_base + 0x300, low);
+        // }
+        WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4600 + vector_sipi);
+        // moe_usleep(200000);
+        // WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4600 + vector_sipi);
+        moe_usleep(200000);
+        // moe_timer_t timeout = moe_create_interval_timer(200000);
+        // while ((atomic_load(wait_p) != n_cpu) && moe_check_timer(&timeout)) {
+        //     io_pause();
+        // }
+        n_active_cpu = atomic_load(wait_p);
     }
 }
 

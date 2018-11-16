@@ -30,7 +30,7 @@
 #define VER_SYSTEM_NAME     "Minimal Operating Environment"
 #define VER_SYSTEM_MAJOR    0
 #define VER_SYSTEM_MINOR    4
-#define VER_SYSTEM_REVISION 1
+#define VER_SYSTEM_REVISION 2
 
 
 extern void arch_init();
@@ -214,9 +214,7 @@ _Noreturn void start_init(void* args) {
         draw_logo_bitmap(desktop_dib, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
     }
 
-    printf("%s v%d.%d.%d [%d Processors, Memory %dMB]\n",
-        VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION,
-        n_active_cpu, (int)(total_memory >> 8));
+    printf("%s v%d.%d.%d [%d Processors, Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, n_active_cpu, (int)(total_memory >> 8));
     // printf("Hello, world!\n");
 
     for (int i = 0; i < 5; i++){
@@ -264,7 +262,7 @@ _Noreturn void start_init(void* args) {
                     break;
 
                 case 'v':
-                    printf("%s v%d.%d.%d [Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(total_memory >> 8));
+                    printf("%s v%d.%d.%d\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION);
                     break;
 
                 case 'c':

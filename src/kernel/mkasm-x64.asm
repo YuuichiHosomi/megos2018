@@ -4,6 +4,8 @@
 
 %define LOADER_CS64 0x10
 %define LOADER_SS   0x18
+%define BOOT_INFO   0x0FF0
+%define MSR_EFER    0xC0000080
 
 [BITS 64]
 [section .text]
@@ -149,14 +151,7 @@ _longjmp:
     mov r14, [rcx+0x40]
     mov r15, [rcx+0x48]
 
-    ; mov rdx, [rcx+0x08]
-    ; push byte 0
-    ; push rdx
-    ; pushfq
-    ; push byte LOADER_CS64
     mov rdx, [rcx     ]
-    ; push rdx
-    ; bts dword [rsp+0x10], 9
 
     or eax, eax
     ; lea ecx, [rax+1]
@@ -164,7 +159,6 @@ _longjmp:
     jnz .nozero
     inc eax
 .nozero:
-    ; iretq
     sti
     jmp rdx
 
@@ -392,25 +386,39 @@ _irqXX:
     iretq
 
 
+; _Atomic uint32_t *mp_startup_init(uint8_t vector_sipi);
     global mp_startup_init
 mp_startup_init:
+    push rsi
     push rdi
+
     movzx edi, cl
-    shl edi, 10
+    shl edi, 12
     lea rsi, [rel _mp_rm_payload]
     mov ecx, _end_mp_rm_payload - _mp_rm_payload
     rep movsb
 
-    mov eax, 0x00000FF0
+    mov eax, BOOT_INFO
+    mov edx, 1
+    mov [rax], edx
 
     pop rdi
+    pop rsi
     ret
 
 [BITS 16]
 _mp_rm_payload:
+    cli
     xor ax, ax
     mov ds, ax
-    inc dword [ds:0xFF0]
+    mov bx, BOOT_INFO
+
+    lock inc dword [ds:bx]
+    ; mov ebp, 1
+    ; lock xadd [ds:bx], ebp
+    ; shl bp, 12
+    ; mov ss, ax
+    ; mov ss, bp
 
     hlt
     jmp $-1
