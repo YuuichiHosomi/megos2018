@@ -2,9 +2,11 @@
 ; Copyright (c) 2018 MEG-OS project, All rights reserved.
 ; License: BSD
 
+%define LOADER_CS32 0x08
 %define LOADER_CS64 0x10
 %define LOADER_SS   0x18
-%define BOOT_INFO   0x0FF0
+%define BOOT_INFO   0x0800
+%define MP_GDTR     BOOT_INFO + 0x40
 %define MSR_EFER    0xC0000080
 
 [BITS 64]
@@ -398,30 +400,86 @@ mp_startup_init:
     mov ecx, _end_mp_rm_payload - _mp_rm_payload
     rep movsb
 
+    mov edx, MP_GDTR
+    lea rsi, [rel __GDT]
+    mov edi, edx
+    mov ecx, (__end_GDT - __GDT)/4
+    rep movsd
+    mov [edx+4], edx
+    mov ax, (__end_GDT - __GDT)-1
+    mov [edx+2], ax
+
     mov eax, BOOT_INFO
     mov edx, 1
     mov [rax], edx
+    mov rcx, cr4
+    mov [rax + 0x04], ecx
+    mov rcx, cr3
+    mov [rax + 0x08], rcx
+    sidt [rax + 0x12]
+    lea ecx, [rel _startup32]
+    mov [rax + 0x20], ecx
+    mov ecx, LOADER_CS32
+    mov [rax + 0x24], ecx
+    lea ecx, [rel _startup_ap]
+    mov [rax + 0x28], ecx
+    mov ecx, LOADER_CS64
+    mov [rax + 0x2C], ecx
 
     pop rdi
     pop rsi
     ret
+
+_startup_ap:
+    lidt [rbx + 0x12]
+
+    inc dword [rbx]
+    hlt
+    jmp $-1
+
+
+[BITS 32]
+_startup32:
+
+    ; enter to LM
+    mov eax, cr0
+    bts eax, 31
+    mov cr0, eax
+
+    jmp far [ebx + 0x28]
+
 
 [BITS 16]
 _mp_rm_payload:
     cli
     xor ax, ax
     mov ds, ax
-    mov bx, BOOT_INFO
+    mov ebx, BOOT_INFO
 
-    lock inc dword [ds:bx]
-    ; mov ebp, 1
-    ; lock xadd [ds:bx], ebp
-    ; shl bp, 12
-    ; mov ss, ax
-    ; mov ss, bp
+    ; enter to PM
+    mov eax, cr0
+    or al, 0x01
+    mov cr0, eax
 
-    hlt
-    jmp $-1
+    lgdt [MP_GDTR+2]
+
+    mov eax, LOADER_SS
+    mov ss, eax
+    mov ds, eax
+    mov es, eax
+
+    mov eax, [bx + 0x04]
+    mov cr4, eax
+    mov eax, [bx + 0x08]
+    mov cr3 ,eax
+
+    mov ecx, MSR_EFER
+    rdmsr
+    bts eax, 8 ; LME
+    bts eax, 11 ; NXE
+    wrmsr
+
+    jmp dword far [bx + 0x20]
 _end_mp_rm_payload:
 
 
@@ -429,7 +487,7 @@ _end_mp_rm_payload:
 align 16
 __GDT:
     dw (__end_GDT-__GDT-1), 0, 0, 0     ; 00 NULL
-    dw 0, 0, 0, 0                       ; 08 RESERVED
+    dw 0xFFFF, 0x0000, 0x9A00, 0x00CF   ; 08 32bit KERNEL TEXT FLAT
     dw 0xFFFF, 0x0000, 0x9A00, 0x00AF   ; 10 64bit KERNEL TEXT FLAT
     dw 0xFFFF, 0x0000, 0x9200, 0x00CF   ; 18 32bit KERNEL DATA FLAT
     dw 0xFFFF, 0x0000, 0xFA00, 0x00AF   ; 23 64bit USER TEXT FLAT

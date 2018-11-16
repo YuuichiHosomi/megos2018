@@ -279,7 +279,7 @@ void apic_init() {
 //  because to initialize AP needs Timer
 void apic_init_mp() {
     if (n_cpu > 1) {
-        uint8_t vector_sipi = 0x80;
+        uint8_t vector_sipi = 0x10;
         _Atomic uint32_t* wait_p = mp_startup_init(vector_sipi);
         // for (int i = 1; i < n_cpu; i++) {
         //     uint32_t dest = apic_ids[i] << 24;
