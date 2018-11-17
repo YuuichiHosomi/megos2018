@@ -66,8 +66,20 @@ void* mm_alloc_static(size_t n);
 
 
 //  Threading Service
+typedef uint8_t moe_priority_level_t;
+typedef enum {
+    priority_idle = 0,
+    priority_lowest,
+    priority_lower,
+    priority_normal,
+    priority_higher,
+    priority_highest,
+    priority_realtime,
+    priority_max,
+} moe_priority_type_t;
+
 typedef void (*moe_start_thread)(void* args);
-int moe_create_thread(moe_start_thread start, void* args, const char* name);
+int moe_create_thread(moe_start_thread start, moe_priority_level_t priority, void* args, const char* name);
 void moe_yield();
 void moe_consume_quantum();
 int moe_usleep(uint64_t us);
@@ -84,6 +96,8 @@ typedef struct moe_fifo_t moe_fifo_t;
 moe_fifo_t* moe_fifo_init(uintptr_t capacity);
 intptr_t moe_fifo_read(moe_fifo_t* self, intptr_t default_val);
 int moe_fifo_write(moe_fifo_t* self, intptr_t data);
+uintptr_t moe_fifo_get_estimated_count(moe_fifo_t* self);
+uintptr_t moe_fifo_get_estimated_free(moe_fifo_t* self);
 
 
 //  HID Service

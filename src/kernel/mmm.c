@@ -6,6 +6,7 @@
 #include "kernel.h"
 #include "efi.h"
 
+#define PAGE_SIZE   0x1000
 #define ROUNDUP_PAGE(n) ((n + 0xFFF) & ~0xFFF)
 
 typedef struct {
@@ -15,11 +16,24 @@ typedef struct {
 } moe_mmap;
 
 
-static atomic_uintptr_t static_start;
+uintptr_t total_memory = 0;
+_Atomic uintptr_t free_memory;
+static _Atomic uintptr_t static_start;
 
-void* mm_alloc_static_page(size_t n) {
-    uintptr_t result = atomic_fetch_add(&static_start, ROUNDUP_PAGE(n));
-    return (void*)result;
+void *mm_alloc_static_page(size_t n) {
+    uintptr_t size = ROUNDUP_PAGE(n);
+    uintptr_t free = atomic_load(&free_memory);
+    while (free > size) {
+        if (atomic_compare_exchange_strong(&free_memory, &free, free - size)) {
+            atomic_fetch_sub(&free_memory, size);
+            uintptr_t result = atomic_fetch_add(&static_start, size);
+            return (void*)result;
+        } else {
+            io_pause();
+            free = atomic_load(&free_memory);
+        }
+    }
+    return NULL;
 }
 
 void* mm_alloc_static(size_t n) {
@@ -31,7 +45,6 @@ void* mm_alloc_static(size_t n) {
 /*********************************************************************/
 
 
-uintptr_t total_memory = 0;
 
 static int mm_type_for_count(uint32_t type) {
     switch (type) {
@@ -105,6 +118,7 @@ void mm_init(moe_bootinfo_mmap_t* mmap) {
     gRT->SetVirtualAddressMap(mmap->size, mmap->desc_size, mmap->desc_version, mmap->mmap);
 
     static_start = mabase;
+    free_memory = masize * PAGE_SIZE;
 
     // printf("mm: %08zx %08zx\n", mmap->size, mmap->desc_size);
 

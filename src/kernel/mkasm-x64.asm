@@ -6,11 +6,24 @@
 %define LOADER_CS64 0x10
 %define LOADER_SS   0x18
 %define BOOT_INFO   0x0800
-%define MP_GDTR     BOOT_INFO + 0x40
+%define BOOTINFO_STACK_SIZE 0x04
+%define BOOTINFO_STACKS     0x08
+%define BOOTINFO_CR4        0x10
+%define BOOTINFO_CR3        0x18
+%define BOOTINFO_IDT        0x22
+%define BOOTINFO_START32    0x30
+%define BOOTINFO_START64    0x38
+%define BOOTINFO_GDTR       0x40
 %define MSR_EFER    0xC0000080
+%define IA32_APIC_BASE_MSR          0x1B
+%define IA32_APIC_BASE_MSR_ENABLE   0x800
 
 [BITS 64]
 [section .text]
+    extern default_int_handler
+    extern moe_switch_fpu_context
+    extern _irq_main
+    extern irq_LV_main
 
 
 ; int atomic_bit_test(void *p, uintptr_t bit);
@@ -218,14 +231,24 @@ io_in32:
     ret
 
 
+    global io_cli
+io_cli:
+    cli
+    ret
+
+
 ; int gdt_init(void);
     global gdt_init
 gdt_init:
 
     ; load GDTR
     lea rax, [rel __GDT]
-    mov [rax+2], rax
-    lgdt [rax]
+    push rax
+    mov ecx, (__end_GDT - __GDT)-1
+    shl rcx, 48
+    push rcx
+    lgdt [rsp+6]
+    add rsp, 16
 
     ; refresh CS and SS
     mov eax, LOADER_CS64
@@ -251,7 +274,6 @@ idt_load:
 
 
     global _int00, _int03, _int06, _int0D, _int0E
-    extern default_int_handler
 _int00: ; #DE
     push BYTE 0
     push BYTE 0x00
@@ -320,7 +342,6 @@ _iretq:
 
 
     global _int07
-    extern moe_switch_fpu_context
 _int07: ; #NM
     push rax
     push rcx
@@ -346,7 +367,6 @@ _int07: ; #NM
 
 
     global _irq00, _irq01, _irq02, _irq0C
-    extern _irq_main
 _irq00:
     push rcx
     mov cl, 0x00
@@ -387,8 +407,30 @@ _irqXX:
     pop rcx
     iretq
 
+    global _irq_LV
+_irq_LV:
+    push rax
+    push rcx
+    push rdx
+    push r8
+    push r9
+    push r10
+    push r11
+    cld
 
-; _Atomic uint32_t *mp_startup_init(uint8_t vector_sipi);
+    call irq_LV_main
+
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdx
+    pop rcx
+    pop rax
+    iretq
+
+
+; _Atomic uint32_t *mp_startup_init(uint8_t vector_sipi, size_t stack_chunk_size, uintptr_t* stacks);
     global mp_startup_init
 mp_startup_init:
     push rsi
@@ -400,42 +442,72 @@ mp_startup_init:
     mov ecx, _end_mp_rm_payload - _mp_rm_payload
     rep movsb
 
-    mov edx, MP_GDTR
+    mov eax, BOOT_INFO
+    mov [eax + BOOTINFO_STACK_SIZE], edx
+    mov [eax + BOOTINFO_STACKS], r8
+    lea edx, [rax + BOOTINFO_GDTR]
     lea rsi, [rel __GDT]
     mov edi, edx
     mov ecx, (__end_GDT - __GDT)/4
     rep movsd
-    mov [edx+4], edx
-    mov ax, (__end_GDT - __GDT)-1
-    mov [edx+2], ax
+    mov [edx+2], edx
+    mov word [edx], (__end_GDT - __GDT)-1
 
-    mov eax, BOOT_INFO
     mov edx, 1
     mov [rax], edx
-    mov rcx, cr4
-    mov [rax + 0x04], ecx
-    mov rcx, cr3
-    mov [rax + 0x08], rcx
-    sidt [rax + 0x12]
+    mov rdx, cr4
+    mov [rax + BOOTINFO_CR4], edx
+    mov rdx, cr3
+    mov [rax + BOOTINFO_CR3], rdx
+    sidt [rax + BOOTINFO_IDT]
+
     lea ecx, [rel _startup32]
-    mov [rax + 0x20], ecx
-    mov ecx, LOADER_CS32
-    mov [rax + 0x24], ecx
+    mov edx, LOADER_CS32
+    mov [rax + BOOTINFO_START32], ecx
+    mov [rax + BOOTINFO_START32 + 4], edx
     lea ecx, [rel _startup_ap]
-    mov [rax + 0x28], ecx
-    mov ecx, LOADER_CS64
-    mov [rax + 0x2C], ecx
+    mov edx, LOADER_CS64
+    mov [rax + BOOTINFO_START64], ecx
+    mov [rax + BOOTINFO_START64 + 4], edx
 
     pop rdi
     pop rsi
     ret
 
-_startup_ap:
-    lidt [rbx + 0x12]
 
-    inc dword [rbx]
-    hlt
-    jmp $-1
+    extern moe_startup_ap
+    extern apic_set_apicid_to_cpuid
+_startup_ap:
+    lidt [rbx + BOOTINFO_IDT]
+
+    ; acquire stack per cpu
+    mov ebp, 1
+    lock xadd [rbx], ebp
+    mov eax, ebp
+    imul eax, [rbx + BOOTINFO_STACK_SIZE]
+    mov rcx, [rbx + BOOTINFO_STACKS]
+    lea rsp, [rcx + rax]
+    and rsp, byte 0xF0
+
+    ; enable APIC
+    mov ecx, IA32_APIC_BASE_MSR
+    rdmsr
+    or eax, IA32_APIC_BASE_MSR_ENABLE
+    wrmsr
+    and eax, 0xFFFFF000
+    ; xor ecx, ecx
+    ; mov [rax + 0x270], ecx
+    mov edx, [rax + 0x20]
+    shr edx, 24
+    mov ecx, ebp
+    call apic_set_apicid_to_cpuid
+
+    ; then enable interrupt
+    sti
+
+    mov ecx, ebp
+    call moe_startup_ap
+    ud2
 
 
 [BITS 32]
@@ -446,7 +518,7 @@ _startup32:
     bts eax, 31
     mov cr0, eax
 
-    jmp far [ebx + 0x28]
+    jmp far [ebx + BOOTINFO_START64]
 
 
 [BITS 16]
@@ -461,16 +533,16 @@ _mp_rm_payload:
     or al, 0x01
     mov cr0, eax
 
-    lgdt [MP_GDTR+2]
+    lgdt [bx + BOOTINFO_GDTR]
 
-    mov eax, LOADER_SS
-    mov ss, eax
-    mov ds, eax
-    mov es, eax
+    mov ax, LOADER_SS
+    mov ss, ax
+    mov ds, ax
+    mov es, ax
 
-    mov eax, [bx + 0x04]
+    mov eax, [bx + BOOTINFO_CR4]
     mov cr4, eax
-    mov eax, [bx + 0x08]
+    mov eax, [bx + BOOTINFO_CR3]
     mov cr3 ,eax
 
     mov ecx, MSR_EFER
@@ -479,14 +551,14 @@ _mp_rm_payload:
     bts eax, 11 ; NXE
     wrmsr
 
-    jmp dword far [bx + 0x20]
+    jmp dword far [bx + BOOTINFO_START32]
 _end_mp_rm_payload:
 
 
 [section .data]
 align 16
 __GDT:
-    dw (__end_GDT-__GDT-1), 0, 0, 0     ; 00 NULL
+    dw 0, 0, 0, 0                       ; 00 NULL
     dw 0xFFFF, 0x0000, 0x9A00, 0x00CF   ; 08 32bit KERNEL TEXT FLAT
     dw 0xFFFF, 0x0000, 0x9A00, 0x00AF   ; 10 64bit KERNEL TEXT FLAT
     dw 0xFFFF, 0x0000, 0x9200, 0x00CF   ; 18 32bit KERNEL DATA FLAT

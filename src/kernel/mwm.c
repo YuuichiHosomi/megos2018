@@ -200,5 +200,5 @@ _Noreturn void window_thread(void* args) {
 extern moe_dib_t main_screen_dib;
 void mwm_init() {
     main_screen = moe_create_view(NULL, &main_screen_dib);
-    moe_create_thread(&window_thread, NULL, "Window Manager");
+    moe_create_thread(&window_thread, priority_highest, NULL, "Window Manager");
 }

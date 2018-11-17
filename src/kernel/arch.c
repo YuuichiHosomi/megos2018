@@ -7,7 +7,7 @@
 #include "x86.h"
 
 
-extern _Atomic uint32_t *mp_startup_init(uint8_t);
+extern _Atomic uint32_t *mp_startup_init(uint8_t vector_sipi, size_t stack_chunk_size, uintptr_t* stacks);
 extern uint16_t gdt_init(void);
 extern void idt_load(volatile void*, size_t);
 extern void* _int00;
@@ -20,6 +20,7 @@ extern void* _irq00;
 extern void* _irq01;
 extern void* _irq02;
 extern void* _irq0C;
+extern void* _irq_LV;
 uint64_t io_rdmsr(uint32_t addr);
 void io_wrmsr(uint32_t addr, uint64_t val);
 
@@ -28,11 +29,13 @@ uint8_t io_in8(uint16_t port);
 void io_out32(uint16_t port, uint32_t val);
 uint32_t io_in32(uint16_t port);
 
+void moe_init_mp(int n_active_cpu);
+
 
 /*********************************************************************/
 //  IDT
 
-#define MAX_IDT_NUM 0x80
+#define MAX_IDT_NUM 0x100
 uint16_t cs_sel;
 x64_idt64_t* idt;
 
@@ -90,8 +93,9 @@ void idt_init() {
 
 #define IRQ_BASE                    0x40
 #define MAX_IRQ                     24
-#define MAX_CPU                     16
+#define MAX_CPU                     32
 #define INVALID_CPUID               0xFF
+#define IRQ_SCHDULE                 0xFC
 
 #define IA32_APIC_BASE_MSR          0x1B
 #define IA32_APIC_BASE_MSR_BSP      0x100
@@ -126,12 +130,11 @@ IRQ_HANDLER irq_handler[MAX_IRQ];
 apic_madt_ovr_t gsi_table[MAX_IRQ];
 
 apic_id_t apic_ids[MAX_CPU];
+uint8_t apicid_to_cpuids[256];
 int n_cpu = 0;
-int n_active_cpu = 0;
-
-
 MOE_PHYSICAL_ADDRESS lapic_base = 0;
 MOE_PHYSICAL_ADDRESS ioapic_base   = 0;
+int mp_mode = 0;
 
 
 void apic_set_io_redirect(uint8_t irq, uint8_t vector, uint8_t trigger, int mask, apic_id_t desination) {
@@ -183,8 +186,33 @@ void _irq_main(uint8_t irq, void* p) {
     }
     if (irq == 2) {
         moe_consume_quantum();
+        if (mp_mode) {
+            while (READ_PHYSICAL_UINT32(lapic_base + 0x0300) & 0x1000) io_pause();
+            // WRITE_PHYSICAL_UINT32(lapic_base + 0x310, 0xFF000000);
+            WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0xC0000 + IRQ_SCHDULE);
+            // WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0xC0400);
+        } else {
+            // moe_consume_quantum();
+        }
     }
 }
+
+void irq_LV_main() {
+    WRITE_PHYSICAL_UINT32(lapic_base + 0x0B0, 0);
+    // __asm__ volatile("int $3");
+    moe_consume_quantum();
+}
+
+uint32_t moe_get_current_cpuid() {
+    int apicid = (READ_PHYSICAL_UINT32(lapic_base + 0x20) >> 24);
+    return apicid_to_cpuids[apicid];
+}
+
+void apic_set_apicid_to_cpuid(uint8_t cpuid, uint8_t apicid) {
+    apicid_to_cpuids[apicid] = cpuid;
+    WRITE_PHYSICAL_UINT32(lapic_base + 0x0F0, 0x100);
+}
+
 
 void apic_init() {
     acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
@@ -192,6 +220,8 @@ void apic_init() {
 
         //  Init IRQ table
         memset(gsi_table, -1, sizeof(gsi_table));
+
+        memset(apicid_to_cpuids, 0, 256);
 
         // apic_madt_ovr_t gsi_irq00 = { 0, 0, 2, 0 };
         // gsi_table[0] = gsi_irq00;
@@ -206,6 +236,8 @@ void apic_init() {
         lapic_base = msr_lapic & ~0xFFF;
 
         apic_ids[n_cpu++] = READ_PHYSICAL_UINT32(lapic_base + 0x20) >> 24;
+
+        // WRITE_PHYSICAL_UINT32(lapic_base + 0x0F0, 0x100);
 
         //  Parse structures
         size_t max_length = madt->Header.length - 44;
@@ -260,6 +292,7 @@ void apic_init() {
         idt_set_kernel_handler(IRQ_BASE+1, (uintptr_t)&_irq01, 0);
         idt_set_kernel_handler(IRQ_BASE+2, (uintptr_t)&_irq02, 0);
         idt_set_kernel_handler(IRQ_BASE+12, (uintptr_t)&_irq0C, 0);
+        idt_set_kernel_handler(IRQ_SCHDULE, (uintptr_t)&_irq_LV, 0);
 
         //  Disable Legacy PIC
         if (madt->Flags & ACPI_MADT_PCAT_COMPAT) {
@@ -280,30 +313,17 @@ void apic_init() {
 void apic_init_mp() {
     if (n_cpu > 1) {
         uint8_t vector_sipi = 0x10;
-        _Atomic uint32_t* wait_p = mp_startup_init(vector_sipi);
-        // for (int i = 1; i < n_cpu; i++) {
-        //     uint32_t dest = apic_ids[i] << 24;
-        //     uint32_t low = 0x00000500; // INIT
-        //     WRITE_PHYSICAL_UINT32(lapic_base + 0x310, dest);
-        //     WRITE_PHYSICAL_UINT32(lapic_base + 0x300, low);
-        // }
+        const uintptr_t stack_chunk_size = 0x4000;
+        uintptr_t* stacks = mm_alloc_static_page(stack_chunk_size * n_cpu);
+        _Atomic uint32_t* wait_p = mp_startup_init(vector_sipi, stack_chunk_size, stacks);
         WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4500);
         moe_usleep(10000);
-        // for (int i = 1; i < n_cpu; i++) {
-        //     uint32_t dest = apic_ids[i] << 24;
-        //     uint32_t low = 0x000600 + vector_sipi; // Startup IPI
-        //     WRITE_PHYSICAL_UINT32(lapic_base + 0x310, dest);
-        //     WRITE_PHYSICAL_UINT32(lapic_base + 0x300, low);
-        // }
         WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4600 + vector_sipi);
-        // moe_usleep(200000);
-        // WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4600 + vector_sipi);
         moe_usleep(200000);
-        // moe_timer_t timeout = moe_create_interval_timer(200000);
-        // while ((atomic_load(wait_p) != n_cpu) && moe_check_timer(&timeout)) {
-        //     io_pause();
-        // }
-        n_active_cpu = atomic_load(wait_p);
+        moe_init_mp(atomic_load(wait_p));
+        mp_mode = 1;
+    } else {
+        moe_init_mp(1);
     }
 }
 

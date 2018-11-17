@@ -110,6 +110,6 @@ void hid_init() {
     const uintptr_t fifo_size = 256;
     hid_fifo = moe_fifo_init(fifo_size);
 
-    moe_create_thread(hid_thread, 0, "HID");
+    moe_create_thread(hid_thread, priority_highest, 0, "HID");
     ps2_exists = ps2_init();
 }

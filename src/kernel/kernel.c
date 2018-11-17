@@ -30,7 +30,7 @@
 #define VER_SYSTEM_NAME     "Minimal Operating Environment"
 #define VER_SYSTEM_MAJOR    0
 #define VER_SYSTEM_MINOR    4
-#define VER_SYSTEM_REVISION 2
+#define VER_SYSTEM_REVISION 3
 
 
 extern void arch_init();
@@ -44,6 +44,7 @@ extern void mwm_init();
 extern void display_threads();
 
 extern uintptr_t total_memory;
+extern uintptr_t free_memory;
 extern int n_active_cpu;
 
 EFI_RUNTIME_SERVICES* gRT;
@@ -173,9 +174,9 @@ void moe_ctrl_alt_del() {
     gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
 }
 
+volatile double pi = 3.14;
 _Noreturn void fpu_thread(void* args) {
-    double count = 0.0;
-    double pi = 3.14;
+    volatile double count = 0.0;
     int pid = moe_get_current_thread();
     for (;;) {
         count += pi * pid;
@@ -218,7 +219,7 @@ _Noreturn void start_init(void* args) {
     // printf("Hello, world!\n");
 
     for (int i = 0; i < 5; i++){
-        moe_create_thread(&fpu_thread, 0, "FPU DEMO");
+        moe_create_thread(&fpu_thread, 0, 0, "FPU DEMO");
     }
 
     // display_threads();
@@ -274,8 +275,10 @@ _Noreturn void start_init(void* args) {
                     break;
 
                 case 'f':
-                    moe_create_thread(&fpu_thread, 0, "FPU");
-                    printf("FPU Thread started\n");
+                {
+                    int thid = moe_create_thread(&fpu_thread, 0, 0, "FPU");
+                    printf("FPU Thread started (%d)\n", thid);
+                }
                     break;
 
                 case 'r':
@@ -311,6 +314,7 @@ _Noreturn void start_init(void* args) {
 
                 case 'm':
                 {
+                    // printf("Total: %d MB\nFree: %d KB\n", (int)(total_memory >> 8), (int)(free_memory >> 10));
                     acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
                     if (madt) {
                         printf("Dump of MADT:\n");
@@ -346,8 +350,8 @@ void moe_assert(const char* file, uintptr_t line, ...) {
     vprintf(msg, list);
 
 	va_end(list);
-    // __asm__ volatile("int3");
-    // for (;;) io_hlt();
+    __asm__ volatile("int3");
+    for (;;) io_hlt();
 }
 
 _Noreturn void start_kernel(moe_bootinfo_t* bootinfo) {
@@ -361,7 +365,7 @@ _Noreturn void start_kernel(moe_bootinfo_t* bootinfo) {
     mwm_init();
     hid_init();
 
-    moe_create_thread(&start_init, 0, "main");
+    moe_create_thread(&start_init, 0, 0, "kernel");
 
     //  Do Idle
     for (;;) io_hlt();
