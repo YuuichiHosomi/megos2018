@@ -20,7 +20,7 @@ extern void* _irq00;
 extern void* _irq01;
 extern void* _irq02;
 extern void* _irq0C;
-extern void* _irq_LV;
+extern void* _ipi_sche;
 uint64_t io_rdmsr(uint32_t addr);
 void io_wrmsr(uint32_t addr, uint64_t val);
 
@@ -29,7 +29,7 @@ uint8_t io_in8(uint16_t port);
 void io_out32(uint16_t port, uint32_t val);
 uint32_t io_in32(uint16_t port);
 
-void moe_init_mp(int n_active_cpu);
+void smp_start(int n_active_cpu);
 
 
 /*********************************************************************/
@@ -134,7 +134,7 @@ uint8_t apicid_to_cpuids[256];
 int n_cpu = 0;
 MOE_PHYSICAL_ADDRESS lapic_base = 0;
 MOE_PHYSICAL_ADDRESS ioapic_base   = 0;
-int mp_mode = 0;
+int smp_mode = 0;
 
 
 void apic_set_io_redirect(uint8_t irq, uint8_t vector, uint8_t trigger, int mask, apic_id_t desination) {
@@ -186,24 +186,23 @@ void _irq_main(uint8_t irq, void* p) {
     }
     if (irq == 2) {
         moe_consume_quantum();
-        if (mp_mode) {
-            while (READ_PHYSICAL_UINT32(lapic_base + 0x0300) & 0x1000) io_pause();
-            // WRITE_PHYSICAL_UINT32(lapic_base + 0x310, 0xFF000000);
+        if (smp_mode) {
+            // while (READ_PHYSICAL_UINT32(lapic_base + 0x0300) & 0x1000) io_pause();
+            // for (int i = 1; i < n_cpu; i++) {
+            //     WRITE_PHYSICAL_UINT32(lapic_base + 0x310, apic_ids[i] << 24);
+            //     WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x00000 + IRQ_SCHDULE);
+            // }
             WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0xC0000 + IRQ_SCHDULE);
-            // WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0xC0400);
-        } else {
-            // moe_consume_quantum();
         }
     }
 }
 
-void irq_LV_main() {
+void ipi_sche_main() {
     WRITE_PHYSICAL_UINT32(lapic_base + 0x0B0, 0);
-    // __asm__ volatile("int $3");
     moe_consume_quantum();
 }
 
-uint32_t moe_get_current_cpuid() {
+uintptr_t moe_get_current_cpuid() {
     int apicid = (READ_PHYSICAL_UINT32(lapic_base + 0x20) >> 24);
     return apicid_to_cpuids[apicid];
 }
@@ -292,7 +291,7 @@ void apic_init() {
         idt_set_kernel_handler(IRQ_BASE+1, (uintptr_t)&_irq01, 0);
         idt_set_kernel_handler(IRQ_BASE+2, (uintptr_t)&_irq02, 0);
         idt_set_kernel_handler(IRQ_BASE+12, (uintptr_t)&_irq0C, 0);
-        idt_set_kernel_handler(IRQ_SCHDULE, (uintptr_t)&_irq_LV, 0);
+        idt_set_kernel_handler(IRQ_SCHDULE, (uintptr_t)&_ipi_sche, 0);
 
         //  Disable Legacy PIC
         if (madt->Flags & ACPI_MADT_PCAT_COMPAT) {
@@ -320,10 +319,10 @@ void apic_init_mp() {
         moe_usleep(10000);
         WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4600 + vector_sipi);
         moe_usleep(200000);
-        moe_init_mp(atomic_load(wait_p));
-        mp_mode = 1;
+        smp_start(atomic_load(wait_p));
+        smp_mode = 1;
     } else {
-        moe_init_mp(1);
+        smp_start(1);
     }
 }
 
@@ -331,7 +330,7 @@ void apic_init_mp() {
 /*********************************************************************/
 //  High Precision Event Timer
 
-#define HPET_DIV    1
+#define HPET_DIV    5
 MOE_PHYSICAL_ADDRESS hpet_base = 0;
 uint32_t hpet_main_cnt_period = 0;
 volatile uint64_t hpet_count = 0;

@@ -21,7 +21,7 @@ typedef struct moe_fiber_t moe_fiber_t;
 typedef struct moe_fiber_t {
     moe_fiber_t* next;
     union {
-        uintptr_t flags;
+        _Atomic uintptr_t flags;
         struct {
             moe_priority_level_t priority: 4;
             uint8_t unkown: 4;
@@ -44,13 +44,18 @@ typedef struct moe_fiber_t {
     char name[THREAD_NAME_SIZE];
 } moe_fiber_t;
 
+enum {
+    thread_flags_running = 31,
+};
 
 extern void io_set_lazy_fpu_switch();
 extern void io_finit();
 extern void io_fsave(void*);
 extern void io_fload(void*);
+extern uint32_t io_lock_irq();
+extern void io_unlock_irq(uint32_t);
 extern void setjmp_new_thread(jmp_buf env, uintptr_t* new_sp);
-extern uint32_t moe_get_current_cpuid();
+extern uintptr_t moe_get_current_cpuid();
 char *strncpy(char *s1, const char *s2, size_t n);
 int snprintf(char* buffer, size_t n, const char* format, ...);
 
@@ -59,30 +64,29 @@ _Atomic thid_t next_thid = 1;
 _Atomic uint32_t system_affinity = 1;
 
 moe_fiber_t **idle_threads;
-moe_fiber_t **current_threads;
-moe_fiber_t **fpu_owners;
+_Atomic (moe_fiber_t *)*current_threads;
+_Atomic (moe_fiber_t *)*fpu_owners;
 moe_fiber_t root_thread;
 int n_active_cpu = 1;
 
 struct {
     moe_fifo_t* waiting[DEFAULT_SCHEDULE_QUEUES];
     moe_fifo_t* retired[DEFAULT_SCHEDULE_QUEUES];
+    atomic_flag lock;
 } thread_queue;
 
 
 moe_fiber_t* get_current_thread() {
-    // if (!current_threads) return &root_thread;
-    return current_threads[moe_get_current_cpuid()];
+    uintptr_t cpuid = moe_get_current_cpuid();
+    return atomic_load(&current_threads[cpuid]);
 }
 
 int moe_get_current_thread() {
-    // if (!current_threads) return 0;
     return get_current_thread()->thid;
 }
 
-uint64_t moe_get_current_load() {
-    // if (!current_threads) return 0;
-    return moe_get_measure() - get_current_thread()->measure0;
+uint64_t moe_get_thread_load(moe_fiber_t* thread) {
+    return moe_get_measure() - atomic_load(&thread->measure0);
 }
 
 int sch_add(moe_fiber_t *thread) {
@@ -111,27 +115,22 @@ moe_fiber_t *sch_next() {
     }
 
     //  Wait queue is empty
-    uintptr_t t;
-    for(int i = 0; i < DEFAULT_SCHEDULE_QUEUES; i++) {
-        while ((t = moe_fifo_read(thread_queue.retired[i], 0))) {
-            moe_fifo_write(thread_queue.waiting[i], t);
+    if (!atomic_flag_test_and_set(&thread_queue.lock)) {
+        uintptr_t t;
+        for(int i = 0; i < DEFAULT_SCHEDULE_QUEUES; i++) {
+            while ((t = moe_fifo_read(thread_queue.retired[i], 0))) {
+                moe_fifo_write(thread_queue.waiting[i], t);
+            }
         }
+        atomic_flag_clear(&thread_queue.lock);
     }
 
     return idle_threads[moe_get_current_cpuid()];
 }
 
 //  Main Context Swicth
-int switch_context(moe_fiber_t* next) {
-
-    int cpuid = moe_get_current_cpuid();
-    moe_fiber_t* current = current_threads[cpuid];
-
-    if (current == next) return 0;
-
-    if (atomic_flag_test_and_set(&current->lock)) return -1;
-
-    uint64_t load = moe_get_current_load();
+static void switch_context(uint32_t cpuid, moe_fiber_t* current, moe_fiber_t* next) {
+    uint64_t load = moe_get_thread_load(current);
     atomic_fetch_add(&current->cputime, load);
     atomic_fetch_add(&current->load0, load);
     if (!setjmp(current->jmpbuf)) {
@@ -139,30 +138,44 @@ int switch_context(moe_fiber_t* next) {
         if (fpu_owners[cpuid] != next) {
             // io_set_lazy_fpu_switch();
         }
-        current_threads[cpuid] = next;
-        next->measure0 = moe_get_measure();
-        next->affinity |= (1 << cpuid);
-        next->last_cpuid = cpuid;
-        next->running = 1;
-        current->running = 0;
-        longjmp(next->jmpbuf, 0);
+        if (atomic_compare_exchange_strong(&current_threads[cpuid], &current, next)) {
+            current->running = 0;
+            next->measure0 = moe_get_measure();
+            next->affinity |= (1 << cpuid);
+            next->last_cpuid = cpuid;
+            next->running = 1;
+            longjmp(next->jmpbuf, 0);
+        } else {
+            MOE_ASSERT(false, "WTF?");
+        }
     }
+}
 
-    atomic_flag_clear(&current->lock);
-    return 0;
+static void next_thread() {
+    uint32_t eflags = io_lock_irq();
+    uint32_t cpuid = moe_get_current_cpuid();
+    moe_fiber_t* current = current_threads[cpuid];
+    if (!atomic_flag_test_and_set(&current->lock)) {
+        moe_fiber_t* next = sch_next();
+        if (next != current) {
+            switch_context(cpuid, current, next);
+        }
+        atomic_flag_clear(&current->lock);
+    }
+    io_unlock_irq(eflags);
 }
 
 //  Lazy FPU Context Switch
 void moe_switch_fpu_context(uintptr_t delta) {
     int cpuid = moe_get_current_cpuid();
     moe_fiber_t* current = current_threads[cpuid];
-    if (fpu_owners[cpuid] == current) {
+    if (atomic_load(&fpu_owners[cpuid]) == current) {
         ;
     } else {
-        if (fpu_owners[cpuid]) {
+        if (atomic_load(&fpu_owners[cpuid])) {
             io_fsave(fpu_owners[cpuid]->fpu_context);
         }
-        fpu_owners[cpuid] = current;
+        atomic_store(&fpu_owners[cpuid], current);
         if (current->fpu_context) {
             io_fload(current->fpu_context);
         } else {
@@ -172,31 +185,25 @@ void moe_switch_fpu_context(uintptr_t delta) {
     }
 }
 
-void moe_next_thread() {
-    moe_fiber_t* next = sch_next();
-    if (switch_context(next)) {
-        sch_add(next);
-    }
-}
 
 void moe_consume_quantum() {
     if (!current_threads) return;
     moe_fiber_t* current = get_current_thread();
-    if (current->quantum_base) {
+    if (current->quantum_base > 0) {
         if (current->priority < priority_highest && moe_fifo_get_estimated_count(thread_queue.waiting[0])) {
-            moe_next_thread();
+            next_thread();
         }
-        uint32_t cload = moe_get_current_load();
+        uint32_t cload = moe_get_thread_load(current);
         uint32_t load = atomic_fetch_add(&current->load00, cload);
         if (load + cload > CONSUME_QUANTUM_THRESHOLD) {
             atomic_fetch_sub(&current->load00, CONSUME_QUANTUM_THRESHOLD);
             if (atomic_fetch_add(&current->quantum_left, -1) <= 0) {
                 atomic_fetch_add(&current->quantum_left, current->quantum_base);
-                moe_next_thread();
+                next_thread();
             }
         }
     } else {
-        moe_next_thread();
+        next_thread();
     }
 }
 
@@ -206,10 +213,10 @@ void moe_yield() {
         return;
     }
     moe_fiber_t* current = get_current_thread();
-    if (current->quantum_left > current->quantum_base) {
+    if (atomic_load(&current->quantum_left) > current->quantum_base) {
         atomic_store(&current->quantum_left, current->quantum_base);
     }
-    moe_next_thread();
+    next_thread();
 }
 
 int moe_wait_for_timer(moe_timer_t* timer) {
@@ -236,15 +243,17 @@ moe_fiber_t* create_thread(moe_start_thread start, moe_priority_level_t priority
     if (name) {
         strncpy(&new_thread->name[0], name, THREAD_NAME_SIZE - 1);
     }
-    const uintptr_t stack_count = 0x1000;
-    const uintptr_t stack_size = stack_count * sizeof(uintptr_t);
-    uintptr_t* stack = mm_alloc_static(stack_size);
-    memset(stack, 0, stack_size);
-    uintptr_t* sp = stack + stack_count;
-    *--sp = 0x00007fffdeadbeef;
-    *--sp = (uintptr_t)args;
-    *--sp = (uintptr_t)start;
-    setjmp_new_thread(new_thread->jmpbuf, sp);
+    if (start) {
+        const uintptr_t stack_count = 0x1000;
+        const uintptr_t stack_size = stack_count * sizeof(uintptr_t);
+        uintptr_t* stack = mm_alloc_static(stack_size);
+        memset(stack, 0, stack_size);
+        uintptr_t* sp = stack + stack_count;
+        *--sp = 0x00007fffdeadbeef;
+        *--sp = (uintptr_t)args;
+        *--sp = (uintptr_t)start;
+        setjmp_new_thread(new_thread->jmpbuf, sp);
+    }
 
     moe_fiber_t* p = &root_thread;
     for (; p->next; p = p->next) {}
@@ -260,14 +269,10 @@ int moe_create_thread(moe_start_thread start, moe_priority_level_t priority, voi
 }
 
 
-_Noreturn void thread_ap_idle(void* args) {
-    for (;;) io_hlt();
-}
-
 _Noreturn void moe_startup_ap(int cpuid, int apic_id) {
     atomic_bit_test_and_set(&system_affinity, cpuid);
     // printf("Hello AP! (%d)\n", cpuid);
-    thread_ap_idle(NULL);
+    for (;;) io_hlt();
 }
 
 
@@ -306,22 +311,22 @@ _Noreturn void scheduler() {
     }
 }
 
-void moe_init_mp(int _n_active_cpu) {
+void smp_start(int _n_active_cpu) {
 
-    char buff[THREAD_NAME_SIZE];
+    char name[THREAD_NAME_SIZE];
     n_active_cpu = _n_active_cpu;
     uintptr_t size = n_active_cpu * sizeof(void*);
     moe_fiber_t** p;
 
     p = mm_alloc_static(size);
     memset(p, 0, size);
-    fpu_owners = p;
+    fpu_owners = (_Atomic (moe_fiber_t*)*) p;
 
     p = mm_alloc_static(size);
     p[0] = &root_thread;
     for (int i = 1; i < n_active_cpu; i++) {
-        snprintf(buff, THREAD_NAME_SIZE, "(IDLE CPU=%d)", i);
-        moe_fiber_t* th = create_thread(&thread_ap_idle, priority_idle, 0, buff);
+        snprintf(name, THREAD_NAME_SIZE, "(IDLE CPU=%d)", i);
+        moe_fiber_t* th = create_thread(NULL, priority_idle, NULL, name);
         th->affinity = 1 << i;
         p[i] = th;
     }
@@ -329,7 +334,7 @@ void moe_init_mp(int _n_active_cpu) {
 
     p = mm_alloc_static(size);
     memcpy(p, idle_threads, size);
-    current_threads = p;
+    current_threads = (_Atomic (moe_fiber_t*)*) p;
 
     moe_create_thread(&scheduler, priority_highest, 0, "Scheduler");
 }

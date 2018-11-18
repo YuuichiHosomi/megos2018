@@ -175,11 +175,13 @@ void moe_ctrl_alt_del() {
 }
 
 volatile double pi = 3.14;
-_Noreturn void fpu_thread(void* args) {
-    volatile double count = 0.0;
+_Noreturn void demo_thread(void* args) {
+    // volatile double count = 0.0;
     int pid = moe_get_current_thread();
+    uint32_t count = pid;
     for (;;) {
-        count += pi * pid;
+        count += pid;
+        // count += pi * pid;
         int b = (int)count;
         mgs_fill_rect(pid * 10, 2, 8, 8, b);
         moe_yield();
@@ -203,7 +205,7 @@ extern moe_dib_t *desktop_dib;
 _Noreturn void start_init(void* args) {
 
     // TODO: Waiting for initializing window manager
-    if (!desktop_dib) moe_yield();
+    while (!desktop_dib) moe_yield();
 
     mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
     mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
@@ -219,7 +221,7 @@ _Noreturn void start_init(void* args) {
     // printf("Hello, world!\n");
 
     for (int i = 0; i < 5; i++){
-        moe_create_thread(&fpu_thread, 0, 0, "FPU DEMO");
+        moe_create_thread(&demo_thread, 0, 0, "DEMO");
     }
 
     // display_threads();
@@ -256,10 +258,9 @@ _Noreturn void start_init(void* args) {
                     printf("mini shell commands:\n");
                     printf("  v   display Version\n");
                     printf("  t   display Thread list\n");
+                    printf("  m   display memory info\n");
                     printf("  c   Clear screen\n");
-                    printf("  f   add FPU test thread (experimental)\n");
                     printf("  a   display Acpi table (experimental)\n");
-                    printf("  m   display Madt table (experimental)\n");
                     break;
 
                 case 'v':
@@ -274,12 +275,12 @@ _Noreturn void start_init(void* args) {
                     display_threads();
                     break;
 
-                case 'f':
-                {
-                    int thid = moe_create_thread(&fpu_thread, 0, 0, "FPU");
-                    printf("FPU Thread started (%d)\n", thid);
-                }
-                    break;
+                // case 'f':
+                // {
+                //     int thid = moe_create_thread(&demo_thread, 0, 0, "DEMO");
+                //     printf("DEMO Thread started (%d)\n", thid);
+                // }
+                //     break;
 
                 case 'r':
                     gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
@@ -307,6 +308,17 @@ _Noreturn void start_init(void* args) {
                                     printf("%p: %.4s %d\n", (void*)table, table->signature, table->length);
                                 }
                             }
+                            acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
+                            if (madt) {
+                                printf("Dump of MADT:\n");
+                                size_t max_length = madt->Header.length - 44;
+                                uint8_t* p = madt->Structure;
+                                for (size_t loc = 0; loc < max_length; ) {
+                                    size_t len = p[loc+1];
+                                    dump_madt(p+loc, len);
+                                    loc += len;
+                                }
+                            }
                             break;
                     }
                     break;
@@ -314,18 +326,7 @@ _Noreturn void start_init(void* args) {
 
                 case 'm':
                 {
-                    // printf("Total: %d MB\nFree: %d KB\n", (int)(total_memory >> 8), (int)(free_memory >> 10));
-                    acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
-                    if (madt) {
-                        printf("Dump of MADT:\n");
-                        size_t max_length = madt->Header.length - 44;
-                        uint8_t* p = madt->Structure;
-                        for (size_t loc = 0; loc < max_length; ) {
-                            size_t len = p[loc+1];
-                            dump_madt(p+loc, len);
-                            loc += len;
-                        }
-                    }
+                    printf("Total: %d MB\nFree: %d KB\n", (int)(total_memory >> 8), (int)(free_memory >> 10));
                     break;
                 }
 

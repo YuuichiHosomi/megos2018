@@ -23,7 +23,7 @@
     extern default_int_handler
     extern moe_switch_fpu_context
     extern _irq_main
-    extern irq_LV_main
+    extern ipi_sche_main
 
 
 ; int atomic_bit_test(void *p, uintptr_t bit);
@@ -118,6 +118,7 @@ setjmp_new_thread:
     ret
 
 _new_thread:
+    ; sti
     pop rax
     pop rcx
     jmp rax
@@ -174,7 +175,7 @@ _longjmp:
     jnz .nozero
     inc eax
 .nozero:
-    sti
+    ; sti
     jmp rdx
 
 
@@ -231,9 +232,20 @@ io_in32:
     ret
 
 
-    global io_cli
-io_cli:
+    global io_lock_irq
+io_lock_irq:
+    pushfq
+    pop rax
     cli
+    ret
+
+
+    global io_unlock_irq
+io_unlock_irq:
+    bt ecx, 9
+    jnc .nosti
+    sti
+.nosti:
     ret
 
 
@@ -407,8 +419,9 @@ _irqXX:
     pop rcx
     iretq
 
-    global _irq_LV
-_irq_LV:
+
+    global _ipi_sche
+_ipi_sche:
     push rax
     push rcx
     push rdx
@@ -418,7 +431,7 @@ _irq_LV:
     push r11
     cld
 
-    call irq_LV_main
+    call ipi_sche_main
 
     pop r11
     pop r10
