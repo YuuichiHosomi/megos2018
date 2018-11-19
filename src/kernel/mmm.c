@@ -25,7 +25,6 @@ void *mm_alloc_static_page(size_t n) {
     uintptr_t free = atomic_load(&free_memory);
     while (free > size) {
         if (atomic_compare_exchange_strong(&free_memory, &free, free - size)) {
-            atomic_fetch_sub(&free_memory, size);
             uintptr_t result = atomic_fetch_add(&static_start, size);
             return (void*)result;
         } else {

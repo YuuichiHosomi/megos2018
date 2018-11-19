@@ -5,23 +5,28 @@
 %define LOADER_CS32 0x08
 %define LOADER_CS64 0x10
 %define LOADER_SS   0x18
-%define BOOT_INFO   0x0800
-%define BOOTINFO_STACK_SIZE 0x04
-%define BOOTINFO_STACKS     0x08
-%define BOOTINFO_CR4        0x10
+
+%define BOOT_INFO           0x0800
+%define BOOTINFO_MAX_CPU    0x04
+%define BOOTINFO_ACQUIRE    0x08
+%define BOOTINFO_STACK_SIZE 0x0C
+%define BOOTINFO_STACKS     0x10
 %define BOOTINFO_CR3        0x18
 %define BOOTINFO_IDT        0x22
+%define BOOTINFO_CR4        0x2C
 %define BOOTINFO_START32    0x30
 %define BOOTINFO_START64    0x38
 %define BOOTINFO_GDTR       0x40
+
+%define	EFLAGS_IF   0x00000200
 %define MSR_EFER    0xC0000080
-%define IA32_APIC_BASE_MSR          0x1B
-%define IA32_APIC_BASE_MSR_ENABLE   0x800
+%define IA32_APIC_BASE_MSR          0x0000001B
+%define IA32_APIC_BASE_MSR_ENABLE   0x00000800
 
 [BITS 64]
 [section .text]
     extern default_int_handler
-    extern moe_switch_fpu_context
+    extern moe_fpu_restore
     extern _irq_main
     extern ipi_sche_main
 
@@ -62,9 +67,9 @@ atomic_bit_test_and_clear:
     ret
 
 
-; void io_set_lazy_fpu_switch();
-    global io_set_lazy_fpu_switch
-io_set_lazy_fpu_switch:
+; void io_set_lazy_fpu_restore();
+    global io_set_lazy_fpu_restore
+io_set_lazy_fpu_restore:
     mov rax, cr0
     bts eax, 3 ; TS
     mov cr0, rax
@@ -118,7 +123,7 @@ setjmp_new_thread:
     ret
 
 _new_thread:
-    ; sti
+    sti
     pop rax
     pop rcx
     jmp rax
@@ -232,18 +237,21 @@ io_in32:
     ret
 
 
+; uint32_t io_lock_irq(void);
     global io_lock_irq
 io_lock_irq:
     pushfq
-    pop rax
     cli
+    pop rax
+    and eax, EFLAGS_IF
     ret
 
 
+; void io_unlock_irq(uint32_t);
     global io_unlock_irq
 io_unlock_irq:
-    bt ecx, 9
-    jnc .nosti
+    and ecx, EFLAGS_IF
+    jz .nosti
     sti
 .nosti:
     ret
@@ -366,7 +374,7 @@ _int07: ; #NM
     clts
 
     mov ecx, 512
-    call moe_switch_fpu_context
+    call moe_fpu_restore
  
     pop r11
     pop r10
@@ -443,9 +451,9 @@ _ipi_sche:
     iretq
 
 
-; _Atomic uint32_t *mp_startup_init(uint8_t vector_sipi, size_t stack_chunk_size, uintptr_t* stacks);
-    global mp_startup_init
-mp_startup_init:
+; _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stacks);
+    global smp_setup_init
+smp_setup_init:
     push rsi
     push rdi
 
@@ -456,8 +464,10 @@ mp_startup_init:
     rep movsb
 
     mov eax, BOOT_INFO
-    mov [eax + BOOTINFO_STACK_SIZE], edx
-    mov [eax + BOOTINFO_STACKS], r8
+    xor ecx, ecx
+    mov [rax + BOOTINFO_MAX_CPU], edx
+    mov [rax + BOOTINFO_STACK_SIZE], r8d
+    mov [rax + BOOTINFO_STACKS], r9
     lea edx, [rax + BOOTINFO_GDTR]
     lea rsi, [rel __GDT]
     mov edi, edx
@@ -468,6 +478,7 @@ mp_startup_init:
 
     mov edx, 1
     mov [rax], edx
+    mov [rax + BOOTINFO_ACQUIRE], edx
     mov rdx, cr4
     mov [rax + BOOTINFO_CR4], edx
     mov rdx, cr3
@@ -488,36 +499,29 @@ mp_startup_init:
     ret
 
 
+    extern apic_init_ap
     extern moe_startup_ap
-    extern apic_set_apicid_to_cpuid
 _startup_ap:
     lidt [rbx + BOOTINFO_IDT]
 
-    ; acquire stack per cpu
-    mov ebp, 1
-    lock xadd [rbx], ebp
+    ; init stack pointer
     mov eax, ebp
     imul eax, [rbx + BOOTINFO_STACK_SIZE]
     mov rcx, [rbx + BOOTINFO_STACKS]
     lea rsp, [rcx + rax]
     and rsp, byte 0xF0
 
-    ; enable APIC
-    mov ecx, IA32_APIC_BASE_MSR
-    rdmsr
-    or eax, IA32_APIC_BASE_MSR_ENABLE
-    wrmsr
-    and eax, 0xFFFFF000
-    ; xor ecx, ecx
-    ; mov [rax + 0x270], ecx
-    mov edx, [rax + 0x20]
-    shr edx, 24
+    ; init APIC
     mov ecx, ebp
-    call apic_set_apicid_to_cpuid
+    call apic_init_ap
+
+    ; raise n_active_cpu
+    lock inc dword [rbx]
 
     ; then enable interrupt
     sti
 
+    ; go to scheduler
     mov ecx, ebp
     call moe_startup_ap
     ud2
@@ -540,6 +544,16 @@ _mp_rm_payload:
     xor ax, ax
     mov ds, ax
     mov ebx, BOOT_INFO
+
+    ; acquire CPU
+    mov ebp, 1
+    lock xadd [bx + BOOTINFO_ACQUIRE], bp
+    cmp bp, [bx + BOOTINFO_MAX_CPU]
+    jb short .cpuok
+.forever:
+    hlt
+    jmp short .forever
+.cpuok:
 
     ; enter to PM
     mov eax, cr0

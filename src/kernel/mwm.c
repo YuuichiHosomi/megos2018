@@ -3,6 +3,7 @@
 // License: BSD
 #include <stdatomic.h>
 #include "moe.h"
+#include "hid.h"
 
 
 typedef struct moe_view_t {

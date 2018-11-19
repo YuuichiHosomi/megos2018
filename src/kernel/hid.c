@@ -2,6 +2,7 @@
 // Copyright (c) 2018 MEG-OS project, All rights reserved.
 // License: BSD
 #include "moe.h"
+#include "hid.h"
 
 
 moe_fifo_t* hid_fifo;

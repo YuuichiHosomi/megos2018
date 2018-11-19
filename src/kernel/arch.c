@@ -7,7 +7,7 @@
 #include "x86.h"
 
 
-extern _Atomic uint32_t *mp_startup_init(uint8_t vector_sipi, size_t stack_chunk_size, uintptr_t* stacks);
+extern _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stacks);
 extern uint16_t gdt_init(void);
 extern void idt_load(volatile void*, size_t);
 extern void* _int00;
@@ -77,12 +77,12 @@ void idt_init() {
     idt = mm_alloc_static_page(idt_size);
     memset((void*)idt, 0, idt_size);
 
-    SET_SYSTEM_INT_HANDLER(00); // #DE
-    SET_SYSTEM_INT_HANDLER(03); // #DB
-    SET_SYSTEM_INT_HANDLER(06); // #UD
-    SET_SYSTEM_INT_HANDLER(07); // #NM
-    SET_SYSTEM_INT_HANDLER(0D); // #GP
-    SET_SYSTEM_INT_HANDLER(0E); // #PF
+    SET_SYSTEM_INT_HANDLER(00); // #DE Device by zero Error
+    SET_SYSTEM_INT_HANDLER(03); // #BP Breakpoint
+    SET_SYSTEM_INT_HANDLER(06); // #UD Undefined Opcode
+    SET_SYSTEM_INT_HANDLER(07); // #NM Device not Available
+    SET_SYSTEM_INT_HANDLER(0D); // #GP General Protection Fault
+    SET_SYSTEM_INT_HANDLER(0E); // #PF Page Fault
 
     idt_load(idt, idt_size-1);
 }
@@ -187,11 +187,6 @@ void _irq_main(uint8_t irq, void* p) {
     if (irq == 2) {
         moe_consume_quantum();
         if (smp_mode) {
-            // while (READ_PHYSICAL_UINT32(lapic_base + 0x0300) & 0x1000) io_pause();
-            // for (int i = 1; i < n_cpu; i++) {
-            //     WRITE_PHYSICAL_UINT32(lapic_base + 0x310, apic_ids[i] << 24);
-            //     WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x00000 + IRQ_SCHDULE);
-            // }
             WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0xC0000 + IRQ_SCHDULE);
         }
     }
@@ -207,8 +202,14 @@ uintptr_t moe_get_current_cpuid() {
     return apicid_to_cpuids[apicid];
 }
 
-void apic_set_apicid_to_cpuid(uint8_t cpuid, uint8_t apicid) {
+void apic_init_ap(uint8_t cpuid) {
+    uint64_t msr_lapic = io_rdmsr(IA32_APIC_BASE_MSR);
+    msr_lapic |= IA32_APIC_BASE_MSR_ENABLE;
+    io_wrmsr(IA32_APIC_BASE_MSR, msr_lapic);
+
+    uint8_t apicid = READ_PHYSICAL_UINT32(lapic_base + 0x20) >> 24;
     apicid_to_cpuids[apicid] = cpuid;
+
     WRITE_PHYSICAL_UINT32(lapic_base + 0x0F0, 0x100);
 }
 
@@ -314,7 +315,7 @@ void apic_init_mp() {
         uint8_t vector_sipi = 0x10;
         const uintptr_t stack_chunk_size = 0x4000;
         uintptr_t* stacks = mm_alloc_static_page(stack_chunk_size * n_cpu);
-        _Atomic uint32_t* wait_p = mp_startup_init(vector_sipi, stack_chunk_size, stacks);
+        _Atomic uint32_t* wait_p = smp_setup_init(vector_sipi, MAX_CPU, stack_chunk_size, stacks);
         WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4500);
         moe_usleep(10000);
         WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4600 + vector_sipi);
@@ -406,6 +407,7 @@ void pci_write_config_register(uint32_t base, uint8_t reg, uint32_t val) {
 
 /*********************************************************************/
 //  PS/2 Keyboard and Mouse
+#include "hid.h"
 
 #define PS2_DATA_PORT       0x0060
 #define PS2_STATUS_PORT     0x0064
