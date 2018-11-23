@@ -26,6 +26,8 @@ static int row_to_y(int y) {
     return padding_y + line_height * y;
 }
 
+static void blt_main(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect);
+
 
 moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color) {
     size_t dibsz = size->width * size->height * sizeof(uint32_t);
@@ -86,6 +88,15 @@ void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *r
         if (w <= 0 || h <= 0) return;
     }
 
+    moe_point_t p = { dx, dy };
+    moe_rect_t r = { { sx, sy }, { w, h } };
+    blt_main(dest, src, &p, &r);
+}
+
+void blt_main(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect) {
+    int dx = origin->x, dy = origin->y;
+    int sx = rect->origin.x, sy = rect->origin.y, w = rect->size.width, h = rect->size.height;
+
     // Transfer
     uint32_t *p = dest->dib;
     p += dx + dy * dest->delta;
@@ -141,7 +152,6 @@ void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *r
             }
         }
     }
-
 }
 
 // TODO:

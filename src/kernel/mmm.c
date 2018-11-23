@@ -17,7 +17,7 @@ typedef struct {
 
 
 uintptr_t total_memory = 0;
-_Atomic uintptr_t free_memory;
+static _Atomic uintptr_t free_memory;
 static _Atomic uintptr_t static_start;
 
 void *mm_alloc_static_page(size_t n) {
@@ -93,10 +93,9 @@ static int mm_type_for_count(uint32_t type) {
 // }
 
 extern EFI_RUNTIME_SERVICES* gRT;
+static uintptr_t kma_base, kma_size = 0x1000;
 
 void mm_init(moe_bootinfo_mmap_t* mmap) {
-
-    uint64_t mabase = 0, masize = 0x1000;
 
     uintptr_t mmap_ptr = (uintptr_t)mmap->mmap;
     int n_mmap = mmap->size / mmap->desc_size;
@@ -104,9 +103,9 @@ void mm_init(moe_bootinfo_mmap_t* mmap) {
         EFI_MEMORY_DESCRIPTOR* efi_mem = (EFI_MEMORY_DESCRIPTOR*)(mmap_ptr + i * mmap->desc_size);
         efi_mem->VirtualStart = efi_mem->PhysicalStart;
         uint32_t type = mm_type_for_count(efi_mem->Type);
-        if (type == EfiConventionalMemory && masize < efi_mem->NumberOfPages && ROUNDUP_PAGE(efi_mem->PhysicalStart) == efi_mem->PhysicalStart && efi_mem->PhysicalStart < UINT32_MAX ) {
-            mabase = efi_mem->PhysicalStart;
-            masize = efi_mem->NumberOfPages;
+        if (type == EfiConventionalMemory && kma_size < efi_mem->NumberOfPages && ROUNDUP_PAGE(efi_mem->PhysicalStart) == efi_mem->PhysicalStart && efi_mem->PhysicalStart < UINT32_MAX ) {
+            kma_base = efi_mem->PhysicalStart;
+            kma_size = efi_mem->NumberOfPages;
         }
         if (type > 0) {
             total_memory += efi_mem->NumberOfPages;
@@ -116,9 +115,14 @@ void mm_init(moe_bootinfo_mmap_t* mmap) {
     }
     gRT->SetVirtualAddressMap(mmap->size, mmap->desc_size, mmap->desc_version, mmap->mmap);
 
-    static_start = mabase;
-    free_memory = masize * PAGE_SIZE;
+    static_start = kma_base;
+    free_memory = kma_size * PAGE_SIZE;
 
-    // printf("mm: %08zx %08zx\n", mmap->size, mmap->desc_size);
+}
 
+void cmd_mem() {
+    printf("Memory: %d MB\n", (int)(total_memory >> 8));
+    printf("Kernel: %08zx-%08zx %zuKB/%zuKB (%zuMB)\n",
+    kma_base, (kma_base + kma_size * PAGE_SIZE - 1), free_memory /1024, kma_size * PAGE_SIZE / 1024,
+    (kma_size * PAGE_SIZE) >> 20);
 }

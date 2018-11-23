@@ -30,7 +30,7 @@
 #define VER_SYSTEM_NAME     "Minimal Operating Environment"
 #define VER_SYSTEM_MAJOR    0
 #define VER_SYSTEM_MINOR    4
-#define VER_SYSTEM_REVISION 3
+#define VER_SYSTEM_REVISION 4
 
 
 extern void arch_init();
@@ -42,9 +42,9 @@ extern void hid_init();
 extern void mwm_init();
 
 extern void display_threads();
+extern void cmd_mem();
 
 extern uintptr_t total_memory;
-extern uintptr_t free_memory;
 extern int n_active_cpu;
 
 EFI_RUNTIME_SERVICES* gRT;
@@ -324,7 +324,7 @@ _Noreturn void start_init(void* args) {
 
                 case 'm':
                 {
-                    printf("Total: %d MB\nFree: %d KB\n", (int)(total_memory >> 8), (int)(free_memory >> 10));
+                    cmd_mem();
                     break;
                 }
 
@@ -349,8 +349,8 @@ void moe_assert(const char* file, uintptr_t line, ...) {
     vprintf(msg, list);
 
 	va_end(list);
-    __asm__ volatile("int3");
-    for (;;) io_hlt();
+    // __asm__ volatile("int3");
+    // for (;;) io_hlt();
 }
 
 _Noreturn void start_kernel(moe_bootinfo_t* bootinfo) {

@@ -77,7 +77,7 @@ void idt_init() {
     idt = mm_alloc_static_page(idt_size);
     memset((void*)idt, 0, idt_size);
 
-    SET_SYSTEM_INT_HANDLER(00); // #DE Device by zero Error
+    SET_SYSTEM_INT_HANDLER(00); // #DE Divide by zero Error
     SET_SYSTEM_INT_HANDLER(03); // #BP Breakpoint
     SET_SYSTEM_INT_HANDLER(06); // #UD Undefined Opcode
     SET_SYSTEM_INT_HANDLER(07); // #NM Device not Available
@@ -210,7 +210,7 @@ void apic_init_ap(uint8_t cpuid) {
     uint8_t apicid = READ_PHYSICAL_UINT32(lapic_base + 0x20) >> 24;
     apicid_to_cpuids[apicid] = cpuid;
 
-    WRITE_PHYSICAL_UINT32(lapic_base + 0x0F0, 0x100);
+    WRITE_PHYSICAL_UINT32(lapic_base + 0x0F0, 0x10F);
 }
 
 

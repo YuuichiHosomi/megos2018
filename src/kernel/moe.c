@@ -7,10 +7,10 @@
 #include "efi.h"
 #include "setjmp.h"
 
-#define DEFAULT_QUANTUM     3
-#define CLEANUP_LOAD_TIME   1000000
-#define CONSUME_QUANTUM_THRESHOLD 1000
+#define DEFAULT_QUANTUM     5
+#define CONSUME_QUANTUM_THRESHOLD 2500
 #define THREAD_NAME_SIZE    32
+#define CLEANUP_LOAD_TIME   1000000
 #define DEFAULT_SCHEDULE_SIZE   1024
 #define DEFAULT_SCHEDULE_QUEUES 2
 
@@ -66,11 +66,12 @@ _Atomic uint32_t system_affinity = 1;
 moe_thread_t **idle_threads;
 _Atomic (moe_thread_t *)*current_threads;
 moe_thread_t root_thread;
-int n_active_cpu = 1;
+int n_active_cpu;
 
 struct {
     moe_fifo_t* waiting[DEFAULT_SCHEDULE_QUEUES];
     moe_fifo_t* retired;
+    _Atomic uint32_t ctx_lock;
     atomic_flag lock;
 } thread_queue;
 
@@ -113,51 +114,56 @@ moe_thread_t *sch_next() {
     }
 
     //  Wait queue is empty
-    if (!atomic_flag_test_and_set(&thread_queue.lock)) {
+    if (!atomic_bit_test_and_set(&thread_queue.lock, 0)) {
         moe_thread_t *p;
         while ((p = (moe_thread_t*)moe_fifo_read(thread_queue.retired, 0))) {
             sch_add(p);
         }
-        atomic_flag_clear(&thread_queue.lock);
+        atomic_bit_test_and_clear(&thread_queue.lock, 0);
     }
 
     return idle_threads[moe_get_current_cpuid()];
 }
 
-//  Main Context Swicth
-static void switch_context(uint32_t cpuid, moe_thread_t* current, moe_thread_t* next) {
-    uint64_t load = moe_get_thread_load(current);
-    atomic_fetch_add(&current->cputime, load);
-    atomic_fetch_add(&current->load0, load);
-    if (current->fpu_used) {
-        io_fsave(current->fpu_context);
-        current->fpu_used = 0;
-    }
-    if (!setjmp(current->jmpbuf)) {
-        sch_retire(current);
-        if (atomic_compare_exchange_strong(&current_threads[cpuid], &current, next)) {
-            io_set_lazy_fpu_restore();
-            current->running = 0;
-            next->measure0 = moe_get_measure();
-            next->affinity |= (1 << cpuid);
-            next->last_cpuid = cpuid;
-            next->running = 1;
-            longjmp(next->jmpbuf, 0);
-        } else {
-            MOE_ASSERT(false, "WTF?");
-        }
-    }
+void moe_new_thread_unlock_ctx() {
+    uint32_t eflags = io_lock_irq();
+    int cpuid = moe_get_current_cpuid();
+    atomic_bit_test_and_clear(&thread_queue.ctx_lock, cpuid);
+    io_unlock_irq(eflags);
 }
 
-static void next_thread() {
-    uint32_t cpuid = moe_get_current_cpuid();
-    moe_thread_t* current = current_threads[cpuid];
-    if (!atomic_flag_test_and_set(&current->lock)) {
+//  Context Swicth
+static void next_thread(uint32_t cpuid, moe_thread_t* current) {
+    if (!atomic_bit_test_and_set(&thread_queue.ctx_lock, cpuid)) {
+    // if (!atomic_bit_test_and_set(&current->lock, 0)) {
         moe_thread_t* next = sch_next();
         if (next != current) {
-            switch_context(cpuid, current, next);
+            MOE_ASSERT(!next->running, "THREAD RUNNING (%d)\n", next->thid);
+            uint64_t load = moe_get_thread_load(current);
+            atomic_fetch_add(&current->cputime, load);
+            atomic_fetch_add(&current->load0, load);
+            if (current->fpu_used) {
+                io_fsave(current->fpu_context);
+                current->fpu_used = 0;
+            }
+            if (!setjmp(current->jmpbuf)) {
+                if (atomic_compare_exchange_strong(&current_threads[cpuid], &current, next)) {
+                    io_set_lazy_fpu_restore();
+                    current->running = 0;
+                    next->measure0 = moe_get_measure();
+                    next->affinity |= (1 << cpuid);
+                    next->last_cpuid = cpuid;
+                    next->running = 1;
+                    sch_retire(current);
+                    longjmp(next->jmpbuf, 0);
+                } else {
+                    MOE_ASSERT(false, "WTF?");
+                }
+            }
         }
-        atomic_flag_clear(&current->lock);
+        // atomic_bit_test_and_clear(&current->lock, 0);
+        // atomic_bit_test_and_clear(&thread_queue.ctx_lock, cpuid);
+        moe_new_thread_unlock_ctx();
     }
 }
 
@@ -177,10 +183,11 @@ void moe_fpu_restore(uintptr_t delta) {
 
 void moe_consume_quantum() {
     if (!current_threads) return;
-    moe_thread_t* current = get_current_thread();
+    uint32_t cpuid = moe_get_current_cpuid();
+    moe_thread_t* current = current_threads[cpuid];
     if (current->quantum_base > 0) {
         if (current->priority < priority_highest && moe_fifo_get_estimated_count(thread_queue.waiting[0])) {
-            next_thread();
+            next_thread(cpuid, current);
         }
         uint32_t cload = moe_get_thread_load(current);
         uint32_t load = atomic_fetch_add(&current->load00, cload);
@@ -188,11 +195,11 @@ void moe_consume_quantum() {
             atomic_fetch_sub(&current->load00, CONSUME_QUANTUM_THRESHOLD);
             if (atomic_fetch_add(&current->quantum_left, -1) <= 0) {
                 atomic_fetch_add(&current->quantum_left, current->quantum_base);
-                next_thread();
+                next_thread(cpuid, current);
             }
         }
     } else {
-        next_thread();
+        next_thread(cpuid, current);
     }
 }
 
@@ -202,11 +209,12 @@ void moe_yield() {
         return;
     }
     uint32_t eflags = io_lock_irq();
-    moe_thread_t* current = get_current_thread();
+    uint32_t cpuid = moe_get_current_cpuid();
+    moe_thread_t* current = current_threads[cpuid];
     if (atomic_load(&current->quantum_left) > current->quantum_base) {
         atomic_store(&current->quantum_left, current->quantum_base);
     }
-    next_thread();
+    next_thread(cpuid, current);
     io_unlock_irq(eflags);
 }
 
@@ -228,8 +236,10 @@ moe_thread_t* create_thread(moe_start_thread start, moe_priority_level_t priorit
     memset(new_thread, 0, sizeof(moe_thread_t));
     new_thread->thid = atomic_fetch_add(&next_thid, 1);
     new_thread->priority = priority;
-    new_thread->quantum_base = new_thread->priority * DEFAULT_QUANTUM;
-    new_thread->quantum_left = 3 * new_thread->quantum_base; // quantum boost
+    if (priority) {
+        new_thread->quantum_base = DEFAULT_QUANTUM;
+        new_thread->quantum_left = 3 * new_thread->quantum_base; // quantum boost
+    }
     // new_thread->affinity = system_affinity;
     if (name) {
         strncpy(&new_thread->name[0], name, THREAD_NAME_SIZE - 1);
@@ -362,9 +372,9 @@ intptr_t moe_fifo_read(moe_fifo_t* self, intptr_t default_val) {
     uint32_t count = atomic_load(&self->count);
     while (count > 0) {
         if (atomic_compare_exchange_weak(&self->count, &count, count - 1)) {
-            uintptr_t read_ptr = atomic_fetch_add(&self->read, 1);
-            intptr_t retval = atomic_load(&self->data[read_ptr & self->mask]);
-            atomic_fetch_add(&self->free, 1);
+            uintptr_t read_ptr = atomic_fetch_add_explicit(&self->read, 1, memory_order_seq_cst);
+            intptr_t retval = atomic_load_explicit(&self->data[read_ptr & self->mask], memory_order_seq_cst);
+            atomic_fetch_add_explicit(&self->free, 1, memory_order_seq_cst);
             return retval;
         } else {
             io_pause();
@@ -377,10 +387,10 @@ intptr_t moe_fifo_read(moe_fifo_t* self, intptr_t default_val) {
 int moe_fifo_write(moe_fifo_t* self, intptr_t data) {
     uint32_t free = atomic_load(&self->free);
     while (free > 0) {
-        if (atomic_compare_exchange_strong(&self->free, &free, free - 1)) {
-            uintptr_t write_ptr = atomic_fetch_add(&self->write, 1);
-            atomic_store(&self->data[write_ptr & self->mask], data);
-            atomic_fetch_add(&self->count, 1);
+        if (atomic_compare_exchange_weak(&self->free, &free, free - 1)) {
+            uintptr_t write_ptr = atomic_fetch_add_explicit(&self->write, 1, memory_order_seq_cst);
+            atomic_store_explicit(&self->data[write_ptr & self->mask], data, memory_order_seq_cst);
+            atomic_fetch_add_explicit(&self->count, 1, memory_order_seq_cst);
             return 0;
         } else {
             io_pause();

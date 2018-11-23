@@ -8,7 +8,7 @@
 
 %define BOOT_INFO           0x0800
 %define BOOTINFO_MAX_CPU    0x04
-%define BOOTINFO_ACQUIRE    0x08
+;define BOOTINFO_xxxx       0x08
 %define BOOTINFO_STACK_SIZE 0x0C
 %define BOOTINFO_STACKS     0x10
 %define BOOTINFO_CR3        0x18
@@ -122,7 +122,9 @@ setjmp_new_thread:
     ; mov [rcx+0x10], rdx
     ret
 
+    extern moe_new_thread_unlock_ctx
 _new_thread:
+    call moe_new_thread_unlock_ctx
     sti
     pop rax
     pop rcx
@@ -159,7 +161,7 @@ _setjmp:
 ; void _longjmp(jmp_buf env, int retval);
     global _longjmp
 _longjmp:
-    cli
+;    cli
     mov eax, edx
     mov rsp, [rcx+0x08]
     mov rbp, [rcx+0x10]
@@ -464,7 +466,6 @@ smp_setup_init:
     rep movsb
 
     mov eax, BOOT_INFO
-    xor ecx, ecx
     mov [rax + BOOTINFO_MAX_CPU], edx
     mov [rax + BOOTINFO_STACK_SIZE], r8d
     mov [rax + BOOTINFO_STACKS], r9
@@ -478,7 +479,6 @@ smp_setup_init:
 
     mov edx, 1
     mov [rax], edx
-    mov [rax + BOOTINFO_ACQUIRE], edx
     mov rdx, cr4
     mov [rax + BOOTINFO_CR4], edx
     mov rdx, cr3
@@ -515,9 +515,6 @@ _startup_ap:
     mov ecx, ebp
     call apic_init_ap
 
-    ; raise n_active_cpu
-    lock inc dword [rbx]
-
     ; then enable interrupt
     sti
 
@@ -545,15 +542,26 @@ _mp_rm_payload:
     mov ds, ax
     mov ebx, BOOT_INFO
 
-    ; acquire CPU
-    mov ebp, 1
-    lock xadd [bx + BOOTINFO_ACQUIRE], bp
-    cmp bp, [bx + BOOTINFO_MAX_CPU]
-    jb short .cpuok
+    ; acquire core-id
+    mov cl, [bx + BOOTINFO_MAX_CPU]
+.loop:
+    mov al, [bx]
+    cmp al, cl
+    jae .fail
+    mov dl, al
+    inc dx
+    lock cmpxchg [bx], dl
+    jz .resolv
+    pause
+    jmp short .loop
+.fail:
 .forever:
     hlt
     jmp short .forever
-.cpuok:
+
+.resolv:
+    movzx ebp, al
+
 
     ; enter to PM
     mov eax, cr0
