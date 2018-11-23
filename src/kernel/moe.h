@@ -84,6 +84,7 @@ void moe_yield();
 void moe_consume_quantum();
 int moe_usleep(uint64_t us);
 int moe_get_current_thread();
+_Noreturn void moe_exit_thread(uint32_t exit_code);
 
 typedef uint64_t moe_timer_t;
 typedef double moe_time_interval_t;

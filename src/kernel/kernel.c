@@ -37,12 +37,16 @@ extern void arch_init();
 extern void acpi_init(acpi_rsd_ptr_t* rsd);
 extern void mgs_init(moe_video_info_t* _video);
 extern void mm_init(moe_bootinfo_mmap_t* mmap);
-extern void thread_init();
 extern void hid_init();
 extern void mwm_init();
 
 extern void display_threads();
 extern void cmd_mem();
+
+extern char *strchr(const char *s, int c);
+extern int putchar(char);
+extern int getchar();
+extern int vprintf(const char *format, va_list args);
 
 extern uintptr_t total_memory;
 extern int n_active_cpu;
@@ -124,9 +128,6 @@ void dump_madt(uint8_t* p, size_t n) {
     printf("\n");
 }
 
-extern int putchar(char);
-extern int getchar();
-
 int read_cmdline(char* buffer, size_t max_len) {
     int cont_flag = 1;
     int len = 0, limit = max_len - 1;
@@ -180,6 +181,7 @@ _Noreturn void demo_thread(void* args) {
     int pid = moe_get_current_thread();
     for (;;) {
         count += pi * pid;
+        if (count > 0x1000000) count -= 0x1000000;
         int b = (int)count;
         mgs_fill_rect(pid * 10, 2, 8, 8, b);
         moe_yield();
@@ -328,6 +330,12 @@ _Noreturn void start_init(void* args) {
                     break;
                 }
 
+                case 'w':
+                {
+                    moe_usleep(1000000);
+                }
+                    break;
+
                 default:
                     printf("Bad command or file name\n");
                     break;
@@ -338,17 +346,20 @@ _Noreturn void start_init(void* args) {
 
 }
 
-int vprintf(const char *format, va_list args);
 void moe_assert(const char* file, uintptr_t line, ...) {
     // mgs_bsod();
-	va_list list;
-	va_start(list, line);
+    va_list list;
+    va_start(list, line);
 
-    printf("ASSERT(File %s Line %zu):", file, line);
     const char* msg = va_arg(list, const char*);
-    vprintf(msg, list);
+    if (strchr(msg, '%')) {
+        printf("%s(%zu):", file, line);
+        vprintf(msg, list);
+    } else {
+        printf("%s(%zu): %s\n", file, line, msg);
+    }
 
-	va_end(list);
+    va_end(list);
     // __asm__ volatile("int3");
     // for (;;) io_hlt();
 }
@@ -358,7 +369,6 @@ _Noreturn void start_kernel(moe_bootinfo_t* bootinfo) {
     gRT = bootinfo->efiRT;
     mgs_init(&bootinfo->video);
     mm_init(&bootinfo->mmap);
-    thread_init();
     acpi_init(bootinfo->acpi);
     arch_init();
     mwm_init();

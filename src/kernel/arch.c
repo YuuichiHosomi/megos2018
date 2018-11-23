@@ -29,7 +29,7 @@ uint8_t io_in8(uint16_t port);
 void io_out32(uint16_t port, uint32_t val);
 uint32_t io_in32(uint16_t port);
 
-void smp_start(int n_active_cpu);
+void smp_init(int n_active_cpu);
 
 
 /*********************************************************************/
@@ -68,7 +68,7 @@ void default_int_handler(x64_context_t* regs) {
         regs->rax, regs->rbx, regs->rcx, regs->rdx, regs->rbp, regs->rsi, regs->rdi,
         regs->r8, regs->r9, regs->r10, regs->r11, regs->r12, regs->r13, regs->r14, regs->r15);
 
-    for (;;) io_hlt();
+    moe_exit_thread(-1);
 }
 
 void idt_init() {
@@ -320,10 +320,10 @@ void apic_init_mp() {
         moe_usleep(10000);
         WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4600 + vector_sipi);
         moe_usleep(200000);
-        smp_start(atomic_load(wait_p));
+        smp_init(atomic_load(wait_p));
         smp_mode = 1;
     } else {
-        smp_start(1);
+        smp_init(1);
     }
 }
 

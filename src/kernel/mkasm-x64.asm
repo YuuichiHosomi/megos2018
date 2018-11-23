@@ -122,9 +122,9 @@ setjmp_new_thread:
     ; mov [rcx+0x10], rdx
     ret
 
-    extern moe_new_thread_unlock_ctx
+    extern moe_thread_start
 _new_thread:
-    call moe_new_thread_unlock_ctx
+    call moe_thread_start
     sti
     pop rax
     pop rcx
