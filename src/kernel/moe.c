@@ -7,6 +7,7 @@
 #include "efi.h"
 #include "setjmp.h"
 
+
 #define DEFAULT_QUANTUM     5
 #define CONSUME_QUANTUM_THRESHOLD 2500
 #define THREAD_NAME_SIZE    32
@@ -42,7 +43,6 @@ typedef struct moe_thread_t {
     moe_affinity_t affinity;
     _Atomic uint8_t quantum_left;
     uint8_t quantum, quantum_min, quantum_max;
-    atomic_flag lock;
     moe_timer_t block;
     void *fpu_context;
     jmp_buf jmpbuf;
@@ -109,14 +109,16 @@ int sch_add(moe_thread_t *thread) {
 }
 
 int sch_retire(moe_thread_t* thread) {
+    if (thread->zombie) {
+        return 0;
+    }
     if (thread->priority) {
+        while (atomic_bit_test_and_set(&thread_queue.lock, 0)) {
+            io_pause();
+        }
         if (!thread->block) {
             thread->block = moe_create_interval_timer(BLOCK_AFTER_RETIRE);
         }
-        // while (atomic_bit_test_and_set(&thread_queue.lock, 0)) {
-        //     MOE_ASSERT(false, "QUEUE_LOCK");
-        //     io_pause();
-        // }
         int retval = moe_fifo_write(thread_queue.retired, (uintptr_t)thread);
         atomic_bit_test_and_clear(&thread_queue.lock, 0);
         return retval;
@@ -130,9 +132,7 @@ moe_thread_t *sch_next() {
     for(int i = 0; i < DEFAULT_SCHEDULE_QUEUES; i++) {
         result = (moe_thread_t*)moe_fifo_read(thread_queue.ready[i], 0);
         if (result) {
-            if (result->zombie) {
-                // DO NOT SCHEDULE
-            } else if (moe_check_timer(&result->block)) {
+            if (moe_check_timer(&result->block)) {
                 sch_retire(result);
             } else {
                 return result;
@@ -175,7 +175,6 @@ void moe_unlock_core() {
 //  Context Swicth
 static void next_thread(uint32_t cpuid, moe_thread_t* current, moe_timer_t timer) {
     if (!atomic_bit_test_and_set(&thread_queue.core_lock, cpuid)) {
-    // if (!atomic_flag_test_and_set(&current->lock)) {
         moe_thread_t* next = sch_next();
         uint64_t load = moe_get_thread_load(current);
         atomic_fetch_add(&current->cputime, load);
@@ -207,9 +206,20 @@ static void next_thread(uint32_t cpuid, moe_thread_t* current, moe_timer_t timer
         } else {
             current->measure0 = moe_get_measure();
         }
-        // atomic_flag_clear(&current->lock);
         moe_unlock_core();
     }
+}
+
+void on_thread_start() {
+    // uint32_t eflags = io_lock_irq();
+    uint32_t cpuid = moe_get_current_cpuid();
+    moe_thread_t* current = core_data[cpuid].current;
+    current->measure0 = moe_get_measure();
+    current->affinity |= (1 << cpuid);
+    current->last_cpuid = cpuid;
+    current->running = 1;
+    // io_unlock_irq(eflags);
+    moe_unlock_core();
 }
 
 //  Lazy FPU restore
@@ -291,11 +301,7 @@ _Noreturn void moe_exit_thread(uint32_t exit_code) {
     for (;;) io_hlt();
 }
 
-void moe_thread_start() {
-    moe_unlock_core();
-}
-
-moe_thread_t* create_thread(moe_start_thread start, moe_priority_level_t priority, void* args, const char* name) {
+moe_thread_t* create_thread(moe_thread_start start, moe_priority_level_t priority, void* args, const char* name) {
 
     moe_thread_t* new_thread = mm_alloc_static(sizeof(moe_thread_t));
     memset(new_thread, 0, sizeof(moe_thread_t));
@@ -336,7 +342,7 @@ moe_thread_t* create_thread(moe_start_thread start, moe_priority_level_t priorit
     return new_thread;
 }
 
-int moe_create_thread(moe_start_thread start, moe_priority_level_t priority, void* args, const char* name) {
+int moe_create_thread(moe_thread_start start, moe_priority_level_t priority, void* args, const char* name) {
     return create_thread(start, priority ? priority : priority_normal, args, name)->thid;
 }
 
@@ -361,28 +367,22 @@ _Noreturn void scheduler_thread() {
                 atomic_fetch_add(&thread->load0, -load);
             }
 
-            //  usage icon
-            // {
-            //     int left = pid * 10 + 1, width = 6;
-            //     int load = (1000000 - root_thread.load) / 200000;
-            //     if (load < 0) load = 0;
-            //     if (load > 3) {
-            //         mgs_fill_rect(left, 2, width, 8, 0xFF0000);
-            //     } else {
-            //         int ux = load * 2;
-            //         int lx = (4 - load) * 2;
-            //         mgs_fill_rect(left, 2, width, lx, 0x555555);
-            //         mgs_fill_rect(left, 2 + lx, width, ux, 0x00FF00);
-            //     }
-            // }
-
             last_cleanup_load_measure = measure;
         }
         moe_yield();
     }
 }
 
-void smp_init(int _n_active_cpu) {
+int moe_get_usage() {
+    int total = 0;
+    for (int i = 0; i < n_active_cpu; i++) {
+        total += core_data[i].idle->load;
+    }
+    int usage = 1000 - (total / (n_active_cpu * 1000));
+    return usage > 0 ? usage: 0;
+}
+
+void thread_init(int _n_active_cpu) {
 
     char name[THREAD_NAME_SIZE];
     n_active_cpu = _n_active_cpu;
@@ -401,16 +401,19 @@ void smp_init(int _n_active_cpu) {
         snprintf(name, THREAD_NAME_SIZE, "(Idle Core #%d)", i);
         moe_thread_t* th = create_thread(NULL, priority_idle, NULL, name);
         th->affinity = 1 << i;
+        th->last_cpuid = i;
+        th->running = 1;
         _core_data[i].idle = th;
         _core_data[i].current = th;
     }
+    core_data = _core_data;
 
     moe_create_thread(&scheduler_thread, priority_highest, 0, "Scheduler");
-    core_data = _core_data;
 }
 
 
 /*********************************************************************/
+//  First In, First Out method
 
 typedef struct moe_fifo_t {
     _Atomic intptr_t* data;
@@ -472,14 +475,14 @@ uintptr_t moe_fifo_get_estimated_free(moe_fifo_t* self) {
 
 void display_threads() {
     moe_thread_t* p = root_thread;
-    printf("ID context  sse_ctx  flags    affinity      usage cpu time   name\n");
+    printf("ID context  attr     affinity      usage cpu time   name\n");
     for (; p; p = p->next) {
         uint64_t time = p->cputime / 1000000;
         uint32_t time0 = time % 60;
         uint32_t time1 = (time / 60) % 60;
         uint32_t time2 = (time / 3600);
-        printf("%2d %08zx %08zx %08zx %08x %2d/%2d %4u %4u:%02u:%02u %s\n",
-            (int)p->thid, (uintptr_t)p, (uintptr_t)p->fpu_context, p->flags, p->affinity,
+        printf("%2d %08zx %08zx %08x %2d/%2d %4u %4u:%02u:%02u %s\n",
+            (int)p->thid, (uintptr_t)p, p->flags, p->affinity,
             p->quantum_left, p->quantum, p->load / 1000, time2, time1, time0,
             p->name);
     }

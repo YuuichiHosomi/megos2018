@@ -29,7 +29,7 @@ uint8_t io_in8(uint16_t port);
 void io_out32(uint16_t port, uint32_t val);
 uint32_t io_in32(uint16_t port);
 
-void smp_init(int n_active_cpu);
+void thread_init(int n_active_cpu);
 
 
 /*********************************************************************/
@@ -320,10 +320,10 @@ void apic_init_mp() {
         moe_usleep(10000);
         WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4600 + vector_sipi);
         moe_usleep(200000);
-        smp_init(atomic_load(wait_p));
+        thread_init(atomic_load(wait_p));
         smp_mode = 1;
     } else {
-        smp_init(1);
+        thread_init(1);
     }
 }
 

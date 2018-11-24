@@ -79,6 +79,7 @@ io_set_lazy_fpu_restore:
 ; void io_finit(void);
     global io_finit
 io_finit:
+    clts
     fninit
     xorps xmm0, xmm0
     movq xmm1, xmm0
@@ -122,9 +123,9 @@ setjmp_new_thread:
     ; mov [rcx+0x10], rdx
     ret
 
-    extern moe_thread_start
+    extern on_thread_start
 _new_thread:
-    call moe_thread_start
+    call on_thread_start
     sti
     pop rax
     pop rcx
@@ -134,7 +135,6 @@ _new_thread:
 ; int _setjmp(jmp_buf env);
     global _setjmp
 _setjmp:
-    ; cli
     push rbp
     mov rbp, rsp
 
@@ -161,7 +161,6 @@ _setjmp:
 ; void _longjmp(jmp_buf env, int retval);
     global _longjmp
 _longjmp:
-;    cli
     mov eax, edx
     mov rsp, [rcx+0x08]
     mov rbp, [rcx+0x10]
@@ -182,7 +181,6 @@ _longjmp:
     jnz .nozero
     inc eax
 .nozero:
-    ; sti
     jmp rdx
 
 

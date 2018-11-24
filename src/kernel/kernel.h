@@ -11,18 +11,13 @@
 
 
 typedef struct {
-    void* vram;
-    int res_x, res_y, pixel_per_scan_line;
-} moe_video_info_t;
-
-typedef struct {
     void* mmap; // EFI_MEMORY_DESCRIPTOR
     uintptr_t size, desc_size;
     uint32_t desc_version;
 } moe_bootinfo_mmap_t;
 
 typedef struct {
-    moe_video_info_t video;
+    moe_dib_t screen;
     acpi_rsd_ptr_t* acpi;
 
     void* efiRT; // EFI_RUNTIME_SERVICES

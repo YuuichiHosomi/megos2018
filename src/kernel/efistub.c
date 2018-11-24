@@ -1,5 +1,5 @@
 // Minimal OS EFI Stub
-// Copyright (c) 1998,2018 MEG-OS project, All rights reserved.
+// Copyright (c) 2018 MEG-OS project, All rights reserved.
 // License: BSD
 #include "moe.h"
 #include "kernel.h"
@@ -32,15 +32,16 @@ static void* efi_find_config_table(EFI_SYSTEM_TABLE *st, CONST EFI_GUID* guid) {
 
 /*********************************************************************/
 
+moe_bootinfo_t bootinfo;
+
 EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
     EFI_BOOT_SERVICES* bs;
     EFI_STATUS status;
-    moe_bootinfo_t bootinfo;
 
     // Init UEFI Environments
     bs = st->BootServices;
 
-    //	Find ACPI table pointer
+    // Find ACPI table pointer
     {
         bootinfo.acpi = efi_find_config_table(st, &efi_acpi_20_table_guid);
         if (!bootinfo.acpi) {
@@ -49,7 +50,7 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
         }
     }
 
-    //	Get GOP
+    // Get GOP
     {
         EFI_GRAPHICS_OUTPUT_PROTOCOL* gop = NULL;
 
@@ -59,13 +60,13 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
             goto errexit;
         }
 
-        bootinfo.video.vram = (void*)gop->Mode->FrameBufferBase;
-        bootinfo.video.res_x = gop->Mode->Info->HorizontalResolution;
-        bootinfo.video.res_y = gop->Mode->Info->VerticalResolution;
-        bootinfo.video.pixel_per_scan_line = gop->Mode->Info->PixelsPerScanLine;
+        bootinfo.screen.dib = (uint32_t *)gop->Mode->FrameBufferBase;
+        bootinfo.screen.width = gop->Mode->Info->HorizontalResolution;
+        bootinfo.screen.height = gop->Mode->Info->VerticalResolution;
+        bootinfo.screen.delta = gop->Mode->Info->PixelsPerScanLine;
     }
 
-    //	Exit BootServices
+    // Exit BootServices
     {
         EFI_MEMORY_DESCRIPTOR* mmap = NULL;
         UINTN mmapsize = 0;
@@ -91,7 +92,7 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
         bootinfo.efiRT = st->RuntimeServices;
     }
 
-    //	Start Kernel
+    // Start Kernel
     start_kernel(&bootinfo);
 
 errexit:

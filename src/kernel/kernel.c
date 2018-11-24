@@ -30,23 +30,25 @@
 #define VER_SYSTEM_NAME     "Minimal Operating Environment"
 #define VER_SYSTEM_MAJOR    0
 #define VER_SYSTEM_MINOR    4
-#define VER_SYSTEM_REVISION 4
+#define VER_SYSTEM_REVISION 5
 
 
 extern void arch_init();
 extern void acpi_init(acpi_rsd_ptr_t* rsd);
-extern void mgs_init(moe_video_info_t* _video);
+extern void gs_init(moe_dib_t* screen);
 extern void mm_init(moe_bootinfo_mmap_t* mmap);
 extern void hid_init();
-extern void mwm_init();
+extern void window_init();
 
 extern void display_threads();
 extern void cmd_mem();
+extern void cmd_win();
 
 extern char *strchr(const char *s, int c);
 extern int putchar(char);
 extern int getchar();
 extern int vprintf(const char *format, va_list args);
+extern int snprintf(char* buffer, size_t n, const char* format, ...);
 
 extern uintptr_t total_memory;
 extern int n_active_cpu;
@@ -175,16 +177,80 @@ void moe_ctrl_alt_del() {
     gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
 }
 
-_Noreturn void demo_thread(void* args) {
+extern moe_dib_t main_screen_dib;
+_Noreturn void demo_thread(void *args) {
+    const size_t size_buff = 16;
+    char buff[size_buff];
     double count = 0.0;
-    double pi = 3.14;
-    int pid = moe_get_current_thread();
+    const double pi = 3.14;
+    int pid = (int)args;
+    const int width = 48, height = 16, padding_x = 4, padding_y = 2; 
+    moe_rect_t rect = {{ padding_x + pid * (width + padding_x * 2), padding_y }, { width, height }};
     for (;;) {
-        count += pi * pid;
+        count += pi * (1 + pid * pid);
         if (count > 0x1000000) count -= 0x1000000;
-        int b = (int)count;
-        mgs_fill_rect(pid * 10, 2, 8, 8, b);
+        uint32_t color = count;
+        uint32_t bgcolor = color ^ 0x7F7F7F;
+        snprintf(buff, size_buff, "%06x", color);
+        moe_fill_rect(&main_screen_dib, &rect, bgcolor);
+        moe_draw_string(&main_screen_dib, NULL, &rect, buff, color);
         moe_yield();
+    }
+}
+
+//  Clock and Statusbar thread
+extern moe_dib_t *desktop_dib;
+_Noreturn void clock_thread(void *args) {
+
+    uint32_t taskbar_bgcolor = 0xFFFFFF;
+    uint32_t taskbar_border_color = 0;
+    uint32_t fgcolor = 0x555555;
+
+    moe_rect_t rect_taskbar = {{0, 0}, {desktop_dib->width, 23}};
+    moe_dib_t *taskbar_dib = moe_create_dib(&rect_taskbar.size, 0, 0);
+    moe_view_t *taskbar = moe_create_view(NULL, taskbar_dib, window_level_higher);
+    moe_add_next_view(NULL, taskbar);
+
+    const size_t size_buff = 16;
+    char buff[size_buff];
+
+    moe_dib_t *clock_dib = &main_screen_dib;
+    int width = 8 * 8, height = 16, padding_x = 12, padding_y = 2;
+    moe_rect_t rect_c = { {clock_dib->width - width - padding_x, padding_y}, {width, height} };
+
+    int width_usage = 6 * 8;
+    moe_rect_t rect_u = {{rect_c.origin.x - padding_x - width_usage, padding_y}, {width_usage, height}};
+
+    EFI_TIME etime;
+    gRT->GetTime(&etime, NULL);
+    uint64_t time_base = 1000000LL * (etime.Second + etime.Minute * 60 + etime.Hour * 3600) + (etime.Nanosecond / 1000) - moe_get_measure();
+
+    moe_fill_rect(taskbar_dib, NULL, taskbar_bgcolor);
+    moe_rect_t rect0 = {{rect_taskbar.origin.x, rect_taskbar.origin.y + rect_taskbar.size.height -1 },
+        {rect_taskbar.size.width, 1}};
+    moe_fill_rect(taskbar_dib, &rect0, taskbar_border_color);
+    moe_invalidate_screen(&rect_taskbar);
+
+    moe_rect_t rect_redraw = {{rect_u.origin.x, 0}, {rect_taskbar.size.width - rect_u.origin.x, rect_taskbar.size.height - 1}};
+
+    for (;;) {
+        moe_fill_rect(taskbar_dib, &rect_redraw, taskbar_bgcolor);
+
+        uint32_t now = ((time_base + moe_get_measure()) / 1000000LL);
+        unsigned time0 = now % 60;
+        unsigned time1 = (now / 60) % 60;
+        unsigned time2 = (now / 3600) % 100;
+        snprintf(buff, size_buff, "%02d:%02d:%02d", time2, time1, time0);
+        moe_draw_string(taskbar_dib, NULL, &rect_c, buff, fgcolor);
+
+        int usage = moe_get_usage();
+        int usage0 = usage % 10;
+        int usage1 = usage / 10;
+        snprintf(buff, size_buff, "%3d.%1d%%", usage1, usage0);
+        moe_draw_string(taskbar_dib, NULL, &rect_u, buff, fgcolor);
+
+        moe_invalidate_screen(&rect_redraw);
+        moe_usleep(250000);
     }
 }
 
@@ -201,15 +267,14 @@ void acpi_enable(int enabled) {
     }
 }
 
-extern moe_dib_t *desktop_dib;
 _Noreturn void start_init(void* args) {
 
     // TODO: Waiting for initializing window manager
     while (!desktop_dib) moe_yield();
 
-    mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
-    mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
-    mgs_fill_rect(250, 100, 300, 300, 0x77CCFF);
+    // mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
+    // mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
+    // mgs_fill_rect(250, 100, 300, 300, 0x77CCFF);
 
     //  Show BGRT (Boot Graphics Resource Table) from ACPI
     acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
@@ -220,11 +285,11 @@ _Noreturn void start_init(void* args) {
     printf("%s v%d.%d.%d [%d Active Cores, Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, n_active_cpu, (int)(total_memory >> 8));
     // printf("Hello, world!\n");
 
-    for (int i = 0; i < 5; i++){
-        moe_create_thread(&demo_thread, 0, 0, "DEMO");
-    }
+    moe_create_thread(&clock_thread, 0, 0, "Clock");
 
-    // display_threads();
+    // for (int i = 0; i < 5; i++){
+    //     moe_create_thread(&demo_thread, 0, (void *)(intptr_t)i, "DEMO");
+    // }
 
     //  Pseudo shell
     {
@@ -332,7 +397,8 @@ _Noreturn void start_init(void* args) {
 
                 case 'w':
                 {
-                    moe_usleep(1000000);
+                    cmd_win();
+                    // moe_usleep(1000000);
                 }
                     break;
 
@@ -367,13 +433,13 @@ void moe_assert(const char* file, uintptr_t line, ...) {
 _Noreturn void start_kernel(moe_bootinfo_t* bootinfo) {
 
     gRT = bootinfo->efiRT;
-    mgs_init(&bootinfo->video);
+    gs_init(&bootinfo->screen);
     mm_init(&bootinfo->mmap);
     acpi_init(bootinfo->acpi);
     arch_init();
-    mwm_init();
-    hid_init();
 
+    window_init();
+    hid_init();
     moe_create_thread(&start_init, 0, 0, "kernel");
 
     //  Do Idle

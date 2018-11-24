@@ -110,7 +110,7 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
     char* q = buffer;
     for(;*p && count<limit;) {
         char c = *p++;
-        if(c=='%') {
+        if (c == '%') {
             size_t width = 0, dot_width = 0;
             int z_flag = 0;
             int l_flag = 0;
@@ -149,6 +149,11 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
             for(;c == 'l';c=*p++) { l_flag=1; }
 
             switch(c) {
+                default:
+                    *q++ = c;
+                    count++;
+                    break;
+
                 case 'c':
                     *q++ = va_arg(args, int);
                     count++;

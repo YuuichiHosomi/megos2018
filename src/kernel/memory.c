@@ -13,7 +13,7 @@ typedef struct {
     uintptr_t base;
     uintptr_t size;
     uintptr_t type;
-} moe_mmap;
+} moe_mmap_t;
 
 
 uintptr_t total_memory = 0;
@@ -29,7 +29,6 @@ void *mm_alloc_static_page(size_t n) {
             return (void*)result;
         } else {
             io_pause();
-            free = atomic_load(&free_memory);
         }
     }
     return NULL;
@@ -110,7 +109,7 @@ void mm_init(moe_bootinfo_mmap_t* mmap) {
         if (type > 0) {
             total_memory += efi_mem->NumberOfPages;
         }
-        // moe_mmap mem = { efi_mem->PhysicalStart, efi_mem->NumberOfPages*0x1000, mm_type_for_count(efi_mem->Type) };
+        // moe_mmap_t mem = { efi_mem->PhysicalStart, efi_mem->NumberOfPages*0x1000, mm_type_for_count(efi_mem->Type) };
         // printf("%016llx %08zx %08zx\n", mem.base, mem.size, mem.type);
     }
     gRT->SetVirtualAddressMap(mmap->size, mmap->desc_size, mmap->desc_version, mmap->mmap);

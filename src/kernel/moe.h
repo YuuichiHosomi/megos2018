@@ -24,7 +24,6 @@ void moe_assert(const char* file, uintptr_t line, ...);
 
 //  Minimal Graphics Subsystem
 void mgs_cls();
-void mgs_fill_rect(int x, int y, int width, int height, uint32_t color);
 
 typedef struct moe_point_t {
     int x, y;
@@ -39,6 +38,10 @@ typedef struct moe_rect_t {
     moe_size_t size;
 } moe_rect_t;
 
+typedef struct moe_edge_insets_t {
+    int top, left, bottom, right;
+} moe_edge_insets_t;
+
 typedef struct moe_dib_t {
     uint32_t* dib;
     int width, height;
@@ -46,6 +49,7 @@ typedef struct moe_dib_t {
 } moe_dib_t;
 
 typedef struct moe_view_t moe_view_t;
+typedef struct moe_console_context_t moe_console_context_t;
 
 #define MOE_DIB_COLOR_KEY   0x0001
 #define MOE_DIB_ROTATE      0x0002
@@ -53,11 +57,23 @@ typedef struct moe_view_t moe_view_t;
 extern const moe_point_t *moe_point_zero;
 extern const moe_size_t *moe_size_zero;
 extern const moe_rect_t *moe_rect_zero;
+extern const moe_edge_insets_t *moe_edge_insets_zero;
 
 moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color);
 void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect, uint32_t options);
 void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color);
 void moe_invalidate_screen(moe_rect_t *rect);
+moe_point_t moe_draw_string(moe_dib_t *dib, moe_point_t *_cursor, moe_rect_t *_rect, const char *s, uint32_t color);
+
+typedef enum {
+    window_level_lowest,
+    window_level_normal = 32,
+    window_level_higher = 64,
+    window_level_highest = 127,
+} moe_window_level_t;
+
+moe_view_t *moe_create_view(moe_rect_t *frame, moe_dib_t* dib, uint32_t flags);
+void moe_add_next_view(moe_view_t *self, moe_view_t* child);
 
 
 //  Minimal Memory Subsystem
@@ -78,12 +94,13 @@ typedef enum {
     priority_max,
 } moe_priority_type_t;
 
-typedef void (*moe_start_thread)(void* args);
-int moe_create_thread(moe_start_thread start, moe_priority_level_t priority, void* args, const char* name);
+typedef void (*moe_thread_start)(void* args);
+int moe_create_thread(moe_thread_start start, moe_priority_level_t priority, void* args, const char* name);
 void moe_yield();
 void moe_consume_quantum();
 int moe_usleep(uint64_t us);
 int moe_get_current_thread();
+int moe_get_usage();
 _Noreturn void moe_exit_thread(uint32_t exit_code);
 
 typedef uint64_t moe_timer_t;
