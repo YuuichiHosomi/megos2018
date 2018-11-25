@@ -30,8 +30,8 @@
 #define VER_SYSTEM_NAME     "Minimal Operating Environment"
 #define VER_SYSTEM_NAME_SHORT   "MOE"
 #define VER_SYSTEM_MAJOR    0
-#define VER_SYSTEM_MINOR    4
-#define VER_SYSTEM_REVISION 5
+#define VER_SYSTEM_MINOR    5
+#define VER_SYSTEM_REVISION 0
 
 
 extern void arch_init();
