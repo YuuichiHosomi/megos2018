@@ -4,15 +4,16 @@
 #include "moe.h"
 #include "kernel.h"
 
-#define DEFAULT_ATTRIBUTES 0x70
-// #define DEFAULT_ATTRIBUTES 0xF8
+#define DEFAULT_ATTRIBUTES 0x07
 
 typedef struct moe_console_context_t {
+    moe_view_t *view;
     moe_dib_t *dib;
     moe_edge_insets_t edge_insets;
     int cols, rows, cursor_x, cursor_y;
     uint32_t bgcolor, fgcolor;
     uint32_t attributes;
+    int cursor_enabled;
 } moe_console_context_t;
 
 static const moe_rect_t rect_zero = {{0, 0}, {0, 0}};
@@ -22,7 +23,6 @@ const moe_size_t *moe_size_zero = &rect_zero.size;
 const moe_rect_t *moe_rect_zero = &rect_zero;
 const moe_edge_insets_t *moe_edge_insets_zero = &edge_insets_zero;
 
-extern moe_dib_t *desktop_dib;
 moe_dib_t main_screen_dib;
 
 static moe_edge_insets_t main_console_insets;
@@ -36,6 +36,17 @@ uint32_t palette[] = {
 
 #include "bootfont.h"
 int font_w8, line_height, font_offset;
+
+
+moe_rect_t moe_edge_insets_inset_rect(moe_rect_t *_rect, moe_edge_insets_t *insets) {
+    moe_rect_t rect = *_rect;
+    rect.origin.x += insets->left;
+    rect.origin.y += insets->top;
+    rect.size.width -= (insets->left + insets->right);
+    rect.size.height -= (insets->top + insets->bottom);
+    return rect;
+}
+
 
 static int col_to_x(moe_console_context_t *self, int x) {
     return self->edge_insets.left + font_w * x;
@@ -60,7 +71,7 @@ moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color) {
     if (flags & MOE_DIB_COLOR_KEY) {
         self->color_key = color;
     }
-    memset32(bitmap, color, self->width * self->delta);
+    memset32(bitmap, color, self->height * self->delta);
     return self;
 }
 
@@ -279,11 +290,20 @@ moe_point_t moe_draw_string(moe_dib_t *dib, moe_point_t *_cursor, moe_rect_t *_r
     uint32_t uc = *s++;
     for (; uc; uc = *s++) {
 
-        moe_rect_t font_rect = {{ cursor.origin.x, cursor.origin.y + font_offset}, {font_w, font_h}};
-        const uint8_t* font_p = font_data + (uc - 0x20) * font_w8 * font_h;
-        draw_pattern(dib, &font_rect, font_p, color);
+        switch(uc) {
+            default:
+                moe_rect_t font_rect = {{ cursor.origin.x, cursor.origin.y + font_offset}, {font_w, font_h}};
+                const uint8_t* font_p = font_data + (uc - 0x20) * font_w8 * font_h;
+                draw_pattern(dib, &font_rect, font_p, color);
 
-        cursor.origin.x += cursor.size.width;
+                cursor.origin.x += cursor.size.width;
+                break;
+            
+            case '\n':
+                cursor.origin.x = rect.origin.x;
+                cursor.origin.y += cursor.size.height;
+                break;
+        }
 
         if (cursor.origin.x >= right) {
             cursor.origin.x = rect.origin.x;
@@ -297,10 +317,9 @@ moe_point_t moe_draw_string(moe_dib_t *dib, moe_point_t *_cursor, moe_rect_t *_r
 }
 
 
-
-
-
-void console_init(moe_console_context_t *self, moe_dib_t *dib, moe_edge_insets_t* insets) {
+void console_init(moe_console_context_t *self, moe_view_t* view, moe_dib_t *dib, moe_edge_insets_t* insets) {
+    if (!self) self = current_console;
+    self->view = view;
     self->dib = dib;
     if (insets) {
         self->edge_insets = *insets;
@@ -316,31 +335,57 @@ void console_init(moe_console_context_t *self, moe_dib_t *dib, moe_edge_insets_t
 
 void moe_set_console_attributes(moe_console_context_t *self, uint32_t attributes) {
     if (!self) self = current_console;
+    if (!attributes) attributes = DEFAULT_ATTRIBUTES;
     self->attributes = attributes;
     self->fgcolor = palette[attributes & 0x0F];
     self->bgcolor = palette[(attributes >> 4) & 0x0F];
 }
 
+int moe_set_cursor_enabled(moe_console_context_t *self, int visible) {
+    if (!self) self = current_console;
+    int old_value = self->cursor_enabled;
+    self->cursor_enabled = visible;
+    moe_rect_t rect = {{col_to_x(self, self->cursor_x), row_to_y(self, self->cursor_y) + font_offset}, {font_w, font_h}};
+    if (visible) {
+        moe_fill_rect(self->dib, &rect, self->fgcolor);
+        if (self->view) {
+            moe_invalidate_view(self->view, &rect);
+        }
+    } else if (old_value) {
+        moe_fill_rect(self->dib, &rect, self->bgcolor);
+        if (self->view) {
+            moe_invalidate_view(self->view, &rect);
+        }
+    }
+    return old_value;
+}
+
 
 void putchar32(moe_console_context_t *self, uint32_t c) {
+    if (!self) self = current_console;
+    int old_cursor_state = moe_set_cursor_enabled(self, 0);
     while (self->cursor_y >= self->rows) {
         self->cursor_y--;
-        moe_point_t origin = { col_to_x(self, 0), row_to_y(self, 0) };
-        moe_rect_t rect = {{ col_to_x(self, 0), row_to_y(self, 1) }, { self->cols * font_w, (self->rows - 1) * line_height }};
+        moe_point_t origin = {col_to_x(self, 0), row_to_y(self, 0) };
+        moe_rect_t rect = {{col_to_x(self, 0), row_to_y(self, 1) }, { self->cols * font_w, (self->rows - 1) * line_height }};
         moe_blt(self->dib, self->dib, &origin, &rect, 0);
         moe_rect_t rect_last_line = { {col_to_x(self, 0), row_to_y(self, self->cursor_y) }, { self->cols * font_w, line_height } };
         moe_fill_rect(current_console->dib, &rect_last_line, self->bgcolor);
-        moe_invalidate_screen(NULL);
+        if (self->view) {
+            moe_invalidate_view(self->view, NULL);
+        }
     }
     switch (c) {
         default:
             if (c >= 0x20 && c < 0x80) {
-                moe_rect_t rect = { { col_to_x(self, self->cursor_x), row_to_y(self, self->cursor_y) }, { font_w, line_height } };
-                moe_rect_t rect_f = { { col_to_x(self, self->cursor_x), row_to_y(self, self->cursor_y) + font_offset }, { font_w, font_h } };
+                moe_rect_t rect = {{col_to_x(self, self->cursor_x), row_to_y(self, self->cursor_y)}, {font_w, line_height}};
+                moe_rect_t rect_f = {{col_to_x(self, self->cursor_x), row_to_y(self, self->cursor_y) + font_offset}, {font_w, font_h}};
                 const uint8_t* font_p = font_data + (c - 0x20) * font_w8 * font_h;
                 moe_fill_rect(self->dib, &rect, self->bgcolor);
                 draw_pattern(self->dib, &rect_f, font_p, self->fgcolor);
-                moe_invalidate_screen(&rect);
+                if (self->view) {
+                    moe_invalidate_view(self->view, &rect);
+                }
             }
             self->cursor_x++;
             break;
@@ -365,25 +410,24 @@ void putchar32(moe_console_context_t *self, uint32_t c) {
         self->cursor_x = 0;
         self->cursor_y++;
     }
+    moe_set_cursor_enabled(self, old_cursor_state);
 }
 
 
-// TODO:
 int putchar(unsigned char c) {
     putchar32(current_console, c);
     return 1;
 }
 
-// TODO:
 void mgs_cls() {
-    if (desktop_dib) {
-        console_init(current_console, desktop_dib, &main_console_insets);
-    } else {
-        console_init(current_console, &main_screen_dib, &main_console_insets);
+    moe_rect_t rect = {{0, 0}, {current_console->dib->width, current_console->dib->height}};
+    rect = moe_edge_insets_inset_rect(&rect, &current_console->edge_insets);
+    moe_fill_rect(current_console->dib, &rect, current_console->bgcolor);
+    if (current_console->view) {
+        moe_invalidate_view(current_console->view, NULL);
     }
-
-    moe_fill_rect(current_console->dib, NULL, current_console->bgcolor);
-    moe_invalidate_screen(NULL);
+    current_console->cursor_x = 0;
+    current_console->cursor_y = 0;
 }
 
 
@@ -397,9 +441,9 @@ void gs_init(moe_dib_t* screen) {
 
     current_console = &main_console;
     int padding_x = font_w * 2;
-    int padding_y = line_height + 4;
+    int padding_y = line_height;
     moe_edge_insets_t insets = { padding_y, padding_x, padding_y, padding_x };
     main_console_insets = insets;
-    console_init(current_console, &main_screen_dib, &main_console_insets);
-    moe_set_console_attributes(current_console, DEFAULT_ATTRIBUTES);
+    console_init(current_console, NULL, &main_screen_dib, &main_console_insets);
+    moe_set_console_attributes(current_console, 0);
 }

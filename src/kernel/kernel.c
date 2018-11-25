@@ -28,6 +28,7 @@
 
 
 #define VER_SYSTEM_NAME     "Minimal Operating Environment"
+#define VER_SYSTEM_NAME_SHORT   "MOE"
 #define VER_SYSTEM_MAJOR    0
 #define VER_SYSTEM_MINOR    4
 #define VER_SYSTEM_REVISION 5
@@ -134,6 +135,7 @@ int read_cmdline(char* buffer, size_t max_len) {
     int cont_flag = 1;
     int len = 0, limit = max_len - 1;
 
+    int old_cursor_state = moe_set_cursor_enabled(NULL, 1);
     while (cont_flag) {
         uint32_t c = getchar();
         switch (c) {
@@ -168,6 +170,7 @@ int read_cmdline(char* buffer, size_t max_len) {
                 break;
         }
     }
+    moe_set_cursor_enabled(NULL, old_cursor_state);
     buffer[len] = '\0';
     printf("\n");
     return len;
@@ -198,25 +201,23 @@ _Noreturn void demo_thread(void *args) {
     }
 }
 
+
 //  Clock and Statusbar thread
 extern moe_dib_t *desktop_dib;
-_Noreturn void clock_thread(void *args) {
+_Noreturn void statusbar_thread(void *args) {
 
-    uint32_t taskbar_bgcolor = 0xFFFFFF;
-    uint32_t taskbar_border_color = 0;
+    uint32_t statusbar_bgcolor = 0xFFFFFF;
     uint32_t fgcolor = 0x555555;
 
-    moe_rect_t rect_taskbar = {{0, 0}, {desktop_dib->width, 23}};
-    moe_dib_t *taskbar_dib = moe_create_dib(&rect_taskbar.size, 0, 0);
-    moe_view_t *taskbar = moe_create_view(NULL, taskbar_dib, window_level_higher);
-    moe_add_next_view(NULL, taskbar);
+    moe_rect_t rect_statusbar = {{0, 0}, {desktop_dib->width, 22}};
+    moe_dib_t *statusbar_dib = moe_create_dib(&rect_statusbar.size, 0, statusbar_bgcolor);
+    moe_view_t *statusbar = moe_create_view(NULL, statusbar_dib, BORDER_BOTTOM | window_level_higher);
 
-    const size_t size_buff = 16;
+    const size_t size_buff = 256;
     char buff[size_buff];
 
-    moe_dib_t *clock_dib = &main_screen_dib;
-    int width = 8 * 8, height = 16, padding_x = 12, padding_y = 2;
-    moe_rect_t rect_c = { {clock_dib->width - width - padding_x, padding_y}, {width, height} };
+    int width_clock = 8 * 8, height = 20, padding_x = 8, padding_y = 1;
+    moe_rect_t rect_c = { {desktop_dib->width - width_clock - padding_x, padding_y}, {width_clock, height} };
 
     int width_usage = 6 * 8;
     moe_rect_t rect_u = {{rect_c.origin.x - padding_x - width_usage, padding_y}, {width_usage, height}};
@@ -225,31 +226,33 @@ _Noreturn void clock_thread(void *args) {
     gRT->GetTime(&etime, NULL);
     uint64_t time_base = 1000000LL * (etime.Second + etime.Minute * 60 + etime.Hour * 3600) + (etime.Nanosecond / 1000) - moe_get_measure();
 
-    moe_fill_rect(taskbar_dib, NULL, taskbar_bgcolor);
-    moe_rect_t rect0 = {{rect_taskbar.origin.x, rect_taskbar.origin.y + rect_taskbar.size.height -1 },
-        {rect_taskbar.size.width, 1}};
-    moe_fill_rect(taskbar_dib, &rect0, taskbar_border_color);
-    moe_invalidate_screen(&rect_taskbar);
+    {
+        moe_point_t origin = {4, padding_y};
+        moe_draw_string(statusbar_dib, &origin, NULL, VER_SYSTEM_NAME_SHORT, fgcolor);
+        // moe_draw_string(statusbar_dib, &origin, NULL, "[Start] <- HAJIMERU TOKI HA START WO OSU", fgcolor);
+    }
 
-    moe_rect_t rect_redraw = {{rect_u.origin.x, 0}, {rect_taskbar.size.width - rect_u.origin.x, rect_taskbar.size.height - 1}};
+    moe_add_view(statusbar);
+
+    moe_rect_t rect_redraw = {{rect_u.origin.x, 0}, {rect_statusbar.size.width - rect_u.origin.x, rect_statusbar.size.height - 2}};
 
     for (;;) {
-        moe_fill_rect(taskbar_dib, &rect_redraw, taskbar_bgcolor);
+        moe_fill_rect(statusbar_dib, &rect_redraw, statusbar_bgcolor);
 
         uint32_t now = ((time_base + moe_get_measure()) / 1000000LL);
         unsigned time0 = now % 60;
         unsigned time1 = (now / 60) % 60;
         unsigned time2 = (now / 3600) % 100;
         snprintf(buff, size_buff, "%02d:%02d:%02d", time2, time1, time0);
-        moe_draw_string(taskbar_dib, NULL, &rect_c, buff, fgcolor);
+        moe_draw_string(statusbar_dib, NULL, &rect_c, buff, fgcolor);
 
         int usage = moe_get_usage();
         int usage0 = usage % 10;
         int usage1 = usage / 10;
         snprintf(buff, size_buff, "%3d.%1d%%", usage1, usage0);
-        moe_draw_string(taskbar_dib, NULL, &rect_u, buff, fgcolor);
+        moe_draw_string(statusbar_dib, NULL, &rect_u, buff, fgcolor);
 
-        moe_invalidate_screen(&rect_redraw);
+        moe_invalidate_view(statusbar, &rect_redraw);
         moe_usleep(250000);
     }
 }
@@ -267,25 +270,63 @@ void acpi_enable(int enabled) {
     }
 }
 
+void cmd_ver() {
+    printf("%s v%d.%d.%d\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION);
+}
+
+extern void console_init(moe_console_context_t *self, moe_view_t* view, moe_dib_t *dib, const moe_edge_insets_t* insets);
 _Noreturn void start_init(void* args) {
 
     // TODO: Waiting for initializing window manager
     while (!desktop_dib) moe_yield();
 
-    // mgs_fill_rect( 50,  50, 300, 300, 0xFF77CC);
-    // mgs_fill_rect(150, 150, 300, 300, 0x77FFCC);
-    // mgs_fill_rect(250, 100, 300, 300, 0x77CCFF);
+    moe_create_thread(&statusbar_thread, 0, 0, "Statusbar");
 
-    //  Show BGRT (Boot Graphics Resource Table) from ACPI
-    acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
-    if (bgrt) {
-        draw_logo_bitmap(desktop_dib, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
+    // //  Show BGRT (Boot Graphics Resource Table) from ACPI
+    // acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
+    // if (bgrt) {
+    //     draw_logo_bitmap(desktop_dib, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
+    // }
+
+    moe_view_t* splash;
+
+    //  Splash window
+    {
+        const size_t buff_size = 256;
+        char *buff = mm_alloc_static(buff_size);
+        moe_size_t size = {320, 240};
+        moe_rect_t frame;
+        frame.origin.x = (desktop_dib->width - size.width) / 2;
+        frame.origin.y = (desktop_dib->height - size.height) /2;
+        frame.size = size;
+        snprintf(buff, buff_size, "%s v%d.%d.%d\nMemory %dMB, %d Active Cores\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(total_memory >> 8), n_active_cpu);
+
+        moe_dib_t *dib = moe_create_dib(&size, 0, 0xFFFFFF);
+        splash = moe_create_view(&frame, dib, BORDER_ALL | window_level_popup);
+        moe_point_t cursor = {4, 180};
+        moe_point_t cursor_shadow = {5, 181};
+        moe_rect_t client_rect = {{4, 4}, {size.width - 8, size.height - 28}};
+        moe_draw_string(dib, &cursor_shadow, &client_rect, buff, 0xAAAAAA);
+        moe_draw_string(dib, &cursor, &client_rect, buff, 0x000000);
+
+        moe_add_view(splash);
+    }
+    moe_usleep(1000000);
+
+    // Init root console
+    {
+        uint32_t console_attributes = 0xF8;
+        moe_rect_t frame = {{16, 32}, {640, 480}};
+        moe_edge_insets_t insets = { 24, 4, 4, 4 };
+        moe_dib_t *dib = moe_create_dib(&frame.size, 0, 0xFFFFFF);
+        moe_view_t *view = moe_create_view(&frame, dib, BORDER_ALL);
+        moe_add_view(view);
+        console_init(NULL, view, dib, &insets);
+        moe_set_console_attributes(NULL, console_attributes);
     }
 
-    printf("%s v%d.%d.%d [%d Active Cores, Memory %dMB]\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, n_active_cpu, (int)(total_memory >> 8));
-    // printf("Hello, world!\n");
-
-    moe_create_thread(&clock_thread, 0, 0, "Clock");
+    moe_usleep(1000000);
+    moe_remove_view(splash);
 
     // for (int i = 0; i < 5; i++){
     //     moe_create_thread(&demo_thread, 0, (void *)(intptr_t)i, "DEMO");
@@ -296,13 +337,8 @@ _Noreturn void start_init(void* args) {
         const size_t cmdline_size = 80;
         char* cmdline = mm_alloc_static(cmdline_size);
 
-        // EFI_TIME time;
-        // gRT->GetTime(&time, NULL);
-        // printf("Current Time: %d-%02d-%02d %02d:%02d:%02d %04d\n", time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second, time.TimeZone);
-
-        // printf("Checking Timer...");
-        moe_usleep(1000000);
-        // printf("Ok\n");
+        cmd_ver();
+        // printf("Hello, world!\n");
 
         for (;;) {
             printf("# ");
@@ -329,7 +365,7 @@ _Noreturn void start_init(void* args) {
                     break;
 
                 case 'v':
-                    printf("%s v%d.%d.%d\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION);
+                    cmd_ver();
                     break;
 
                 case 'c':

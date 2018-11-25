@@ -308,9 +308,9 @@ moe_thread_t* create_thread(moe_thread_start start, moe_priority_level_t priorit
     new_thread->thid = atomic_fetch_add(&next_thid, 1);
     new_thread->priority = priority;
     if (priority) {
-        new_thread->quantum = DEFAULT_QUANTUM;
         new_thread->quantum_min = DEFAULT_QUANTUM / 2;
         new_thread->quantum_max = DEFAULT_QUANTUM * 3;
+        new_thread->quantum = new_thread->quantum_max;
         new_thread->quantum_left = new_thread->quantum_max;
     }
     // new_thread->affinity = system_affinity;
@@ -475,15 +475,19 @@ uintptr_t moe_fifo_get_estimated_free(moe_fifo_t* self) {
 
 void display_threads() {
     moe_thread_t* p = root_thread;
-    printf("ID context  attr     affinity      usage cpu time   name\n");
+    printf("ID context  attr     usage cpu time   name\n");
     for (; p; p = p->next) {
         uint64_t time = p->cputime / 1000000;
         uint32_t time0 = time % 60;
         uint32_t time1 = (time / 60) % 60;
         uint32_t time2 = (time / 3600);
-        printf("%2d %08zx %08zx %08x %2d/%2d %4u %4u:%02u:%02u %s\n",
-            (int)p->thid, (uintptr_t)p, p->flags, p->affinity,
-            p->quantum_left, p->quantum, p->load / 1000, time2, time1, time0,
+        int usage = p->load / 1000;
+        if (usage > 999) usage = 999;
+        int usage0 = usage % 10, usage1 = usage / 10;
+        printf("%2d %08zx %08zx %2d.%d%% %4u:%02u:%02u %s\n",
+            (int)p->thid, (uintptr_t)p, p->flags,
+            // p->affinity, p->quantum_left, p->quantum,
+            usage1, usage0, time2, time1, time0,
             p->name);
     }
 }

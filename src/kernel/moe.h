@@ -62,18 +62,30 @@ extern const moe_edge_insets_t *moe_edge_insets_zero;
 moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color);
 void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect, uint32_t options);
 void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color);
-void moe_invalidate_screen(moe_rect_t *rect);
+moe_rect_t moe_edge_insets_inset_rect(moe_rect_t *_rect, moe_edge_insets_t *insets);
 moe_point_t moe_draw_string(moe_dib_t *dib, moe_point_t *_cursor, moe_rect_t *_rect, const char *s, uint32_t color);
+void moe_set_console_attributes(moe_console_context_t *self, uint32_t attributes);
+int moe_set_cursor_enabled(moe_console_context_t *self, int visible);
 
 typedef enum {
     window_level_lowest,
     window_level_normal = 32,
     window_level_higher = 64,
+    window_level_popup = 96,
     window_level_highest = 127,
 } moe_window_level_t;
 
+#define BORDER_TOP      0x0100
+#define BORDER_LEFT     0x0200
+#define BORDER_RIGHT    0x0400
+#define BORDER_BOTTOM   0x0800
+#define BORDER_ALL      (BORDER_TOP | BORDER_LEFT | BORDER_BOTTOM | BORDER_RIGHT)
+
 moe_view_t *moe_create_view(moe_rect_t *frame, moe_dib_t* dib, uint32_t flags);
-void moe_add_next_view(moe_view_t *self, moe_view_t* child);
+void moe_add_view(moe_view_t* view);
+void moe_remove_view(moe_view_t *self);
+void moe_invalidate_view(moe_view_t *view, moe_rect_t *rect);
+void moe_invalidate_screen(moe_rect_t *rect);
 
 
 //  Minimal Memory Subsystem
