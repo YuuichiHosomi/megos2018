@@ -9,16 +9,16 @@
 #include <stdint.h>
 
 
-int printf(const char* format, ...);
-void* memcpy(void* p, const void* q, size_t n);
-void* memset(void * p, int v, size_t n);
-void memset32(uint32_t* p, uint32_t v, size_t n);
+int printf(const char *format, ...);
+void* memcpy(void *p, const void *q, size_t n);
+void* memset(void *p, int v, size_t n);
+void memset32(uint32_t *p, uint32_t v, size_t n);
 int atomic_bit_test_and_set(void *p, uintptr_t bit);
 int atomic_bit_test_and_clear(void *p, uintptr_t bit);
 int atomic_bit_test(void *p, uintptr_t bit);
 
 
-void moe_assert(const char* file, uintptr_t line, ...);
+void moe_assert(const char *file, uintptr_t line, ...);
 #define MOE_ASSERT(cond, ...) if (!(cond)) { moe_assert(__FILE__, __LINE__, __VA_ARGS__); }
 
 
@@ -53,6 +53,7 @@ typedef struct moe_console_context_t moe_console_context_t;
 
 #define MOE_DIB_COLOR_KEY   0x0001
 #define MOE_DIB_ROTATE      0x0002
+#define MOE_DIB_ALPHA       0x0004
 
 extern const moe_point_t *moe_point_zero;
 extern const moe_size_t *moe_size_zero;
@@ -60,32 +61,42 @@ extern const moe_rect_t *moe_rect_zero;
 extern const moe_edge_insets_t *moe_edge_insets_zero;
 
 moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color);
-void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect, uint32_t options);
-void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color);
-moe_rect_t moe_edge_insets_inset_rect(moe_rect_t *_rect, moe_edge_insets_t *insets);
-moe_point_t moe_draw_string(moe_dib_t *dib, moe_point_t *_cursor, moe_rect_t *_rect, const char *s, uint32_t color);
+void moe_blt(moe_dib_t *dest, moe_dib_t *src, moe_point_t *origin, moe_rect_t *rect, uint32_t options);
+void moe_fill_rect(moe_dib_t *dest, moe_rect_t *rect, uint32_t color);
+void moe_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t color);
+moe_rect_t moe_edge_insets_inset_rect(moe_rect_t *rect, moe_edge_insets_t *insets);
+moe_point_t moe_draw_string(moe_dib_t *dib, moe_point_t *cursor, moe_rect_t *rect, const char *s, uint32_t color);
+
 void moe_set_console_attributes(moe_console_context_t *self, uint32_t attributes);
-int moe_set_cursor_enabled(moe_console_context_t *self, int visible);
+int moe_set_console_cursor_enabled(moe_console_context_t *self, int visible);
 
 typedef enum {
-    window_level_lowest,
+    window_level_desktop,
+    window_level_desktop_items,
     window_level_normal = 32,
     window_level_higher = 64,
     window_level_popup = 96,
-    window_level_highest = 127,
+    window_level_pointer = 127,
 } moe_window_level_t;
 
-#define BORDER_TOP      0x0100
-#define BORDER_LEFT     0x0200
-#define BORDER_RIGHT    0x0400
-#define BORDER_BOTTOM   0x0800
-#define BORDER_ALL      (BORDER_TOP | BORDER_LEFT | BORDER_BOTTOM | BORDER_RIGHT)
+#define BORDER_TOP          0x0100
+#define BORDER_LEFT         0x0200
+#define BORDER_RIGHT        0x0400
+#define BORDER_BOTTOM       0x0800
+#define BORDER_ALL          (BORDER_TOP | BORDER_LEFT | BORDER_BOTTOM | BORDER_RIGHT)
+#define WINDOW_CAPTION      0x1000
+#define WINDOW_CENTER       0x2000
+#define WINDOW_TRANSPARENT  0x4000
 
-moe_view_t *moe_create_view(moe_rect_t *frame, moe_dib_t* dib, uint32_t flags);
+moe_size_t moe_get_screen_size();
+moe_view_t *moe_create_view(moe_rect_t *frame, moe_dib_t* dib, uint32_t flags, const char *title);
+moe_edge_insets_t moe_get_client_insets(moe_view_t *view);
+moe_rect_t moe_get_client_rect(moe_view_t *view);
 void moe_add_view(moe_view_t* view);
-void moe_remove_view(moe_view_t *self);
+void moe_remove_view(moe_view_t *view);
 void moe_invalidate_view(moe_view_t *view, moe_rect_t *rect);
 void moe_invalidate_screen(moe_rect_t *rect);
+int moe_alert(const char *title, const char *message, uint32_t flags);
 
 
 //  Minimal Memory Subsystem

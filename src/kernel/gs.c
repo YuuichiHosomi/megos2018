@@ -123,6 +123,19 @@ void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *r
     blt_main(dest, src, &p, &r);
 }
 
+// void blt_unroll_test(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect) {
+//     unsigned dx = origin->x, dy = origin->y;
+//     unsigned sx = rect->origin.x, sy = rect->origin.y, w = rect->size.width, h = rect->size.height;
+
+//     // Transfer
+//     uint32_t *p = dest->dib;
+//     p += dx + dy * dest->delta;
+//     uint32_t *q = src->dib;
+//     q += sx + sy * src->delta;
+//     uintptr_t dd = dest->delta - w, sd = src->delta - w;
+
+// }
+
 void blt_main(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect) {
     int dx = origin->x, dy = origin->y;
     int sx = rect->origin.x, sy = rect->origin.y, w = rect->size.width, h = rect->size.height;
@@ -134,7 +147,24 @@ void blt_main(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *
     q += sx + sy * src->delta;
     uintptr_t dd = dest->delta - w, sd = src->delta - w;
 
-    if (src->flags & MOE_DIB_COLOR_KEY) { // Blt with color key
+    if (src->flags & MOE_DIB_ALPHA) { // ARGB Transparency
+        for (uintptr_t i = 0; i < h; i++) {
+            #pragma clang loop vectorize(enable) interleave(enable)
+            for (uintptr_t j = 0; j < w; j++) {
+                uint8_t *p0 = (uint8_t*)p;
+                uint8_t *q0 = (uint8_t*)q;
+                uint8_t alpha = q0[3];
+                uint8_t alpha_n = 255 - alpha;
+                p0[0] = (q0[0] * alpha_n + p0[0] * alpha) / 256;
+                p0[1] = (q0[1] * alpha_n + p0[1] * alpha) / 256;
+                p0[2] = (q0[2] * alpha_n + p0[2] * alpha) / 256;
+                p0[3] = 0;
+                p++, q++;
+            }
+            p += dd;
+            q += sd;
+        }
+    } else if (src->flags & MOE_DIB_COLOR_KEY) { // Blt with color key
         uint32_t k = src->color_key;
         for (uintptr_t i = 0; i < h; i++) {
             #pragma clang loop vectorize(enable) interleave(enable)
@@ -235,6 +265,67 @@ void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color) {
         }
     }
 
+}
+
+
+void moe_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t color) {
+
+    int dx, dy, w, h;
+    if (rect) {
+        dx = rect->origin.x;
+        dy = rect->origin.y;
+        w = rect->size.width;
+        h = rect->size.height;
+    } else {
+        dx = dy = 0;
+        w = dest->width;
+        h = dest->height;
+    }
+
+    if (radius * 2 > w) radius = w / 2;
+    if (radius * 2 > h) radius = h / 2;
+
+    int lh = h - radius * 2;
+    if (lh > 0) {
+        moe_rect_t rect_line = {{dx, dy + radius}, {w, lh}};
+        moe_fill_rect(dest, &rect_line, color);
+    }
+
+    int d = 1 - radius, dh = 3, dd = 5 - 2 * radius;
+    int cx = 0, cy = radius;
+    int bx, by, dw;
+
+    for (; cx <= cy; cx++) {
+        if (d < 0) {
+            d += dh;
+            dd += 2;
+        } else {
+            d += dd;
+            dh += 2;
+            dd += 4;
+            cy--;
+        }
+
+        bx = radius - cy, by = radius - cx;
+        {
+            dw = w - bx * 2;
+            moe_rect_t rect_line1 = {{dx + bx, dy + by}, {dw, 1}};
+            moe_fill_rect(dest, &rect_line1, color);
+
+            moe_rect_t rect_line2 = {{dx + bx, dy + h - by}, {dw, 1}};
+            moe_fill_rect(dest, &rect_line2, color);
+        }
+
+        bx = radius - cx, by = radius - cy;
+        {
+            dw = w - bx * 2;
+            moe_rect_t rect_line1 = {{dx + bx, dy + by}, {dw, 1}};
+            moe_fill_rect(dest, &rect_line1, color);
+
+            moe_rect_t rect_line2 = {{dx + bx, dy + h - by}, {dw, 1}};
+            moe_fill_rect(dest, &rect_line2, color);
+        }
+    }
 }
 
 
@@ -341,7 +432,7 @@ void moe_set_console_attributes(moe_console_context_t *self, uint32_t attributes
     self->bgcolor = palette[(attributes >> 4) & 0x0F];
 }
 
-int moe_set_cursor_enabled(moe_console_context_t *self, int visible) {
+int moe_set_console_cursor_enabled(moe_console_context_t *self, int visible) {
     if (!self) self = current_console;
     int old_value = self->cursor_enabled;
     self->cursor_enabled = visible;
@@ -363,7 +454,7 @@ int moe_set_cursor_enabled(moe_console_context_t *self, int visible) {
 
 void putchar32(moe_console_context_t *self, uint32_t c) {
     if (!self) self = current_console;
-    int old_cursor_state = moe_set_cursor_enabled(self, 0);
+    int old_cursor_state = moe_set_console_cursor_enabled(self, 0);
     while (self->cursor_y >= self->rows) {
         self->cursor_y--;
         moe_point_t origin = {col_to_x(self, 0), row_to_y(self, 0) };
@@ -410,7 +501,7 @@ void putchar32(moe_console_context_t *self, uint32_t c) {
         self->cursor_x = 0;
         self->cursor_y++;
     }
-    moe_set_cursor_enabled(self, old_cursor_state);
+    moe_set_console_cursor_enabled(self, old_cursor_state);
 }
 
 

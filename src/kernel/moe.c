@@ -1,5 +1,5 @@
-// moe service
-// Copyright (c) 1998,2018 MEG-OS project, All rights reserved.
+// MOE Service
+// Copyright (c) 1998,2002,2018 MEG-OS project, All rights reserved.
 // License: BSD
 #include <stdatomic.h>
 #include "moe.h"

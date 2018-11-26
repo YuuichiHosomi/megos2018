@@ -31,7 +31,7 @@
 #define VER_SYSTEM_NAME_SHORT   "MOE"
 #define VER_SYSTEM_MAJOR    0
 #define VER_SYSTEM_MINOR    5
-#define VER_SYSTEM_REVISION 0
+#define VER_SYSTEM_REVISION 1
 
 
 extern void arch_init();
@@ -135,7 +135,7 @@ int read_cmdline(char* buffer, size_t max_len) {
     int cont_flag = 1;
     int len = 0, limit = max_len - 1;
 
-    int old_cursor_state = moe_set_cursor_enabled(NULL, 1);
+    int old_cursor_state = moe_set_console_cursor_enabled(NULL, 1);
     while (cont_flag) {
         uint32_t c = getchar();
         switch (c) {
@@ -170,7 +170,7 @@ int read_cmdline(char* buffer, size_t max_len) {
                 break;
         }
     }
-    moe_set_cursor_enabled(NULL, old_cursor_state);
+    moe_set_console_cursor_enabled(NULL, old_cursor_state);
     buffer[len] = '\0';
     printf("\n");
     return len;
@@ -203,21 +203,21 @@ _Noreturn void demo_thread(void *args) {
 
 
 //  Clock and Statusbar thread
-extern moe_dib_t *desktop_dib;
 _Noreturn void statusbar_thread(void *args) {
 
-    uint32_t statusbar_bgcolor = 0xFFFFFF;
+    uint32_t statusbar_bgcolor = 0xEEEEF7;
     uint32_t fgcolor = 0x555555;
 
-    moe_rect_t rect_statusbar = {{0, 0}, {desktop_dib->width, 22}};
+    moe_size_t screen_size = moe_get_screen_size();
+    moe_rect_t rect_statusbar = {{0, 0}, {screen_size.width, 22}};
     moe_dib_t *statusbar_dib = moe_create_dib(&rect_statusbar.size, 0, statusbar_bgcolor);
-    moe_view_t *statusbar = moe_create_view(NULL, statusbar_dib, BORDER_BOTTOM | window_level_higher);
+    moe_view_t *statusbar = moe_create_view(NULL, statusbar_dib, BORDER_BOTTOM | window_level_higher, "Statusbar");
 
     const size_t size_buff = 256;
     char buff[size_buff];
 
     int width_clock = 8 * 8, height = 20, padding_x = 8, padding_y = 1;
-    moe_rect_t rect_c = { {desktop_dib->width - width_clock - padding_x, padding_y}, {width_clock, height} };
+    moe_rect_t rect_c = { {screen_size.width - width_clock - padding_x, padding_y}, {width_clock, height} };
 
     int width_usage = 6 * 8;
     moe_rect_t rect_u = {{rect_c.origin.x - padding_x - width_usage, padding_y}, {width_usage, height}};
@@ -277,56 +277,48 @@ void cmd_ver() {
 extern void console_init(moe_console_context_t *self, moe_view_t* view, moe_dib_t *dib, const moe_edge_insets_t* insets);
 _Noreturn void start_init(void* args) {
 
-    // TODO: Waiting for initializing window manager
-    while (!desktop_dib) moe_yield();
-
     moe_create_thread(&statusbar_thread, 0, 0, "Statusbar");
 
     // //  Show BGRT (Boot Graphics Resource Table) from ACPI
     // acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
     // if (bgrt) {
-    //     draw_logo_bitmap(desktop_dib, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
+    //     draw_logo_bitmap(?, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
     // }
 
-    moe_view_t* splash;
+    moe_view_t* splash = NULL;
 
     //  Splash window
-    {
+    if (0) {
         const size_t buff_size = 256;
         char *buff = mm_alloc_static(buff_size);
-        moe_size_t size = {320, 240};
-        moe_rect_t frame;
-        frame.origin.x = (desktop_dib->width - size.width) / 2;
-        frame.origin.y = (desktop_dib->height - size.height) /2;
-        frame.size = size;
+        moe_rect_t frame = {{0, 0}, {320, 240}};
         snprintf(buff, buff_size, "%s v%d.%d.%d\nMemory %dMB, %d Active Cores\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(total_memory >> 8), n_active_cpu);
-
-        moe_dib_t *dib = moe_create_dib(&size, 0, 0xFFFFFF);
-        splash = moe_create_view(&frame, dib, BORDER_ALL | window_level_popup);
+        moe_dib_t *dib = moe_create_dib(&frame.size, 0, 0xFFFFFF);
+        splash = moe_create_view(&frame, dib, WINDOW_CENTER | WINDOW_CAPTION | BORDER_ALL | window_level_higher, "Welcome");
         moe_point_t cursor = {4, 180};
         moe_point_t cursor_shadow = {5, 181};
-        moe_rect_t client_rect = {{4, 4}, {size.width - 8, size.height - 28}};
+        moe_rect_t client_rect = {{4, 4}, {frame.size.width - 8, frame.size.height - 28}};
         moe_draw_string(dib, &cursor_shadow, &client_rect, buff, 0xAAAAAA);
         moe_draw_string(dib, &cursor, &client_rect, buff, 0x000000);
 
         moe_add_view(splash);
+        moe_usleep(1000000);
     }
-    moe_usleep(1000000);
 
     // Init root console
     {
         uint32_t console_attributes = 0xF8;
-        moe_rect_t frame = {{16, 32}, {640, 480}};
-        moe_edge_insets_t insets = { 24, 4, 4, 4 };
+        moe_rect_t frame = {{16, 32}, {608, 432}};
         moe_dib_t *dib = moe_create_dib(&frame.size, 0, 0xFFFFFF);
-        moe_view_t *view = moe_create_view(&frame, dib, BORDER_ALL);
-        moe_add_view(view);
+        moe_view_t *view = moe_create_view(&frame, dib, WINDOW_CAPTION | BORDER_ALL, "Terminal");
+        moe_edge_insets_t insets = moe_get_client_insets(view);
         console_init(NULL, view, dib, &insets);
         moe_set_console_attributes(NULL, console_attributes);
+        moe_add_view(view);
     }
 
-    moe_usleep(1000000);
-    moe_remove_view(splash);
+    // moe_usleep(1000000);
+    if (splash) moe_remove_view(splash);
 
     // for (int i = 0; i < 5; i++){
     //     moe_create_thread(&demo_thread, 0, (void *)(intptr_t)i, "DEMO");
@@ -339,6 +331,7 @@ _Noreturn void start_init(void* args) {
 
         cmd_ver();
         // printf("Hello, world!\n");
+        // moe_alert("Hello", "Hello, world!", 0);
 
         for (;;) {
             printf("# ");
@@ -393,35 +386,39 @@ _Noreturn void start_init(void* args) {
 
                 case 'a':
                 {
-                    switch(cmdline[1]) {
-                        case '0':
-                            acpi_enable(0);
-                            break;
-                        case '1':
-                            acpi_enable(1);
-                            break;
-                        default:
-                            int n = acpi_get_number_of_table_entries();
-                            printf("ACPI Tables: %d\n", n);
-                            for (int i = 0; i < n; i++) {
-                                acpi_header_t* table = acpi_enum_table_entry(i);
-                                if (table) {
-                                    printf("%p: %.4s %d\n", (void*)table, table->signature, table->length);
-                                }
-                            }
-                            acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
-                            if (madt) {
-                                printf("Dump of MADT:\n");
-                                size_t max_length = madt->Header.length - 44;
-                                uint8_t* p = madt->Structure;
-                                for (size_t loc = 0; loc < max_length; ) {
-                                    size_t len = p[loc+1];
-                                    dump_madt(p+loc, len);
-                                    loc += len;
-                                }
-                            }
-                            break;
-                    }
+                    const size_t buff_size = 256;
+                    char buff[256];
+                    snprintf(buff, buff_size, "%s v%d.%d.%d\n  (C)2018 MEG-OS Project\n\nMemory %dMB, %d Active Cores\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(total_memory >> 8), n_active_cpu);
+                    moe_alert("About " VER_SYSTEM_NAME_SHORT "...", buff, 0);
+                    // switch(cmdline[1]) {
+                    //     case '0':
+                    //         acpi_enable(0);
+                    //         break;
+                    //     case '1':
+                    //         acpi_enable(1);
+                    //         break;
+                    //     default:
+                    //         int n = acpi_get_number_of_table_entries();
+                    //         printf("ACPI Tables: %d\n", n);
+                    //         for (int i = 0; i < n; i++) {
+                    //             acpi_header_t* table = acpi_enum_table_entry(i);
+                    //             if (table) {
+                    //                 printf("%p: %.4s %d\n", (void*)table, table->signature, table->length);
+                    //             }
+                    //         }
+                    //         acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
+                    //         if (madt) {
+                    //             printf("Dump of MADT:\n");
+                    //             size_t max_length = madt->Header.length - 44;
+                    //             uint8_t* p = madt->Structure;
+                    //             for (size_t loc = 0; loc < max_length; ) {
+                    //                 size_t len = p[loc+1];
+                    //                 dump_madt(p+loc, len);
+                    //                 loc += len;
+                    //             }
+                    //         }
+                    //         break;
+                    // }
                     break;
                 }
 
