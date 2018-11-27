@@ -135,7 +135,7 @@ int read_cmdline(char* buffer, size_t max_len) {
     int cont_flag = 1;
     int len = 0, limit = max_len - 1;
 
-    int old_cursor_state = moe_set_console_cursor_enabled(NULL, 1);
+    int old_cursor_visible = moe_set_console_cursor_visible(NULL, 1);
     while (cont_flag) {
         uint32_t c = getchar();
         switch (c) {
@@ -170,7 +170,7 @@ int read_cmdline(char* buffer, size_t max_len) {
                 break;
         }
     }
-    moe_set_console_cursor_enabled(NULL, old_cursor_state);
+    moe_set_console_cursor_visible(NULL, old_cursor_visible);
     buffer[len] = '\0';
     printf("\n");
     return len;
@@ -211,7 +211,7 @@ _Noreturn void statusbar_thread(void *args) {
     moe_size_t screen_size = moe_get_screen_size();
     moe_rect_t rect_statusbar = {{0, 0}, {screen_size.width, 22}};
     moe_dib_t *statusbar_dib = moe_create_dib(&rect_statusbar.size, 0, statusbar_bgcolor);
-    moe_view_t *statusbar = moe_create_view(NULL, statusbar_dib, BORDER_BOTTOM | window_level_higher, "Statusbar");
+    moe_view_t *statusbar = moe_create_view(NULL, statusbar_dib, window_level_higher, "Statusbar");
 
     const size_t size_buff = 256;
     char buff[size_buff];
@@ -228,11 +228,10 @@ _Noreturn void statusbar_thread(void *args) {
 
     {
         moe_point_t origin = {4, padding_y};
-        moe_draw_string(statusbar_dib, &origin, NULL, VER_SYSTEM_NAME_SHORT, fgcolor);
-        // moe_draw_string(statusbar_dib, &origin, NULL, "[Start] <- HAJIMERU TOKI HA START WO OSU", fgcolor);
+        moe_draw_string(statusbar_dib, &origin, NULL, VER_SYSTEM_NAME_SHORT " | File  Edit  View  Window  Help", fgcolor);
     }
 
-    moe_add_view(statusbar);
+    moe_show_window(statusbar);
 
     moe_rect_t rect_redraw = {{rect_u.origin.x, 0}, {rect_statusbar.size.width - rect_u.origin.x, rect_statusbar.size.height - 2}};
 
@@ -294,31 +293,31 @@ _Noreturn void start_init(void* args) {
         moe_rect_t frame = {{0, 0}, {320, 240}};
         snprintf(buff, buff_size, "%s v%d.%d.%d\nMemory %dMB, %d Active Cores\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION, (int)(total_memory >> 8), n_active_cpu);
         moe_dib_t *dib = moe_create_dib(&frame.size, 0, 0xFFFFFF);
-        splash = moe_create_view(&frame, dib, WINDOW_CENTER | WINDOW_CAPTION | BORDER_ALL | window_level_higher, "Welcome");
+        splash = moe_create_view(&frame, dib, WINDOW_CENTER | WINDOW_CAPTION | WINDOW_BORDER | window_level_higher, "Welcome");
         moe_point_t cursor = {4, 180};
         moe_point_t cursor_shadow = {5, 181};
         moe_rect_t client_rect = {{4, 4}, {frame.size.width - 8, frame.size.height - 28}};
         moe_draw_string(dib, &cursor_shadow, &client_rect, buff, 0xAAAAAA);
         moe_draw_string(dib, &cursor, &client_rect, buff, 0x000000);
 
-        moe_add_view(splash);
+        moe_show_window(splash);
         moe_usleep(1000000);
     }
 
     // Init root console
     {
         uint32_t console_attributes = 0xF8;
-        moe_rect_t frame = {{16, 32}, {608, 432}};
+        moe_rect_t frame = {{16, 32}, {608, 436}};
         moe_dib_t *dib = moe_create_dib(&frame.size, 0, 0xFFFFFF);
-        moe_view_t *view = moe_create_view(&frame, dib, WINDOW_CAPTION | BORDER_ALL, "Terminal");
+        moe_view_t *view = moe_create_view(&frame, dib, WINDOW_CAPTION | WINDOW_BORDER, "Terminal");
         moe_edge_insets_t insets = moe_get_client_insets(view);
         console_init(NULL, view, dib, &insets);
         moe_set_console_attributes(NULL, console_attributes);
-        moe_add_view(view);
+        moe_show_window(view);
     }
 
     // moe_usleep(1000000);
-    if (splash) moe_remove_view(splash);
+    if (splash) moe_hide_window(splash);
 
     // for (int i = 0; i < 5; i++){
     //     moe_create_thread(&demo_thread, 0, (void *)(intptr_t)i, "DEMO");

@@ -13,7 +13,7 @@ typedef struct moe_console_context_t {
     int cols, rows, cursor_x, cursor_y;
     uint32_t bgcolor, fgcolor;
     uint32_t attributes;
-    int cursor_enabled;
+    int cursor_visible;
 } moe_console_context_t;
 
 static const moe_rect_t rect_zero = {{0, 0}, {0, 0}};
@@ -55,8 +55,6 @@ static int col_to_x(moe_console_context_t *self, int x) {
 static int row_to_y(moe_console_context_t *self, int y) {
     return self->edge_insets.top + line_height * y;
 }
-
-static void blt_main(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect);
 
 
 moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color) {
@@ -117,28 +115,6 @@ void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *r
         // printf("\r{%5d %5d %5d %5d %5d %5d %5d %5d}", dx, dy, sx, sy, w, h, r, b);
         if (w <= 0 || h <= 0) return;
     }
-
-    moe_point_t p = { dx, dy };
-    moe_rect_t r = { { sx, sy }, { w, h } };
-    blt_main(dest, src, &p, &r);
-}
-
-// void blt_unroll_test(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect) {
-//     unsigned dx = origin->x, dy = origin->y;
-//     unsigned sx = rect->origin.x, sy = rect->origin.y, w = rect->size.width, h = rect->size.height;
-
-//     // Transfer
-//     uint32_t *p = dest->dib;
-//     p += dx + dy * dest->delta;
-//     uint32_t *q = src->dib;
-//     q += sx + sy * src->delta;
-//     uintptr_t dd = dest->delta - w, sd = src->delta - w;
-
-// }
-
-void blt_main(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect) {
-    int dx = origin->x, dy = origin->y;
-    int sx = rect->origin.x, sy = rect->origin.y, w = rect->size.width, h = rect->size.height;
 
     // Transfer
     uint32_t *p = dest->dib;
@@ -215,6 +191,23 @@ void blt_main(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *
 }
 
 
+// void blt_test(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect) {
+//     unsigned dx = origin->x, dy = origin->y;
+//     unsigned sx = rect->origin.x, sy = rect->origin.y, w = rect->size.width, h = rect->size.height;
+
+//     uint32_t *p = dest->dib;
+//     p += dx + dy * dest->delta;
+//     uint32_t *q = src->dib;
+//     q += sx + sy * src->delta;
+//     uintptr_t dd = dest->delta - w, sd = src->delta - w;
+
+//     if (1) {
+
+
+//     }
+// }
+
+
 void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color) {
 
     int dx, dy, w, h;
@@ -267,8 +260,42 @@ void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color) {
 
 }
 
+void moe_draw_pixel(moe_dib_t* dest, moe_point_t *point, uint32_t color) {
+    int dx = point->x, dy = point->y;
+    if (dx < 0 || dy < 0 || dx >= dest->width || dy >= dest->height) return;
+    uint32_t *p = dest->dib + dx + dy * dest->delta;
+    *p = color;
+}
 
-void moe_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t color) {
+void draw_hline(moe_dib_t *dest, int x, int y, int width, uint32_t color) {
+    int dx = x, dy = y, w = width, h = 1;
+    {
+        if (dx < 0) {
+            w += dx;
+            dx = 0;
+        }
+        if (dy < 0) {
+            h += dy;
+            dy = 0;
+        }
+        int r = dx + w;
+        int b = dy + h;
+        if (r >= dest->width) w = dest->width - dx;
+        if (b >= dest->height) h = dest->height - dy;
+        if (w <= 0 || h <= 0) return;
+    }
+
+    uint32_t *p = dest->dib;
+    p += dx + dy * dest->delta;
+
+    #pragma clang loop vectorize(enable) interleave(enable)
+    for (int j = 0; j < w; j++) {
+        *p++ = color;
+    }
+}
+
+
+void moe_fill_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t color) {
 
     int dx, dy, w, h;
     if (rect) {
@@ -293,7 +320,7 @@ void moe_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t colo
 
     int d = 1 - radius, dh = 3, dd = 5 - 2 * radius;
     int cx = 0, cy = radius;
-    int bx, by, dw;
+    int bx, by, dw, qh = h - 1;
 
     for (; cx <= cy; cx++) {
         if (d < 0) {
@@ -309,21 +336,89 @@ void moe_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t colo
         bx = radius - cy, by = radius - cx;
         {
             dw = w - bx * 2;
-            moe_rect_t rect_line1 = {{dx + bx, dy + by}, {dw, 1}};
-            moe_fill_rect(dest, &rect_line1, color);
-
-            moe_rect_t rect_line2 = {{dx + bx, dy + h - by}, {dw, 1}};
-            moe_fill_rect(dest, &rect_line2, color);
+            draw_hline(dest, dx + bx, dy + by, dw, color);
+            draw_hline(dest, dx + bx, dy + qh - by, dw, color);
         }
 
         bx = radius - cx, by = radius - cy;
         {
             dw = w - bx * 2;
-            moe_rect_t rect_line1 = {{dx + bx, dy + by}, {dw, 1}};
-            moe_fill_rect(dest, &rect_line1, color);
+            draw_hline(dest, dx + bx, dy + by, dw, color);
+            draw_hline(dest, dx + bx, dy + qh - by, dw, color);
+        }
+    }
+}
 
-            moe_rect_t rect_line2 = {{dx + bx, dy + h - by}, {dw, 1}};
-            moe_fill_rect(dest, &rect_line2, color);
+
+void moe_draw_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t color) {
+
+    int dx, dy, w, h;
+    if (rect) {
+        dx = rect->origin.x;
+        dy = rect->origin.y;
+        w = rect->size.width;
+        h = rect->size.height;
+    } else {
+        dx = dy = 0;
+        w = dest->width;
+        h = dest->height;
+    }
+
+    if (radius * 2 > w) radius = w / 2;
+    if (radius * 2 > h) radius = h / 2;
+
+    int lh = h - radius * 2;
+    if (lh > 0) {
+        moe_rect_t rect_line1 = {{dx, dy + radius}, {1, lh}};
+        moe_fill_rect(dest, &rect_line1, color);
+        moe_rect_t rect_line2 = {{dx + w - 1, dy + radius}, {1, lh}};
+        moe_fill_rect(dest, &rect_line2, color);
+    }
+    int lw = w - radius * 2;
+    if (lw > 0) {
+        draw_hline(dest, dx + radius, dy, lw, color);
+        draw_hline(dest, dx + radius, dy + h - 1, lw, color);
+    }
+
+    int d = 1 - radius, dh = 3, dd = 5 - 2 * radius;
+    int cx = 0, cy = radius;
+    int bx, by, dw, qh = h - 1;
+
+    for (; cx <= cy; cx++) {
+        if (d < 0) {
+            d += dh;
+            dd += 2;
+        } else {
+            d += dd;
+            dh += 2;
+            dd += 4;
+            cy--;
+        }
+
+        bx = radius - cy, by = radius - cx;
+        {
+            dw = w - bx * 2 - 1;
+            moe_point_t point1 = {dx + bx, dy + by};
+            moe_draw_pixel(dest, &point1, color);
+            moe_point_t point2 = {dx + bx, dy + qh - by};
+            moe_draw_pixel(dest, &point2, color);
+            moe_point_t point3 = {dx + bx + dw, dy + by};
+            moe_draw_pixel(dest, &point3, color);
+            moe_point_t point4 = {dx + bx + dw, dy + qh - by};
+            moe_draw_pixel(dest, &point4, color);
+        }
+
+        bx = radius - cx, by = radius - cy;
+        {
+            dw = w - bx * 2 - 1;
+            moe_point_t point1 = {dx + bx, dy + by};
+            moe_draw_pixel(dest, &point1, color);
+            moe_point_t point2 = {dx + bx, dy + qh - by};
+            moe_draw_pixel(dest, &point2, color);
+            moe_point_t point3 = {dx + bx + dw, dy + by};
+            moe_draw_pixel(dest, &point3, color);
+            moe_point_t point4 = {dx + bx + dw, dy + qh - by};
+            moe_draw_pixel(dest, &point4, color);
         }
     }
 }
@@ -432,20 +527,22 @@ void moe_set_console_attributes(moe_console_context_t *self, uint32_t attributes
     self->bgcolor = palette[(attributes >> 4) & 0x0F];
 }
 
-int moe_set_console_cursor_enabled(moe_console_context_t *self, int visible) {
+int moe_set_console_cursor_visible(moe_console_context_t *self, int visible) {
     if (!self) self = current_console;
-    int old_value = self->cursor_enabled;
-    self->cursor_enabled = visible;
-    moe_rect_t rect = {{col_to_x(self, self->cursor_x), row_to_y(self, self->cursor_y) + font_offset}, {font_w, font_h}};
-    if (visible) {
-        moe_fill_rect(self->dib, &rect, self->fgcolor);
-        if (self->view) {
-            moe_invalidate_view(self->view, &rect);
-        }
-    } else if (old_value) {
-        moe_fill_rect(self->dib, &rect, self->bgcolor);
-        if (self->view) {
-            moe_invalidate_view(self->view, &rect);
+    int old_value = self->cursor_visible;
+    self->cursor_visible = visible;
+    if (self->cursor_x < self->cols && self->cursor_y < self->rows) {
+        moe_rect_t rect = {{col_to_x(self, self->cursor_x), row_to_y(self, self->cursor_y) + font_offset}, {font_w, font_h}};
+        if (visible) {
+            moe_fill_rect(self->dib, &rect, self->fgcolor);
+            if (self->view) {
+                moe_invalidate_view(self->view, &rect);
+            }
+        } else if (old_value) {
+            moe_fill_rect(self->dib, &rect, self->bgcolor);
+            if (self->view) {
+                moe_invalidate_view(self->view, &rect);
+            }
         }
     }
     return old_value;
@@ -454,7 +551,7 @@ int moe_set_console_cursor_enabled(moe_console_context_t *self, int visible) {
 
 void putchar32(moe_console_context_t *self, uint32_t c) {
     if (!self) self = current_console;
-    int old_cursor_state = moe_set_console_cursor_enabled(self, 0);
+    int old_cursor_state = moe_set_console_cursor_visible(self, 0);
     while (self->cursor_y >= self->rows) {
         self->cursor_y--;
         moe_point_t origin = {col_to_x(self, 0), row_to_y(self, 0) };
@@ -501,7 +598,7 @@ void putchar32(moe_console_context_t *self, uint32_t c) {
         self->cursor_x = 0;
         self->cursor_y++;
     }
-    moe_set_console_cursor_enabled(self, old_cursor_state);
+    moe_set_console_cursor_visible(self, old_cursor_state);
 }
 
 

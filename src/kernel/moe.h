@@ -23,8 +23,6 @@ void moe_assert(const char *file, uintptr_t line, ...);
 
 
 //  Minimal Graphics Subsystem
-void mgs_cls();
-
 typedef struct moe_point_t {
     int x, y;
 } moe_point_t;
@@ -60,15 +58,21 @@ extern const moe_size_t *moe_size_zero;
 extern const moe_rect_t *moe_rect_zero;
 extern const moe_edge_insets_t *moe_edge_insets_zero;
 
+#define COLOR_TRANSPARENT   0xFF000000
+
 moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color);
 void moe_blt(moe_dib_t *dest, moe_dib_t *src, moe_point_t *origin, moe_rect_t *rect, uint32_t options);
 void moe_fill_rect(moe_dib_t *dest, moe_rect_t *rect, uint32_t color);
-void moe_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t color);
+void moe_fill_round_rect(moe_dib_t *dest, moe_rect_t *rect, int radius, uint32_t color);
+void moe_draw_round_rect(moe_dib_t *dest, moe_rect_t *rect, int radius, uint32_t color);
+void moe_draw_pixel(moe_dib_t *dest, moe_point_t *point, uint32_t color);
 moe_rect_t moe_edge_insets_inset_rect(moe_rect_t *rect, moe_edge_insets_t *insets);
 moe_point_t moe_draw_string(moe_dib_t *dib, moe_point_t *cursor, moe_rect_t *rect, const char *s, uint32_t color);
 
 void moe_set_console_attributes(moe_console_context_t *self, uint32_t attributes);
-int moe_set_console_cursor_enabled(moe_console_context_t *self, int visible);
+int moe_set_console_cursor_visible(moe_console_context_t *self, int visible);
+
+void mgs_cls();
 
 typedef enum {
     window_level_desktop,
@@ -79,21 +83,17 @@ typedef enum {
     window_level_pointer = 127,
 } moe_window_level_t;
 
-#define BORDER_TOP          0x0100
-#define BORDER_LEFT         0x0200
-#define BORDER_RIGHT        0x0400
-#define BORDER_BOTTOM       0x0800
-#define BORDER_ALL          (BORDER_TOP | BORDER_LEFT | BORDER_BOTTOM | BORDER_RIGHT)
-#define WINDOW_CAPTION      0x1000
-#define WINDOW_CENTER       0x2000
-#define WINDOW_TRANSPARENT  0x4000
+#define WINDOW_BORDER       0x0100
+#define WINDOW_CAPTION      0x0200
+#define WINDOW_CENTER       0x0400
+#define WINDOW_TRANSPARENT  0x0800
 
 moe_size_t moe_get_screen_size();
 moe_view_t *moe_create_view(moe_rect_t *frame, moe_dib_t* dib, uint32_t flags, const char *title);
 moe_edge_insets_t moe_get_client_insets(moe_view_t *view);
 moe_rect_t moe_get_client_rect(moe_view_t *view);
-void moe_add_view(moe_view_t* view);
-void moe_remove_view(moe_view_t *view);
+void moe_show_window(moe_view_t* view);
+void moe_hide_window(moe_view_t *view);
 void moe_invalidate_view(moe_view_t *view, moe_rect_t *rect);
 void moe_invalidate_screen(moe_rect_t *rect);
 int moe_alert(const char *title, const char *message, uint32_t flags);
