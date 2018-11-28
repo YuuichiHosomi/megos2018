@@ -30,6 +30,7 @@ void io_out32(uint16_t port, uint32_t val);
 uint32_t io_in32(uint16_t port);
 
 void thread_init(int n_active_cpu);
+void reschedule();
 
 
 /*********************************************************************/
@@ -185,7 +186,7 @@ void _irq_main(uint8_t irq, void* p) {
         default_int_handler(&regs);
     }
     if (irq == 2) {
-        moe_consume_quantum();
+        reschedule();
         if (smp_mode) {
             WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0xC0000 + IRQ_SCHDULE);
         }
@@ -194,7 +195,7 @@ void _irq_main(uint8_t irq, void* p) {
 
 void ipi_sche_main() {
     WRITE_PHYSICAL_UINT32(lapic_base + 0x0B0, 0);
-    moe_consume_quantum();
+    reschedule();
 }
 
 uintptr_t moe_get_current_cpuid() {

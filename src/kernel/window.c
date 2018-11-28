@@ -12,7 +12,8 @@
 #define MAX(a, b)   ((a > b) ? (a) : (b))
 #define MIN(a, b)   ((a < b) ? (a) : (b))
 
-char *strncpy(char *s1, const char *s2, size_t n);
+extern char *strncpy(char *s1, const char *s2, size_t n);
+extern int snprintf(char* buffer, size_t n, const char* format, ...);
 int getchar();
 
 const int32_t border_width_top = 1;
@@ -20,19 +21,19 @@ const int32_t border_width_left = 1;
 const int32_t border_width_bottom = 1;
 const int32_t border_width_right = 1;
 
-uint32_t border_color               = 0x00777777;
-uint32_t desktop_color              = 0x0055AAFF;
-uint32_t default_bgcolor            = 0x00FFFFFF;
-uint32_t active_title_bgcolor       = 0x10CCCCCC;
-uint32_t active_title_shadow_color  = 0x20AAAAAA;
-uint32_t active_title_fgcolor       = 0x00000000;
-uint32_t popup_title_color          = 0x00000000;
-uint32_t popup_bgcolor              = 0x18FFFF77;
-uint32_t popup_message_color        = 0x00555555;
-uint32_t active_button_bgcolor      = 0x003366FF;
-uint32_t active_button_fgcolor      = 0x00FFFFFF;
-uint32_t destructive_button_bgcolor = 0x00FF3366;
-uint32_t destructive_button_fgcolor = 0x00FFFFFF;
+uint32_t border_color               = 0xFF777777;
+uint32_t desktop_color              = 0xFF55AAFF;
+uint32_t default_bgcolor            = 0xFFFFFFFF;
+uint32_t active_title_bgcolor       = 0xF0CCCCCC;
+uint32_t active_title_shadow_color  = 0xE0AAAAAA;
+uint32_t active_title_fgcolor       = 0xFF000000;
+uint32_t popup_title_color          = 0xFF000000;
+uint32_t popup_bgcolor              = 0xE8FFFF77;
+uint32_t popup_message_color        = 0xFF555555;
+uint32_t active_button_bgcolor      = 0xFF3366FF;
+uint32_t active_button_fgcolor      = 0xFFFFFFFF;
+uint32_t destructive_button_bgcolor = 0xFFFF3366;
+uint32_t destructive_button_fgcolor = 0xFFFFFFFF;
 
 int button_height = 24;
 int button_radius = 4;
@@ -57,6 +58,7 @@ typedef struct moe_view_t {
 #define WINDOW_FLAG_SAFE_MASK 0x00FFFFFF
 
 enum {
+    view_flag_mouse_capture = 27,
     view_flag_active_window = 28,
     view_flag_needs_redraw = 29,
     view_flag_visible = 30,
@@ -73,9 +75,13 @@ struct {
     moe_dib_t *close_button_dib;
     moe_view_t *off_screen;
     moe_rect_t screen_bounds;
+    moe_edge_insets_t global_insets;
     uint32_t global_flags;
     atomic_flag hierarchy_lock;
 } wm_state;
+
+moe_view_t *captured_view;
+moe_point_t captured_at;
 
 
 enum {
@@ -84,12 +90,10 @@ enum {
     mouse_redraw_flag,
 };
 
-static moe_point_t mouse_point;
-moe_view_t *mouse_cursor;
 
 #define MOUSE_CURSOR_WIDTH  12
 #define MOUSE_CURSOR_HEIGHT  20
-uint32_t mouse_cursor_palette[] = { 0xFFFF00FF, 0x00000000, 0x00FFFFFF };
+uint32_t mouse_cursor_palette[] = { 0x00FF00FF, 0xFF000000, 0xFFFFFFFF };
 uint8_t mouse_cursor_source[MOUSE_CURSOR_HEIGHT][MOUSE_CURSOR_WIDTH] = {
     { 1, },
     { 1, 1, },
@@ -112,18 +116,20 @@ uint8_t mouse_cursor_source[MOUSE_CURSOR_HEIGHT][MOUSE_CURSOR_WIDTH] = {
     { 0, 0, 0, 0, 0, 0, 0, 1, 1, },
 };
 
+
 #define CLOSE_BUTTON_SIZE 10
-uint32_t close_button_palette[] = { 0xFF000000, 0xE0000000, 0xC0000000, 0xA0000000, 0x80000000, 0x60000000 };
+uint32_t close_button_palette[] = { 0x00000000, 0x30000000, 0x60000000, 0x90000000, };
 uint8_t close_button_source[CLOSE_BUTTON_SIZE][CLOSE_BUTTON_SIZE] = {
-    { 0, 1, 0, 0, 0, 0, 0, 1, },
-    { 1, 4, 2, 0, 0, 0, 2, 4, 1, },
-    { 0, 2, 4, 2, 0, 2, 4, 2, },
-    { 0, 0, 2, 4, 3, 4, 2, },
-    { 0, 0, 0, 3, 5, 3, },
-    { 0, 0, 2, 4, 3, 4, 2, },
-    { 0, 2, 4, 2, 0, 2, 4, 2, },
-    { 1, 4, 2, 0, 0, 0, 2, 4, 1, },
-    { 0, 1, 0, 0, 0, 0, 0, 1, },
+    { 0, 1, 0, 0, 0, 0, 0, 0, 1, },
+    { 1, 3, 2, 0, 0, 0, 0, 2, 3, 1, },
+    { 0, 2, 3, 2, 0, 0, 2, 3, 2, },
+    { 0, 0, 2, 3, 2, 2, 3, 2, },
+    { 0, 0, 0, 2, 3, 3, 2, },
+    { 0, 0, 0, 2, 3, 3, 2, },
+    { 0, 0, 2, 3, 2, 2, 3, 2, },
+    { 0, 2, 3, 2, 0, 0, 2, 3, 2, },
+    { 1, 3, 2, 0, 0, 0, 0, 2, 3, 1, },
+    { 0, 1, 0, 0, 0, 0, 0, 0, 1, },
 };
 
 
@@ -190,12 +196,27 @@ moe_edge_insets_t moe_get_client_insets(moe_view_t *view) {
     return insets;
 }
 
-moe_rect_t moe_get_client_rect(moe_view_t *view) {
-    moe_rect_t rect = {{0, 0}};
+moe_rect_t moe_get_view_bounds(moe_view_t *view) {
+    moe_rect_t rect;
+    rect.origin = *moe_point_zero;
     rect.size = view->frame.size;
+    return rect;
+}
+
+moe_rect_t moe_get_client_rect(moe_view_t *view) {
+    moe_rect_t rect = moe_get_view_bounds(view);
     moe_edge_insets_t insets = moe_get_client_insets(view);
     return moe_edge_insets_inset_rect(&rect, &insets);
 }
+
+moe_edge_insets_t moe_add_global_insets(moe_edge_insets_t *insets) {
+    wm_state.global_insets.top      += insets->top;
+    wm_state.global_insets.left     += insets->left;
+    wm_state.global_insets.bottom   += insets->bottom;
+    wm_state.global_insets.right    += insets->right;
+    return wm_state.global_insets;
+}
+
 
 moe_view_t *moe_create_view(moe_rect_t *frame, moe_dib_t* dib, uint32_t flags, const char *title) {
 
@@ -245,8 +266,9 @@ moe_view_t *moe_create_view(moe_rect_t *frame, moe_dib_t* dib, uint32_t flags, c
     return self;
 }
 
-moe_point_t moe_convert_view_point_to_screen(moe_view_t *view) {
-    return view->frame.origin;
+moe_point_t moe_convert_view_point_to_screen(moe_view_t *view, moe_point_t *point) {
+    moe_point_t result = { view->frame.origin.x + point->x, view->frame.origin.y + point->y };
+    return result;
 }
 
 void remove_view_hierarchy_nb(moe_view_t *view) {
@@ -262,13 +284,7 @@ void remove_view_hierarchy_nb(moe_view_t *view) {
     atomic_bit_test_and_clear(&view->flags, view_flag_visible);
 }
 
-void moe_show_window(moe_view_t* view) {
-    while (atomic_flag_test_and_set(&wm_state.hierarchy_lock)) {
-        moe_yield();
-    }
-
-    remove_view_hierarchy_nb(view);
-
+void add_view_hierarchy_nb(moe_view_t *view) {
     moe_view_t *p = wm_state.root;
     moe_window_level_t lv = view->window_level;
 
@@ -281,6 +297,15 @@ void moe_show_window(moe_view_t* view) {
         }
     }
     atomic_bit_test_and_set(&view->flags, view_flag_visible);
+}
+
+void moe_show_window(moe_view_t* view) {
+    while (atomic_flag_test_and_set(&wm_state.hierarchy_lock)) {
+        moe_yield();
+    }
+
+    remove_view_hierarchy_nb(view);
+    add_view_hierarchy_nb(view);
 
     atomic_flag_clear(&wm_state.hierarchy_lock);
 
@@ -293,7 +318,6 @@ void moe_hide_window(moe_view_t *view) {
     }
 
     moe_rect_t rect = view->frame;
-    rect.origin = moe_convert_view_point_to_screen(view);
 
     remove_view_hierarchy_nb(view);
 
@@ -373,9 +397,7 @@ void moe_invalidate_view(moe_view_t *view, moe_rect_t *_rect) {
         atomic_bit_test_and_set(&wm_state.global_flags, view_redraw_flag);
         return;
     }
-    moe_point_t origin = moe_convert_view_point_to_screen(view);
-    rect.origin.x += origin.x;
-    rect.origin.y += origin.y;
+    rect.origin = moe_convert_view_point_to_screen(view, &rect.origin);
     if (view->flags & WINDOW_TRANSPARENT) {
         moe_invalidate_screen(&rect);
     } else {
@@ -455,10 +477,16 @@ int getchar() {
     }
 }
 
+moe_view_t *event_test_window;
 
-void move_mouse(int x, int y) {
-    int new_mouse_x = mouse_point.x + x;
-    int new_mouse_y = mouse_point.y + y;
+static moe_point_t mouse_point;
+moe_view_t *mouse_cursor;
+moe_hid_mouse_report_t mouse;
+void move_mouse(moe_hid_mouse_report_t* mouse_report) {
+    mouse = *mouse_report;
+
+    int new_mouse_x = mouse_point.x + mouse.x;
+    int new_mouse_y = mouse_point.y + mouse.y;
     if (new_mouse_x < 0) new_mouse_x = 0;
     if (new_mouse_y < 0) new_mouse_y = 0;
     if (new_mouse_x >= wm_state.screen_bounds.size.width) new_mouse_x = wm_state.screen_bounds.size.width - 1;
@@ -466,6 +494,26 @@ void move_mouse(int x, int y) {
     mouse_point.x = new_mouse_x;
     mouse_point.y = new_mouse_y;
     atomic_bit_test_and_set(&wm_state.global_flags, mouse_redraw_flag);
+}
+
+
+moe_view_t *moe_view_hit_test(moe_point_t *point) {
+
+    while (atomic_flag_test_and_set(&wm_state.hierarchy_lock)) {
+        moe_yield();
+    }
+
+    moe_view_t *found = NULL;
+
+    moe_view_t *p = wm_state.root;
+    for (; p; p = p->next) {
+        if (p->window_level >= window_level_pointer) break;
+        if (moe_hit_test(&p->frame, point)) found = p;
+    }
+
+    atomic_flag_clear(&wm_state.hierarchy_lock);
+
+    return found;
 }
 
 
@@ -486,8 +534,8 @@ _Noreturn void window_thread(void* args) {
 
     moe_invalidate_screen(NULL);
 
-    //  Main loop
     for (;;) {
+
         if (atomic_bit_test_and_clear(&wm_state.global_flags, screen_redraw_flag)) {
             // Redraw Screen
             atomic_bit_test_and_clear(&wm_state.global_flags, view_redraw_flag);
@@ -506,12 +554,57 @@ _Noreturn void window_thread(void* args) {
             } while (view);
             atomic_flag_clear(&wm_state.hierarchy_lock);
         }
-        // Update mouse state
+
+        // Update mouse
         if (atomic_bit_test_and_clear(&wm_state.global_flags, mouse_redraw_flag)) {
+
+            moe_view_t *mouse_at = moe_view_hit_test(&mouse_point);
+            moe_point_t relative_point;
+            relative_point.x = mouse_point.x - mouse_at->frame.origin.x;
+            relative_point.y = mouse_point.y - mouse_at->frame.origin.y;
+
+            if (mouse.pressed & 1) {
+                if ((mouse_at->flags & WINDOW_PINCHABLE) ||
+                    ((mouse_at->flags & WINDOW_CAPTION) && relative_point.y < title_height)) {
+                    mouse_at->flags |= (1 << view_flag_mouse_capture);
+                    captured_view = mouse_at;
+                    captured_at = relative_point;
+                }
+            } else if (captured_view) {
+                if (mouse.l_button) {
+                    moe_rect_t old_frame = captured_view->frame;
+                    moe_point_t new_origin;
+                    new_origin.x = mouse_point.x - captured_at.x;
+                    int top = (captured_view->window_level < window_level_higher) ? wm_state.global_insets.top : 0;
+                    new_origin.y = MAX(mouse_point.y - captured_at.y, top);
+                    captured_view->frame.origin = new_origin;
+                    moe_invalidate_screen(&old_frame);
+                    moe_invalidate_screen(&captured_view->frame);
+                    // moe_show_window(captured_view);
+                } else {
+                    captured_view->flags &= ~(1 << view_flag_mouse_capture);
+                    captured_view = 0;
+                }
+            }
+
+            size_t size_buff = 32;
+            char buff[32];
+
+            uint32_t packed_button = (mouse.buttons & 7) + ((mouse.pressed & 7) << 4) + ((mouse.released & 7) << 8);
+            snprintf(buff, size_buff, "%4d %4d %03x %d %08zx", mouse_point.x, mouse_point.y, packed_button,
+                mouse_at->index, (uintptr_t)mouse_at
+            );
+            moe_rect_t rect = moe_get_client_rect(event_test_window);
+            moe_fill_rect(event_test_window->dib, &rect, 0x80000000);
+            moe_draw_string(event_test_window->dib, NULL, &rect, buff, 0xFFFFFF77);
+            moe_invalidate_screen(&event_test_window->frame);
+
+
             moe_rect_t oldrect = mouse_cursor->frame;
             mouse_cursor->frame.origin = mouse_point;
             moe_invalidate_screen(&oldrect);
             moe_invalidate_screen(&mouse_cursor->frame);
+
         }
         moe_yield();
     }
@@ -551,11 +644,20 @@ void window_init() {
         wm_state.root->window_level = window_level_desktop;
     }
 
+    // Event test window
+    {
+        moe_rect_t frame = {{100, 100}, {256, 56}};
+        moe_dib_t *dib = moe_create_dib(&frame.size, MOE_DIB_ALPHA, 0x80000000);
+        event_test_window = moe_create_view(&frame, dib, WINDOW_CAPTION | WINDOW_TRANSPARENT | WINDOW_BORDER | window_level_popup, "Event Test");
+
+        moe_show_window(event_test_window);
+    }
+
     // Prepare Popup Placeholder
     {
         moe_rect_t frame = {{0, 0}, {480, 160}};
         moe_dib_t *dib = moe_create_dib(&frame.size, MOE_DIB_ALPHA, 0);
-        wm_state.popup_window = moe_create_view(&frame, dib, WINDOW_CENTER | WINDOW_TRANSPARENT | window_level_popup, "POPUP");
+        wm_state.popup_window = moe_create_view(&frame, dib, WINDOW_PINCHABLE | WINDOW_CENTER | WINDOW_TRANSPARENT | window_level_popup, "POPUP");
     }
 
     moe_create_thread(&window_thread, priority_highest, NULL, "Window Manager");

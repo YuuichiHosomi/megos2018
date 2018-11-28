@@ -31,7 +31,7 @@
 #define VER_SYSTEM_NAME_SHORT   "MOE"
 #define VER_SYSTEM_MAJOR    0
 #define VER_SYSTEM_MINOR    5
-#define VER_SYSTEM_REVISION 1
+#define VER_SYSTEM_REVISION 2
 
 
 extern void arch_init();
@@ -231,7 +231,9 @@ _Noreturn void statusbar_thread(void *args) {
         moe_draw_string(statusbar_dib, &origin, NULL, VER_SYSTEM_NAME_SHORT " | File  Edit  View  Window  Help", fgcolor);
     }
 
+    moe_edge_insets_t insets = {rect_statusbar.size.height, 0, 0, 0};
     moe_show_window(statusbar);
+    moe_add_global_insets(&insets);
 
     moe_rect_t rect_redraw = {{rect_u.origin.x, 0}, {rect_statusbar.size.width - rect_u.origin.x, rect_statusbar.size.height - 2}};
 

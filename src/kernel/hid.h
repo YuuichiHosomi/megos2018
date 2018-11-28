@@ -16,13 +16,18 @@
 
 typedef struct {
     union {
-        uint8_t buttons;
+        struct {
+            uint8_t buttons;
+            uint8_t pressed;
+            uint8_t released;
+            uint8_t old_buttons;
+        };
         struct {
             uint8_t l_button:1;
             uint8_t r_button:1;
             uint8_t m_button:1;
         };
-        int32_t PADDING_1;
+        int32_t packed_buttons;
     };
     int16_t x, y;
 } moe_hid_mouse_report_t;

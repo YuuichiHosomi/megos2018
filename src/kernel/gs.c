@@ -74,6 +74,40 @@ moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color) {
 }
 
 
+void blt_test(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect) {
+    unsigned dx = origin->x, dy = origin->y;
+    unsigned sx = rect->origin.x, sy = rect->origin.y, w = rect->size.width, h = rect->size.height;
+
+    uint32_t *p = dest->dib;
+    p += dx + dy * dest->delta;
+    uint32_t *q = src->dib;
+    q += sx + sy * src->delta;
+    uintptr_t dd = dest->delta - w, sd = src->delta - w;
+
+    if (1) {
+
+        for (uintptr_t i = 0; i < h; i++) {
+            #pragma clang loop vectorize(enable) interleave(enable)
+            for (uintptr_t j = 0; j < w; j++) {
+                uint8_t *p0 = (uint8_t*)p;
+                uint8_t *q0 = (uint8_t*)q;
+                uint8_t alpha = q0[3];
+                uint8_t alpha_n = 255 - alpha;
+                p0[0] = (q0[0] * alpha + p0[0] * alpha_n) / 256;
+                p0[1] = (q0[1] * alpha + p0[1] * alpha_n) / 256;
+                p0[2] = (q0[2] * alpha + p0[2] * alpha_n) / 256;
+                p0[3] = (q0[3] * alpha + p0[3] * alpha_n) / 256;
+                // p0[3] = 0;
+                p++, q++;
+            }
+            p += dd;
+            q += sd;
+        }
+
+    }
+}
+
+
 void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect, uint32_t options) {
 
     int dx, dy, w, h, sx, sy;
@@ -131,10 +165,11 @@ void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *r
                 uint8_t *q0 = (uint8_t*)q;
                 uint8_t alpha = q0[3];
                 uint8_t alpha_n = 255 - alpha;
-                p0[0] = (q0[0] * alpha_n + p0[0] * alpha) / 256;
-                p0[1] = (q0[1] * alpha_n + p0[1] * alpha) / 256;
-                p0[2] = (q0[2] * alpha_n + p0[2] * alpha) / 256;
-                p0[3] = 0;
+                p0[0] = (q0[0] * alpha + p0[0] * alpha_n) / 256;
+                p0[1] = (q0[1] * alpha + p0[1] * alpha_n) / 256;
+                p0[2] = (q0[2] * alpha + p0[2] * alpha_n) / 256;
+                p0[3] = (q0[3] * alpha + p0[3] * alpha_n) / 256;
+                // p0[3] = 0;
                 p++, q++;
             }
             p += dd;
@@ -189,23 +224,6 @@ void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *r
         }
     }
 }
-
-
-// void blt_test(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect) {
-//     unsigned dx = origin->x, dy = origin->y;
-//     unsigned sx = rect->origin.x, sy = rect->origin.y, w = rect->size.width, h = rect->size.height;
-
-//     uint32_t *p = dest->dib;
-//     p += dx + dy * dest->delta;
-//     uint32_t *q = src->dib;
-//     q += sx + sy * src->delta;
-//     uintptr_t dd = dest->delta - w, sd = src->delta - w;
-
-//     if (1) {
-
-
-//     }
-// }
 
 
 void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color) {
@@ -495,7 +513,7 @@ moe_point_t moe_draw_string(moe_dib_t *dib, moe_point_t *_cursor, moe_rect_t *_r
             cursor.origin.x = rect.origin.x;
             cursor.origin.y += cursor.size.height;
         }
-        if (cursor.origin.y >= bottom) break;
+        if (cursor.origin.y + cursor.size.height >= bottom) break;
 
     }
 

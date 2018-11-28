@@ -5,12 +5,17 @@
 #include "hid.h"
 
 
+struct {
+    moe_hid_mouse_report_t mouse;
+    int mouse_changed;
+} hid_state;
+
 moe_fifo_t* hid_fifo;
 extern int ps2_init();
 int ps2_exists = 0;
 extern void moe_ctrl_alt_del();
 extern int ps2_parse_data(moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* mouse_report);
-extern void move_mouse(int x, int y);
+extern void move_mouse(moe_hid_mouse_report_t* mouse_report);
 
 
 int hid_getchar() {
@@ -80,6 +85,10 @@ _Noreturn void hid_thread(void *args) {
             moe_hid_mouse_report_t mouse_report;
             moe_hid_keyboard_report_t keyreport;
 
+            hid_state.mouse.old_buttons = hid_state.mouse.buttons;
+            hid_state.mouse.x = 0;
+            hid_state.mouse.y = 0;
+
             cont = 0;
             if (ps2_exists) {
                 int state = ps2_parse_data(&keyreport, &mouse_report);
@@ -99,7 +108,12 @@ _Noreturn void hid_thread(void *args) {
                         break;
 
                     case 2:
-                        move_mouse(mouse_report.x, mouse_report.y);
+                    {
+                        hid_state.mouse.buttons = mouse_report.buttons;
+                        hid_state.mouse.x += mouse_report.x;
+                        hid_state.mouse.y += mouse_report.y;
+                        hid_state.mouse_changed = 1;
+                    }
                         break;
 
                     case 3:
@@ -107,6 +121,17 @@ _Noreturn void hid_thread(void *args) {
                 }
             }
         } while (cont);
+
+        if (hid_state.mouse_changed) {
+            uint8_t buttons_changed = hid_state.mouse.buttons ^ hid_state.mouse.old_buttons;
+            hid_state.mouse.pressed = buttons_changed & hid_state.mouse.buttons;
+            hid_state.mouse.released = buttons_changed & hid_state.mouse.old_buttons;
+            if (hid_state.mouse.x || hid_state.mouse.y || buttons_changed) {
+                move_mouse(&hid_state.mouse);
+            }
+            hid_state.mouse_changed = 0;
+        }
+
         moe_yield();
     }
 }

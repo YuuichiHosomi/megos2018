@@ -10,8 +10,8 @@
 
 
 int printf(const char *format, ...);
-void* memcpy(void *p, const void *q, size_t n);
-void* memset(void *p, int v, size_t n);
+void *memcpy(void *p, const void *q, size_t n);
+void *memset(void *p, int v, size_t n);
 void memset32(uint32_t *p, uint32_t v, size_t n);
 int atomic_bit_test_and_set(void *p, uintptr_t bit);
 int atomic_bit_test_and_clear(void *p, uintptr_t bit);
@@ -41,7 +41,7 @@ typedef struct moe_edge_insets_t {
 } moe_edge_insets_t;
 
 typedef struct moe_dib_t {
-    uint32_t* dib;
+    uint32_t *dib;
     int width, height;
     uint32_t flags, delta, color_key;
 } moe_dib_t;
@@ -49,16 +49,16 @@ typedef struct moe_dib_t {
 typedef struct moe_view_t moe_view_t;
 typedef struct moe_console_context_t moe_console_context_t;
 
-#define MOE_DIB_COLOR_KEY   0x0001
-#define MOE_DIB_ROTATE      0x0002
-#define MOE_DIB_ALPHA       0x0004
+#define MOE_DIB_ALPHA       0x0001
+#define MOE_DIB_COLOR_KEY   0x0100
+#define MOE_DIB_ROTATE      0x0200
 
 extern const moe_point_t *moe_point_zero;
 extern const moe_size_t *moe_size_zero;
 extern const moe_rect_t *moe_rect_zero;
 extern const moe_edge_insets_t *moe_edge_insets_zero;
 
-#define COLOR_TRANSPARENT   0xFF000000
+#define COLOR_TRANSPARENT   0x00000000
 
 moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color);
 void moe_blt(moe_dib_t *dest, moe_dib_t *src, moe_point_t *origin, moe_rect_t *rect, uint32_t options);
@@ -87,12 +87,16 @@ typedef enum {
 #define WINDOW_CAPTION      0x0200
 #define WINDOW_CENTER       0x0400
 #define WINDOW_TRANSPARENT  0x0800
+#define WINDOW_PINCHABLE    0x1000
 
 moe_size_t moe_get_screen_size();
-moe_view_t *moe_create_view(moe_rect_t *frame, moe_dib_t* dib, uint32_t flags, const char *title);
+moe_edge_insets_t moe_add_global_insets(moe_edge_insets_t *insets);
+moe_view_t *moe_create_view(moe_rect_t *frame, moe_dib_t *dib, uint32_t flags, const char *title);
+moe_rect_t moe_get_view_bounds(moe_view_t *view);
 moe_edge_insets_t moe_get_client_insets(moe_view_t *view);
 moe_rect_t moe_get_client_rect(moe_view_t *view);
-void moe_show_window(moe_view_t* view);
+moe_point_t moe_convert_view_point_to_screen(moe_view_t *view, moe_point_t *point);
+void moe_show_window(moe_view_t *view);
 void moe_hide_window(moe_view_t *view);
 void moe_invalidate_view(moe_view_t *view, moe_rect_t *rect);
 void moe_invalidate_screen(moe_rect_t *rect);
@@ -100,8 +104,8 @@ int moe_alert(const char *title, const char *message, uint32_t flags);
 
 
 //  Minimal Memory Subsystem
-void* mm_alloc_static_page(size_t n);
-void* mm_alloc_static(size_t n);
+void *mm_alloc_static_page(size_t n);
+void *mm_alloc_static(size_t n);
 
 
 //  Threading Service
@@ -117,10 +121,9 @@ typedef enum {
     priority_max,
 } moe_priority_type_t;
 
-typedef void (*moe_thread_start)(void* args);
-int moe_create_thread(moe_thread_start start, moe_priority_level_t priority, void* args, const char* name);
+typedef void (*moe_thread_start)(void *args);
+int moe_create_thread(moe_thread_start start, moe_priority_level_t priority, void *args, const char *name);
 void moe_yield();
-void moe_consume_quantum();
 int moe_usleep(uint64_t us);
 int moe_get_current_thread();
 int moe_get_usage();
@@ -134,8 +137,8 @@ int moe_check_timer(moe_timer_t*);
 uint64_t moe_get_measure();
 
 typedef struct moe_fifo_t moe_fifo_t;
-moe_fifo_t* moe_fifo_init(uintptr_t capacity);
-intptr_t moe_fifo_read(moe_fifo_t* self, intptr_t default_val);
-int moe_fifo_write(moe_fifo_t* self, intptr_t data);
-uintptr_t moe_fifo_get_estimated_count(moe_fifo_t* self);
-uintptr_t moe_fifo_get_estimated_free(moe_fifo_t* self);
+moe_fifo_t *moe_fifo_init(uintptr_t capacity);
+intptr_t moe_fifo_read(moe_fifo_t *self, intptr_t default_val);
+int moe_fifo_write(moe_fifo_t *self, intptr_t data);
+uintptr_t moe_fifo_get_estimated_count(moe_fifo_t *self);
+uintptr_t moe_fifo_get_estimated_free(moe_fifo_t *self);
