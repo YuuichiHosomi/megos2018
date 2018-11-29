@@ -120,7 +120,6 @@ void draw_logo_bitmap(moe_dib_t* screen, const uint8_t* bmp, int offset_x, int o
             }
             break;
     }
-    moe_invalidate_screen(&rect);
 }
 
 
@@ -315,7 +314,8 @@ _Noreturn void start_init(void* args) {
         moe_edge_insets_t insets = moe_get_client_insets(view);
         console_init(NULL, view, dib, &insets);
         moe_set_console_attributes(NULL, console_attributes);
-        moe_show_window(view);
+        // moe_show_window(view);
+        moe_set_active_window(view);
     }
 
     // moe_usleep(1000000);

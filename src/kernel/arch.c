@@ -31,6 +31,7 @@ uint32_t io_in32(uint16_t port);
 
 void thread_init(int n_active_cpu);
 void reschedule();
+extern int snprintf(char* buffer, size_t n, const char* format, ...);
 
 
 /*********************************************************************/
@@ -59,16 +60,23 @@ void idt_set_kernel_handler(uint8_t num, uintptr_t offset, uint8_t ist) {
 }
 
 void default_int_handler(x64_context_t* regs) {
-    printf("#### EXCEPTION %02llx ERR %04llx-%016llx\n", regs->intnum, regs->err, regs->cr2);
-    printf("ThreadID %d IP %04llx:%016llx SP %04llx:%016llx FL %08llx\n", moe_get_current_thread(), regs->cs, regs->rip, regs->ss, regs->rsp, regs->rflags);
-    printf(
+    char buff[1024];
+
+    snprintf(buff, 1024,
+        "Something went wrong.\n\n"
+        "TECH INFO: EXC-%02llx-%04llx-%016llx\n"
+        "Thread %d IP %04llx:%016llx SP %04llx:%016llx FL %08llx\n"
         "ABCD %016llx %016llx %016llx %016llx\n"
         "BPSD %016llx %016llx %016llx\n"
         "R8-  %016llx %016llx %016llx %016llx\n"
-        "R12- %016llx %016llx %016llx %016llx\n",
-        regs->rax, regs->rbx, regs->rcx, regs->rdx, regs->rbp, regs->rsi, regs->rdi,
-        regs->r8, regs->r9, regs->r10, regs->r11, regs->r12, regs->r13, regs->r14, regs->r15);
+        "R12- %016llx %016llx %016llx %016llx\n"
+        , regs->intnum, regs->err, regs->cr2
+        , moe_get_current_thread(), regs->cs, regs->rip, regs->ss, regs->rsp, regs->rflags
+        , regs->rax, regs->rbx, regs->rcx, regs->rdx, regs->rbp, regs->rsi, regs->rdi
+        , regs->r8, regs->r9, regs->r10, regs->r11, regs->r12, regs->r13, regs->r14, regs->r15
+        );
 
+    mgs_bsod(buff);
     moe_exit_thread(-1);
 }
 

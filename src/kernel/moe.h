@@ -63,6 +63,7 @@ extern const moe_edge_insets_t *moe_edge_insets_zero;
 moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color);
 void moe_blt(moe_dib_t *dest, moe_dib_t *src, moe_point_t *origin, moe_rect_t *rect, uint32_t options);
 void moe_fill_rect(moe_dib_t *dest, moe_rect_t *rect, uint32_t color);
+void moe_blend_rect(moe_dib_t *dest, moe_rect_t *rect, uint32_t color);
 void moe_fill_round_rect(moe_dib_t *dest, moe_rect_t *rect, int radius, uint32_t color);
 void moe_draw_round_rect(moe_dib_t *dest, moe_rect_t *rect, int radius, uint32_t color);
 void moe_draw_pixel(moe_dib_t *dest, moe_point_t *point, uint32_t color);
@@ -72,6 +73,7 @@ moe_point_t moe_draw_string(moe_dib_t *dib, moe_point_t *cursor, moe_rect_t *rec
 void moe_set_console_attributes(moe_console_context_t *self, uint32_t attributes);
 int moe_set_console_cursor_visible(moe_console_context_t *self, int visible);
 
+void mgs_bsod(const char *);
 void mgs_cls();
 
 typedef enum {
@@ -79,7 +81,8 @@ typedef enum {
     window_level_desktop_items,
     window_level_normal = 32,
     window_level_higher = 64,
-    window_level_popup = 96,
+    window_level_popup_barrier = 96,
+    window_level_popup,
     window_level_pointer = 127,
 } moe_window_level_t;
 
@@ -100,6 +103,7 @@ void moe_show_window(moe_view_t *view);
 void moe_hide_window(moe_view_t *view);
 void moe_invalidate_view(moe_view_t *view, moe_rect_t *rect);
 void moe_invalidate_screen(moe_rect_t *rect);
+void moe_set_active_window(moe_view_t *new_window);
 int moe_alert(const char *title, const char *message, uint32_t flags);
 
 

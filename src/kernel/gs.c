@@ -227,7 +227,6 @@ void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *r
 
 
 void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color) {
-
     int dx, dy, w, h;
     if (rect) {
         dx = rect->origin.x;
@@ -275,14 +274,79 @@ void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color) {
             p += dd;
         }
     }
+}
+
+void moe_blend_rect(moe_dib_t *dest, moe_rect_t *rect, uint32_t color) {
+    int dx, dy, w, h;
+    if (rect) {
+        dx = rect->origin.x;
+        dy = rect->origin.y;
+        w = rect->size.width;
+        h = rect->size.height;
+    } else {
+        dx = dy = 0;
+        w = dest->width;
+        h = dest->height;
+    }
+
+    {
+        if (dx < 0) {
+            w += dx;
+            dx = 0;
+        }
+        if (dy < 0) {
+            h += dy;
+            dy = 0;
+        }
+        int r = dx + w;
+        int b = dy + h;
+        if (r >= dest->width) w = dest->width - dx;
+        if (b >= dest->height) h = dest->height - dy;
+        if (w <= 0 || h <= 0) return;
+    }
+
+    uint32_t *p = dest->dib;
+    p += dx + dy * dest->delta;
+    uintptr_t dd = dest->delta - w;
+
+    unsigned alpha = (color & 0xFF000000) >> 24;
+    unsigned alpha_n = 255 - alpha;
+    uint8_t _b = color & 0xFF;
+    uint8_t _g = (color >> 8) & 0xFF;
+    uint8_t _r = (color >> 16) & 0xFF;
+
+        for (int i = 0; i < h; i++) {
+            #pragma clang loop vectorize(enable) interleave(enable)
+            for (int j = 0; j < w; j++) {
+            uint8_t *p0 = (uint8_t*)p;
+            p0[0] = (_b * alpha + p0[0] * alpha_n) / 256;
+            p0[1] = (_g * alpha + p0[1] * alpha_n) / 256;
+            p0[2] = (_r * alpha + p0[2] * alpha_n) / 256;
+            // p0[3] = 
+
+            p++;
+            }
+            p += dd;
+        }
 
 }
+
 
 void moe_draw_pixel(moe_dib_t* dest, moe_point_t *point, uint32_t color) {
     int dx = point->x, dy = point->y;
     if (dx < 0 || dy < 0 || dx >= dest->width || dy >= dest->height) return;
     uint32_t *p = dest->dib + dx + dy * dest->delta;
     *p = color;
+}
+
+void moe_draw_multi_pixel(moe_dib_t *dest, size_t n_points, moe_point_t *points, uint32_t color) {
+    for (int i = 0; i < n_points; i++) {
+        int dx = points[i].x, dy = points[i].y;
+        if (dx >= 0 && dy >= 0 && dx < dest->width && dest->height) {
+            uint32_t *p = dest->dib + dx + dy * dest->delta;
+            *p = color;
+        }
+    }
 }
 
 void draw_hline(moe_dib_t *dest, int x, int y, int width, uint32_t color) {
@@ -367,7 +431,6 @@ void moe_fill_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t
     }
 }
 
-
 void moe_draw_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t color) {
 
     int dx, dy, w, h;
@@ -416,27 +479,25 @@ void moe_draw_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t
         bx = radius - cy, by = radius - cx;
         {
             dw = w - bx * 2 - 1;
-            moe_point_t point1 = {dx + bx, dy + by};
-            moe_draw_pixel(dest, &point1, color);
-            moe_point_t point2 = {dx + bx, dy + qh - by};
-            moe_draw_pixel(dest, &point2, color);
-            moe_point_t point3 = {dx + bx + dw, dy + by};
-            moe_draw_pixel(dest, &point3, color);
-            moe_point_t point4 = {dx + bx + dw, dy + qh - by};
-            moe_draw_pixel(dest, &point4, color);
+            moe_point_t points[] = {
+                {dx + bx, dy + by },
+                {dx + bx, dy + qh - by },
+                {dx + bx + dw, dy + by },
+                {dx + bx + dw, dy + qh - by },
+            };
+            moe_draw_multi_pixel(dest, 4, points, color);
         }
 
         bx = radius - cx, by = radius - cy;
         {
             dw = w - bx * 2 - 1;
-            moe_point_t point1 = {dx + bx, dy + by};
-            moe_draw_pixel(dest, &point1, color);
-            moe_point_t point2 = {dx + bx, dy + qh - by};
-            moe_draw_pixel(dest, &point2, color);
-            moe_point_t point3 = {dx + bx + dw, dy + by};
-            moe_draw_pixel(dest, &point3, color);
-            moe_point_t point4 = {dx + bx + dw, dy + qh - by};
-            moe_draw_pixel(dest, &point4, color);
+            moe_point_t points[] = {
+                {dx + bx, dy + by },
+                {dx + bx, dy + qh - by },
+                {dx + bx + dw, dy + by },
+                {dx + bx + dw, dy + qh - by },
+            };
+            moe_draw_multi_pixel(dest, 4, points, color);
         }
     }
 }
@@ -634,6 +695,16 @@ void mgs_cls() {
     }
     current_console->cursor_x = 0;
     current_console->cursor_y = 0;
+}
+
+void mgs_bsod(const char *s) {
+
+    console_init(current_console, NULL, &main_screen_dib, &main_console_insets);
+    moe_set_console_attributes(current_console, 0x1F);
+
+    for(; *s; s++) {
+        putchar(*s);
+    }
 }
 
 
