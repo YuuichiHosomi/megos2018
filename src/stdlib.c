@@ -104,6 +104,14 @@ char *strncpy(char *s1, const char *s2, size_t n) {
     return s1;
 }
 
+int strncmp(const char *s1, const char *s2, size_t n) {
+    while ((n > 1) && (*s1 == *s2)){
+        if (!*s1) return 0;
+        s1++, s2++, n--;
+    }
+    return (int)*s1 - (int)*s2;
+}
+
 int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
     size_t count = 0;
     const char* p = format;

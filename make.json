@@ -24,7 +24,9 @@
                 "page",
                 "hid",
                 "acpi",
+                "shell",
                 "stdlib",
+                "noiz2bg",
                 "mkasm.asm"
             ]
         }

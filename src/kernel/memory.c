@@ -119,9 +119,10 @@ void mm_init(moe_bootinfo_mmap_t* mmap) {
 
 }
 
-void cmd_mem() {
+int cmd_mem(int argc, char **argv) {
     printf("Memory: %d MB\n", (int)(total_memory >> 8));
     printf("Kernel: %08zx-%08zx %zuKB/%zuKB (%zuMB)\n",
     kma_base, (kma_base + kma_size * PAGE_SIZE - 1), free_memory /1024, kma_size * PAGE_SIZE / 1024,
     (kma_size * PAGE_SIZE) >> 20);
+    return 0;
 }

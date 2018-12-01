@@ -29,9 +29,11 @@ typedef struct moe_thread_t {
         struct {
             moe_priority_level_t priority;
             uint8_t last_cpuid;
-            uint8_t reserved1: 7;
+            uint8_t reserved1: 8;
+            uint8_t reserved2: 2;
+            uint8_t fpu_allocated: 1;
             uint8_t fpu_used: 1;
-            uint8_t reserved2: 6;
+            uint8_t reserved3: 2;
             uint8_t zombie: 1;
             uint8_t running: 1;
         };
@@ -101,7 +103,7 @@ uint64_t moe_get_thread_load(moe_thread_t* thread) {
 
 int sch_add(moe_thread_t *thread) {
     if (thread->priority) {
-        int pri = thread->priority >= priority_highest ? 0 : 1;
+        int pri = thread->priority >= priority_high ? 0 : 1;
         return moe_fifo_write(thread_queue.ready[pri], (uintptr_t)thread);
     } else {
         return -1;
@@ -177,6 +179,7 @@ static void next_thread(uint32_t cpuid, moe_thread_t* current, moe_timer_t timer
     if (!atomic_bit_test_and_set(&thread_queue.core_lock, cpuid)) {
         moe_thread_t* next = sch_next(cpuid);
         uint64_t load = moe_get_thread_load(current);
+        MOE_ASSERT(load >= 0, "CPU LOAD EXCEED");
         atomic_fetch_add(&current->cputime, load);
         atomic_fetch_add(&current->load0, load);
         if (next != current) {
@@ -226,6 +229,7 @@ void moe_fpu_restore(uintptr_t delta) {
         io_fload(current->fpu_context);
     } else {
         io_finit();
+        current->fpu_allocated = 1;
         current->fpu_context = mm_alloc_static(delta);
     }
     current->fpu_used = 1;
@@ -238,7 +242,7 @@ void reschedule() {
     uint32_t cpuid = moe_get_current_cpuid();
     moe_thread_t* current = core_data[cpuid].current;
     if (current->quantum > 0) {
-        if (current->priority < priority_highest && moe_fifo_get_estimated_count(thread_queue.ready[0])) {
+        if (current->priority < priority_high && moe_fifo_get_estimated_count(thread_queue.ready[0])) {
             next_thread(cpuid, current, 0);
             return;
         }
@@ -406,7 +410,7 @@ void thread_init(int _n_active_cpu) {
     }
     core_data = _core_data;
 
-    moe_thread_t *sc = create_thread(&scheduler_thread, priority_highest, 0, "Scheduler");
+    moe_thread_t *sc = create_thread(&scheduler_thread, priority_high, 0, "Scheduler");
     sc->affinity = 1;
 }
 
@@ -472,7 +476,7 @@ uintptr_t moe_fifo_get_estimated_free(moe_fifo_t* self) {
 
 /*********************************************************************/
 
-void display_threads() {
+int cmd_ps(int argc, char **argv) {
     moe_thread_t* p = root_thread;
     printf("ID context  attr     usage cpu time   name\n");
     for (; p; p = p->next) {
@@ -489,4 +493,48 @@ void display_threads() {
             usage1, usage0, time2, time1, time0,
             p->name);
     }
+    return 0;
+}
+
+
+int cmd_top(int argc, char **argv) {
+
+    const size_t buff_size = 1024;
+    char buff[buff_size];
+
+    const uint32_t bgcolor = 0x80000000;
+    const uint32_t fgcolor = 0xFFFFFF00;
+
+    moe_rect_t frame = {{-1, -1}, {480, 400}};
+
+    moe_view_t *window = moe_create_window(&frame, MOE_WS_TRANSPARENT | MOE_WS_CAPTION, window_level_higher, "Top");
+    moe_show_window(window);
+
+    for (;;) {
+        moe_rect_t rect = moe_get_client_rect(window);
+        moe_point_t cursor = rect.origin;
+        moe_set_window_bgcolor(window, bgcolor);
+        cursor = moe_draw_string(moe_get_window_bitmap(window), &cursor, &rect, "ID context  attr     usage cpu time   name\n", fgcolor);
+
+        moe_thread_t* p = root_thread;
+        for (; p; p = p->next) {
+            uint64_t time = p->cputime / 1000000;
+            uint32_t time0 = time % 60;
+            uint32_t time1 = (time / 60) % 60;
+            uint32_t time2 = (time / 3600);
+            int usage = p->load / 1000;
+            if (usage > 999) usage = 999;
+            int usage0 = usage % 10, usage1 = usage / 10;
+            snprintf(buff, buff_size, "%2d %08zx %08zx %2d.%d%% %4u:%02u:%02u %s\n",
+                (int)p->thid, (uintptr_t)p, p->flags,
+                // p->affinity, p->quantum_left, p->quantum,
+                usage1, usage0, time2, time1, time0,
+                p->name);
+            cursor = moe_draw_string(moe_get_window_bitmap(window), &cursor, &rect, buff, fgcolor);
+        }
+        moe_invalidate_rect(window, NULL);
+
+        moe_usleep(500000);
+    }
+    return 0;
 }

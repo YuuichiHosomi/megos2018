@@ -8,6 +8,7 @@
 
 #define MAX_WINDOWS     256
 #define WINDOW_TITLE_SIZE    32
+#define MAX_EVENT_QUEUE 256
 
 #define MAX(a, b)   ((a > b) ? (a) : (b))
 #define MIN(a, b)   ((a < b) ? (a) : (b))
@@ -15,6 +16,8 @@
 extern char *strncpy(char *s1, const char *s2, size_t n);
 extern int snprintf(char* buffer, size_t n, const char* format, ...);
 int getchar();
+uint32_t hid_scan_to_unicode(uint8_t scan, uint8_t modifier);
+
 
 const int32_t border_width_top = 1;
 const int32_t border_width_left = 1;
@@ -44,6 +47,7 @@ int title_height = 24;
 typedef struct moe_view_t {
     moe_view_t *next;
     moe_dib_t *dib;
+    moe_fifo_t *event_queue;
     void *context;
     moe_rect_t frame;
     union {
@@ -54,7 +58,7 @@ typedef struct moe_view_t {
     };
     uint32_t state;
     uint32_t bgcolor;
-    int index;
+    int window_id;
     char title[WINDOW_TITLE_SIZE];
 } moe_view_t;
 
@@ -79,7 +83,8 @@ struct {
     moe_view_t *captured_window;
     moe_dib_t *close_button_dib;
     moe_rect_t screen_bounds;
-    moe_edge_insets_t global_insets;
+    moe_edge_insets_t screen_insets;
+    _Atomic int next_window_id;
     _Atomic uint32_t global_flags;
     atomic_flag hierarchy_lock;
 } wm_state;
@@ -88,7 +93,6 @@ moe_point_t captured_at;
 
 
 enum {
-    global_flag_screen_redraw,
     global_flag_view_redraw,
     global_flag_mouse_redraw,
 };
@@ -136,9 +140,20 @@ uint8_t close_button_source[CLOSE_BUTTON_SIZE][CLOSE_BUTTON_SIZE] = {
 };
 
 
+void lock_hierarchy() {
+    while (atomic_flag_test_and_set(&wm_state.hierarchy_lock)) {
+        io_pause();
+    }
+}
+
+void unlock_hierarchy() {
+    atomic_flag_clear(&wm_state.hierarchy_lock);
+}
+
+
 void draw_border(moe_view_t *view) {
     if (!view->dib) return;
-    if ((view->flags & WINDOW_CAPTION)) {
+    if ((view->flags & MOE_WS_CAPTION)) {
         moe_rect_t rect = {{0, 0}, {view->frame.size.width, title_height}};
         moe_point_t point = {20, 3};
         moe_point_t point2 = {21, 4};
@@ -154,7 +169,7 @@ void draw_border(moe_view_t *view) {
         moe_point_t origin_close = {view->frame.size.width - CLOSE_BUTTON_SIZE - 12, (title_height - CLOSE_BUTTON_SIZE) / 2 + 1};
         moe_blt(view->dib, wm_state.close_button_dib, &origin_close, NULL, 0);
     }
-    if ((view->flags & WINDOW_BORDER)) {
+    if ((view->flags & MOE_WS_BORDER)) {
         moe_rect_t rect1 = {{0, 0}, {view->frame.size.width, border_width_top}};
         moe_fill_rect(view->dib, &rect1, border_color);
         moe_rect_t rect2 = {{0, 0}, {border_width_left, view->frame.size.height}};
@@ -172,31 +187,44 @@ void moe_view_set_title(moe_view_t *view, const char *title) {
     } else {
         memset(&view->title[0], 0, WINDOW_TITLE_SIZE);
     }
-    if (view->flags & WINDOW_CAPTION) {
+    if (view->flags & MOE_WS_CAPTION) {
         draw_border(view);
     }
 }
 
 moe_edge_insets_t moe_get_client_insets(moe_view_t *view) {
-    const int thin_insets = 4;
-    const int thick_insets = 8;
+    int thin_insets = 4;
+    int thick_insets = 8;
     uint32_t flags = view->flags;
     moe_edge_insets_t insets;
-    if (flags & WINDOW_BORDER) {
-        moe_edge_insets_t insets1 = {thick_insets, thick_insets, thick_insets, thick_insets};
-        insets = insets1;
+    if (flags & MOE_WS_CLIENT_RECT) {
+        if (flags & MOE_WS_BORDER) {
+            moe_edge_insets_t insets1 = {border_width_top, border_width_left, border_width_bottom, border_width_right};
+            insets = insets1;
+        } else {
+            moe_edge_insets_t insets2 = {0, 0, 0, 0};
+            insets = insets2;
+        }
+        if (flags & MOE_WS_CAPTION) {
+            insets.top = title_height;
+        }
     } else {
-        moe_edge_insets_t insets2 = {thin_insets, thin_insets, thin_insets, thin_insets};
-        insets = insets2;
-    }
-    if (flags & WINDOW_CAPTION) {
-        insets.top = title_height + thin_insets;
+        if (flags & MOE_WS_BORDER) {
+            moe_edge_insets_t insets1 = {thick_insets, thick_insets, thick_insets, thick_insets};
+            insets = insets1;
+        } else {
+            moe_edge_insets_t insets2 = {thin_insets, thin_insets, thin_insets, thin_insets};
+            insets = insets2;
+        }
+        if (flags & MOE_WS_CAPTION) {
+            insets.top = title_height + thin_insets;
+        }
     }
 
     return insets;
 }
 
-moe_rect_t moe_get_view_bounds(moe_view_t *view) {
+moe_rect_t moe_get_window_bounds(moe_view_t *view) {
     moe_rect_t rect;
     rect.origin = *moe_point_zero;
     rect.size = view->frame.size;
@@ -204,21 +232,30 @@ moe_rect_t moe_get_view_bounds(moe_view_t *view) {
 }
 
 moe_rect_t moe_get_client_rect(moe_view_t *view) {
-    moe_rect_t rect = moe_get_view_bounds(view);
+    moe_rect_t rect = moe_get_window_bounds(view);
     moe_edge_insets_t insets = moe_get_client_insets(view);
     return moe_edge_insets_inset_rect(&rect, &insets);
 }
 
-moe_edge_insets_t moe_add_global_insets(moe_edge_insets_t *insets) {
-    wm_state.global_insets.top      += insets->top;
-    wm_state.global_insets.left     += insets->left;
-    wm_state.global_insets.bottom   += insets->bottom;
-    wm_state.global_insets.right    += insets->right;
-    return wm_state.global_insets;
+void moe_blt_to_window(moe_view_t *window, moe_dib_t *dib) {
+    if (!window->dib) return;
+    moe_rect_t rect = moe_get_client_rect(window);
+    moe_rect_t rect2 = {{0, 0}, {rect.size.width, rect.size.height}};
+    moe_blt(window->dib, dib, &rect.origin, &rect2, 0);
+    moe_invalidate_rect(window, NULL);
 }
 
 
-moe_view_t *moe_create_view(moe_rect_t *frame, moe_dib_t* dib, uint32_t flags, const char *title) {
+moe_edge_insets_t moe_add_screen_insets(moe_edge_insets_t *insets) {
+    wm_state.screen_insets.top      += insets->top;
+    wm_state.screen_insets.left     += insets->left;
+    wm_state.screen_insets.bottom   += insets->bottom;
+    wm_state.screen_insets.right    += insets->right;
+    return wm_state.screen_insets;
+}
+
+
+moe_view_t *create_window(moe_rect_t *frame, moe_dib_t* dib, uint32_t flags, const char *title) {
 
     moe_view_t *self = NULL;
     for (int i = 0; i < MAX_WINDOWS; i++) {
@@ -232,12 +269,10 @@ moe_view_t *moe_create_view(moe_rect_t *frame, moe_dib_t* dib, uint32_t flags, c
     moe_view_t view;
     memset(&view, 0, sizeof(moe_view_t));
 
+    view.window_id = atomic_fetch_add(&wm_state.next_window_id, 1);
     view.state = 1 << view_state_used;
-    view.flags = (flags & WINDOW_FLAG_SAFE_MASK);
-    if (!view.window_level) {
-        view.window_level = window_level_normal;
-    }
-    view.bgcolor = default_bgcolor;
+    view.flags = flags;
+
     if (title) {
         strncpy(&view.title[0], title, WINDOW_TITLE_SIZE - 1);
     } else {
@@ -257,15 +292,72 @@ moe_view_t *moe_create_view(moe_rect_t *frame, moe_dib_t* dib, uint32_t flags, c
         view.dib = NULL;
         if (frame) view.frame = *frame;
     }
-    if (view.flags & WINDOW_CENTER) {
-        view.frame.origin.x = (wm_state.screen_bounds.size.width - view.frame.size.width) / 2;
-        view.frame.origin.y = (wm_state.screen_bounds.size.height - view.frame.size.height) / 2;
-    }
-    view.index = self->index;
 
     *self = view;
     return self;
 }
+
+
+moe_view_t *moe_create_window(moe_rect_t *rect, uint32_t style, moe_window_level_t window_level, const char *title) {
+    uint32_t dib_flags = 0;
+    uint32_t bgcolor = default_bgcolor;
+
+    moe_rect_t frame = *rect;
+    int estimated_window_id = wm_state.next_window_id;
+    if (frame.origin.x < 0) frame.origin.x = estimated_window_id * 10;
+    if (frame.origin.y < 0) frame.origin.y = estimated_window_id * 10;
+    frame.origin.x = MAX(frame.origin.x, wm_state.screen_insets.left);
+    frame.origin.y = MAX(frame.origin.y, wm_state.screen_insets.top);
+
+    style &= 0xFFFFFF00;
+    if (window_level > window_level_desktop && window_level < window_level_pointer) {
+        style |= window_level;
+    } else {
+        style |= window_level_normal;
+    }
+    if (style & MOE_WS_CAPTION) {
+        style |= MOE_WS_BORDER;
+    }
+
+    if (style & MOE_WS_CLIENT_RECT) {
+        if (style & MOE_WS_BORDER) {
+            frame.size.width += border_width_left + border_width_right;
+            frame.size.height += border_width_top + border_width_bottom;
+            if (style & MOE_WS_CAPTION) {
+                frame.size.height += title_height - border_width_top;
+            }
+        }
+    }
+
+    if (style & MOE_WS_TRANSPARENT) {
+        dib_flags |= MOE_DIB_ALPHA;
+        bgcolor = MOE_COLOR_TRANSPARENT;
+    }
+
+    moe_dib_t *dib = moe_create_dib(&frame.size, dib_flags, bgcolor);
+    moe_view_t *view = create_window(&frame, dib, style, title);
+    view->bgcolor = bgcolor;
+
+    return view;
+}
+
+
+int moe_destroy_window(moe_view_t *self) {
+
+    moe_hide_window(self);
+
+    // TODO: remove resources
+
+    atomic_bit_test_and_clear(&self->state, view_state_used);
+
+    return 0;
+}
+
+
+moe_dib_t *moe_get_window_bitmap(moe_view_t *self) {
+    return self->dib;
+}
+
 
 moe_point_t moe_convert_view_point_to_screen(moe_view_t *view, moe_point_t *point) {
     moe_point_t result = { view->frame.origin.x + point->x, view->frame.origin.y + point->y };
@@ -273,6 +365,7 @@ moe_point_t moe_convert_view_point_to_screen(moe_view_t *view, moe_point_t *poin
 }
 
 void remove_view_hierarchy_nb(moe_view_t *view) {
+    atomic_bit_test_and_clear(&view->state, view_state_visible);
     moe_view_t *p = wm_state.root;
     for (; p; p = p->next) {
         moe_view_t *next = p->next;
@@ -282,7 +375,6 @@ void remove_view_hierarchy_nb(moe_view_t *view) {
             break;
         }
     }
-    atomic_bit_test_and_clear(&view->state, view_state_visible);
 }
 
 void add_view_hierarchy_nb(moe_view_t *view) {
@@ -302,31 +394,35 @@ void add_view_hierarchy_nb(moe_view_t *view) {
 
 void moe_show_window(moe_view_t* view) {
     if (!view->window_level) return;
-    while (atomic_flag_test_and_set(&wm_state.hierarchy_lock)) {
-        moe_yield();
-    }
+    lock_hierarchy();
 
     remove_view_hierarchy_nb(view);
     add_view_hierarchy_nb(view);
 
-    atomic_flag_clear(&wm_state.hierarchy_lock);
+    unlock_hierarchy();
 
-    moe_invalidate_view(view, NULL);
+    moe_invalidate_rect(view, NULL);
 }
 
 void moe_hide_window(moe_view_t *view) {
     if (!view->window_level) return;
-    while (atomic_flag_test_and_set(&wm_state.hierarchy_lock)) {
-        moe_yield();
+
+    if (wm_state.active_window == view) {
+        wm_state.active_window = NULL;
     }
+    if (wm_state.captured_window == view) {
+        wm_state.captured_window = NULL;
+    }
+
+    lock_hierarchy();
 
     moe_rect_t rect = view->frame;
 
     remove_view_hierarchy_nb(view);
 
-    atomic_flag_clear(&wm_state.hierarchy_lock);
+    unlock_hierarchy();
 
-    moe_invalidate_screen(&rect);
+    moe_invalidate_rect(NULL, &rect);
 }
 
 
@@ -335,7 +431,7 @@ void moe_set_active_window(moe_view_t *new_window) {
     wm_state.active_window = new_window;
     if (old_active) {
         draw_border(old_active);
-        moe_invalidate_view(old_active, NULL);
+        moe_invalidate_rect(old_active, NULL);
     }
     if (new_window) {
         draw_border(wm_state.active_window);
@@ -344,12 +440,22 @@ void moe_set_active_window(moe_view_t *new_window) {
 }
 
 
+void moe_set_window_bgcolor(moe_view_t *self, uint32_t color) {
+    self->bgcolor = color;
+    if (self->dib) {
+        moe_fill_rect(self->dib, NULL, color);
+    }
+    draw_border(self);
+    moe_invalidate_rect(self, NULL);
+}
+
+
 void move_window(moe_view_t *view, moe_point_t *new_point) {
     moe_rect_t old_frame = view->frame;
     if (old_frame.origin.x != new_point->x || old_frame.origin.y != new_point->y) {
         view->frame.origin = *new_point;
-        moe_invalidate_screen(&old_frame);
-        moe_invalidate_view(view, NULL);
+        moe_invalidate_rect(NULL, &old_frame);
+        moe_invalidate_rect(view, NULL);
     }
 }
 
@@ -377,6 +483,7 @@ int moe_hit_test_rect(moe_rect_t *rect1, moe_rect_t *rect2) {
 
 
 void draw_window_nb(moe_view_t *view, moe_rect_t *rect, int off_screen) {
+    // if (!atomic_bit_test(&view->state, view_state_visible)) return;
     moe_view_t *p = view;
     if (!rect) {
         rect = &view->frame;
@@ -401,7 +508,7 @@ void draw_window_nb(moe_view_t *view, moe_rect_t *rect, int off_screen) {
                 moe_blt(dib_to_draw, p->dib, &blt_origin, &blt_rect, 0);
             } else {
                 blt_rect.origin = blt_origin;
-                if (p->flags & WINDOW_TRANSPARENT) {
+                if (p->flags & MOE_WS_TRANSPARENT) {
                     moe_blend_rect(dib_to_draw, &blt_rect, p->bgcolor);
                 } else {
                     moe_fill_rect(dib_to_draw, &blt_rect, p->bgcolor);
@@ -416,14 +523,15 @@ void draw_window_nb(moe_view_t *view, moe_rect_t *rect, int off_screen) {
 }
 
 void draw_window(moe_view_t *view, moe_rect_t *rect, int off_screen) {
-    while (atomic_flag_test_and_set(&wm_state.hierarchy_lock)) {
-        moe_yield();
-    }
+    lock_hierarchy();
     draw_window_nb(view, rect, off_screen);
-    atomic_flag_clear(&wm_state.hierarchy_lock);
+    unlock_hierarchy();
 }
 
-void moe_invalidate_view(moe_view_t *view, moe_rect_t *_rect) {
+void moe_invalidate_rect(moe_view_t *view, moe_rect_t *_rect) {
+    if (!view) {
+        view = wm_state.root;
+    }
     moe_rect_t rect;
     if (_rect) {
         rect = *_rect;
@@ -435,12 +543,10 @@ void moe_invalidate_view(moe_view_t *view, moe_rect_t *_rect) {
     rect.origin = moe_convert_view_point_to_screen(view, &rect.origin);
 
     int needs_recursive = 0;
-    if (view->flags & WINDOW_TRANSPARENT) {
+    if (view->flags & MOE_WS_TRANSPARENT) {
         needs_recursive = 1;
     } else {
-        while (atomic_flag_test_and_set(&wm_state.hierarchy_lock)) {
-            moe_yield();
-        }
+        lock_hierarchy();
         moe_view_t *p = view;
         for (; p; p = p->next) {
             if (moe_hit_test_rect(&rect, &p->frame)) {
@@ -448,7 +554,7 @@ void moe_invalidate_view(moe_view_t *view, moe_rect_t *_rect) {
                 break;
             }
         }
-        atomic_flag_clear(&wm_state.hierarchy_lock);
+        unlock_hierarchy();
     }
 
     if (needs_recursive) {
@@ -456,16 +562,6 @@ void moe_invalidate_view(moe_view_t *view, moe_rect_t *_rect) {
     } else {
         draw_window(view, &rect, 0);
     }
-}
-
-
-void moe_invalidate_screen(moe_rect_t *rect) {
-    moe_invalidate_view(wm_state.root, rect);
-    // if (rect) {
-    //     draw_window(wm_state.root, rect, 1);
-    // } else {
-    //     atomic_bit_test_and_set(&wm_state.global_flags, global_flag_screen_redraw);
-    // }
 }
 
 moe_size_t moe_get_screen_size() {
@@ -478,9 +574,11 @@ int moe_alert(const char *title, const char *message, uint32_t flags) {
     int width = dib->width;
     int height = dib->height;
     int padding_x = 12;
+    moe_point_t origin = { (wm_state.root->frame.size.width - width) / 2, (wm_state.root->frame.size.height - height) / 2};
+    wm_state.popup_window->frame.origin = origin;
 
     // moe_fill_rect(dib, NULL, popup_bgcolor);
-    moe_fill_rect(dib, NULL, COLOR_TRANSPARENT);
+    moe_fill_rect(dib, NULL, MOE_COLOR_TRANSPARENT);
     moe_fill_round_rect(dib, NULL, 12, popup_bgcolor);
     moe_draw_round_rect(dib, NULL, 12, border_color);
 
@@ -509,30 +607,20 @@ int moe_alert(const char *title, const char *message, uint32_t flags) {
     rect_button.origin.y = rect_under.origin.y + 4;
     moe_fill_round_rect(dib, &rect_button, button_radius, active_button_bgcolor);
     // moe_draw_round_rect(dib, &rect_button, button_radius, 0);
-    moe_point_t origin = {rect_button.origin.x + 32, rect_button.origin.y + 2};
-    moe_draw_string(dib, &origin, &rect_button, "OK", active_button_fgcolor);
+    moe_point_t button_origin = {rect_button.origin.x + 32, rect_button.origin.y + 2};
+    moe_draw_string(dib, &button_origin, &rect_button, "OK", active_button_fgcolor);
 
     moe_view_set_title(wm_state.popup_window, title);
 
     moe_show_window(wm_state.popup_barrier);
     // moe_show_window(wm_state.popup_window);
     moe_set_active_window(wm_state.popup_window);
-    getchar();
+    // getchar();
     moe_hide_window(wm_state.popup_barrier);
     moe_hide_window(wm_state.popup_window);
     return 0;
 }
 
-
-int getchar() {
-    for(;;) {
-        int c = hid_getchar();
-        if (c >= 0) {
-            return c;
-        }
-        moe_yield();
-    }
-}
 
 moe_view_t *event_test_window;
 
@@ -556,9 +644,7 @@ void move_mouse(moe_hid_mouse_report_t* mouse_report) {
 
 moe_view_t *moe_view_hit_test(moe_point_t *point) {
 
-    while (atomic_flag_test_and_set(&wm_state.hierarchy_lock)) {
-        moe_yield();
-    }
+    lock_hierarchy();
 
     moe_view_t *found = NULL;
 
@@ -568,54 +654,84 @@ moe_view_t *moe_view_hit_test(moe_point_t *point) {
         if (moe_hit_test(&p->frame, point)) found = p;
     }
 
-    atomic_flag_clear(&wm_state.hierarchy_lock);
+    unlock_hierarchy();
 
     return found;
 }
 
 
-_Noreturn void window_thread(void* args) {
+int moe_send_key_event(moe_hid_keyboard_report_t* report) {
+    if (wm_state.active_window && wm_state.active_window->event_queue) {
+        uintptr_t keyevent = report->keydata[0] | (report->modifier << 8);
+        return moe_send_event(wm_state.active_window, keyevent);
+    }
+    return -1;
+}
 
-    // Init mouse
-    {
-        moe_size_t size = { MOUSE_CURSOR_WIDTH, MOUSE_CURSOR_HEIGHT };
-        moe_dib_t *dib = moe_create_dib(&size, MOE_DIB_COLOR_KEY, mouse_cursor_palette[0]);
-        for (int i = 0; i < MOUSE_CURSOR_WIDTH * MOUSE_CURSOR_HEIGHT; i++) {
-            dib->dib[i] = mouse_cursor_palette[mouse_cursor_source[0][i]];
+void init_event(moe_view_t *view) {
+    if (view->event_queue) return;
+    view->event_queue = moe_fifo_init(MAX_EVENT_QUEUE);
+}
+
+uintptr_t moe_get_event(moe_view_t *view) {
+    init_event(view);
+
+    for (;;) {
+        uintptr_t event = moe_fifo_read(view->event_queue, 0);
+        if (event) return event;
+
+        if (atomic_bit_test_and_clear(&view->state, view_state_needs_redraw)) {
+            if (view->flags & MOE_WS_TRANSPARENT) {
+                draw_window_nb(wm_state.root, &view->frame, 1);
+            } else {
+                draw_window_nb(view, NULL, 1);
+            }
         }
-        mouse_cursor = moe_create_view(NULL, dib, WINDOW_TRANSPARENT | WINDOW_CENTER | window_level_pointer, "Mouse");
-        mouse_point = mouse_cursor->frame.origin;
 
-        moe_show_window(mouse_cursor);
+        moe_usleep(100);
     }
 
-    moe_invalidate_screen(NULL);
+}
+
+int moe_send_event(moe_view_t *view, uintptr_t event) {
+    init_event(view);
+    int result = moe_fifo_write(view->event_queue, event);
+    return result;
+}
+
+uint32_t moe_translate_key_event(moe_view_t *window, uintptr_t event) {
+    if (event < 0x100000) {
+        uint8_t scan = event;
+        uint8_t modifier = event >> 8;
+        uint32_t c = hid_scan_to_unicode(scan, modifier);
+        return c;
+    } else {
+        // TODO:
+    }
+    return INVALID_UNICHAR;
+}
+
+
+_Noreturn void window_thread(void* args) {
+
+    moe_invalidate_rect(NULL, NULL);
 
     for (;;) {
 
-        // if (atomic_bit_test_and_clear(&wm_state.global_flags, global_flag_screen_redraw)) {
-        //     // Redraw Screen
-        //     // atomic_bit_test_and_clear(&wm_state.global_flags, global_flag_view_redraw);
-        //     // draw_window(wm_state.root, &wm_state.root->frame, 1);
-        //     // draw_window(wm_state.root, NULL, 1);
-        // } else 
-
         if (atomic_bit_test_and_clear(&wm_state.global_flags, global_flag_view_redraw)) {
-            // Redraw View
-            while (atomic_flag_test_and_set(&wm_state.hierarchy_lock)) {
-                moe_yield();
-            }
+            // Redraw Windows
+            lock_hierarchy();
             moe_view_t *view = wm_state.root;
             for (; view; view = view->next) {
-                if (atomic_bit_test_and_clear(&view->state, view_state_needs_redraw)) {
-                    if (view->flags & WINDOW_TRANSPARENT) {
+                if (!view->event_queue && atomic_bit_test_and_clear(&view->state, view_state_needs_redraw)) {
+                    if (view->flags & MOE_WS_TRANSPARENT) {
                         draw_window_nb(wm_state.root, &view->frame, 1);
                     } else {
                         draw_window_nb(view, NULL, 1);
                     }
                 }
             }
-            atomic_flag_clear(&wm_state.hierarchy_lock);
+            unlock_hierarchy();
         }
 
         // Update mouse
@@ -625,7 +741,7 @@ _Noreturn void window_thread(void* args) {
                 if (mouse.l_button) {
                     moe_point_t new_origin;
                     new_origin.x = mouse_point.x - captured_at.x;
-                    int top = (wm_state.captured_window->window_level < window_level_higher) ? wm_state.global_insets.top : 0;
+                    int top = (wm_state.captured_window->window_level < window_level_higher) ? wm_state.screen_insets.top : 0;
                     new_origin.y = MAX(mouse_point.y - captured_at.y, top);
                     move_window(wm_state.captured_window, &new_origin);
                 } else {
@@ -641,7 +757,7 @@ _Noreturn void window_thread(void* args) {
                     if (wm_state.active_window != mouse_at) {
                         moe_set_active_window(mouse_at);
                     }
-                    if ((mouse_at->flags & WINDOW_PINCHABLE) || ((mouse_at->flags & WINDOW_CAPTION) && relative_point.y < title_height)) {
+                    if ((mouse_at->flags & MOE_WS_PINCHABLE) || ((mouse_at->flags & MOE_WS_CAPTION) && relative_point.y < title_height)) {
                         wm_state.captured_window = mouse_at;
                         captured_at = relative_point;
                     }
@@ -650,14 +766,13 @@ _Noreturn void window_thread(void* args) {
                 size_t size_buff = 32;
                 char buff[32];
                 uint32_t packed_button = (mouse.buttons & 7) + ((mouse.pressed & 7) << 4) + ((mouse.released & 7) << 8);
-                snprintf(buff, size_buff, "%4d %4d %03x %d %08zx", mouse_point.x, mouse_point.y, packed_button,
-                    mouse_at->index, (uintptr_t)mouse_at
+                snprintf(buff, size_buff, "%4d %4d %03x %d", mouse_point.x, mouse_point.y, packed_button,
+                    mouse_at->window_id
                 );
                 moe_rect_t rect = moe_get_client_rect(event_test_window);
                 moe_fill_rect(event_test_window->dib, &rect, 0x80000000);
                 moe_draw_string(event_test_window->dib, NULL, &rect, buff, 0xFFFFFF77);
-                moe_invalidate_screen(&event_test_window->frame);
-
+                moe_invalidate_rect(event_test_window, NULL);
             }
 
             move_window(mouse_cursor, &mouse_point);
@@ -670,9 +785,6 @@ _Noreturn void window_thread(void* args) {
 void window_init() {
     wm_state.view_pool = mm_alloc_static(MAX_WINDOWS * sizeof(moe_view_t));
     memset(wm_state.view_pool, 0, MAX_WINDOWS * sizeof(moe_view_t));
-    for (int i = 0; i < MAX_WINDOWS; i++) {
-        wm_state.view_pool[i].index = i;
-    }
 
     moe_rect_t screen_bounds = {{0, 0}, {main_screen_dib.width, main_screen_dib.height}};
     wm_state.screen_bounds = screen_bounds;
@@ -680,9 +792,23 @@ void window_init() {
 
     // Init root window
     {
-        wm_state.root = moe_create_view(&wm_state.screen_bounds, NULL, 0, "Desktop");
+        wm_state.root = create_window(&wm_state.screen_bounds, NULL, MOE_WS_CLIENT_RECT, "Desktop");
         wm_state.root->bgcolor = desktop_color;
         wm_state.root->window_level = window_level_desktop;
+        atomic_bit_test_and_set(&wm_state.root->state, view_state_visible);
+    }
+
+    // Init mouse
+    {
+        moe_rect_t frame = {{wm_state.root->frame.size.width / 2, wm_state.root->frame.size.height / 2}, { MOUSE_CURSOR_WIDTH, MOUSE_CURSOR_HEIGHT }};
+        moe_dib_t *dib = moe_create_dib(&frame.size, MOE_DIB_COLOR_KEY, mouse_cursor_palette[0]);
+        for (int i = 0; i < MOUSE_CURSOR_WIDTH * MOUSE_CURSOR_HEIGHT; i++) {
+            dib->dib[i] = mouse_cursor_palette[mouse_cursor_source[0][i]];
+        }
+        mouse_cursor = create_window(&frame, dib, MOE_WS_CLIENT_RECT | MOE_WS_TRANSPARENT | window_level_pointer, "Mouse");
+        mouse_point = mouse_cursor->frame.origin;
+
+        moe_show_window(mouse_cursor);
     }
 
     // Prepare CLOSE BUTTON
@@ -695,43 +821,42 @@ void window_init() {
         wm_state.close_button_dib = dib;
     }
 
-    // Event test window
-    {
-        moe_rect_t frame = {{100, 100}, {256, 56}};
-        moe_dib_t *dib = moe_create_dib(&frame.size, MOE_DIB_ALPHA, 0x80000000);
-        event_test_window = moe_create_view(&frame, dib, WINDOW_CAPTION | WINDOW_TRANSPARENT | WINDOW_BORDER | window_level_popup, "Event Test");
-
-        moe_show_window(event_test_window);
-    }
-
-    // Prepare Popup Placeholder
+    // Popup Placeholder
     {
         moe_rect_t frame = {{0, 0}, {480, 160}};
-        moe_dib_t *dib = moe_create_dib(&frame.size, MOE_DIB_ALPHA, 0);
-        wm_state.popup_window = moe_create_view(&frame, dib, WINDOW_PINCHABLE | WINDOW_CENTER | WINDOW_TRANSPARENT | window_level_popup, "POPUP");
+        wm_state.popup_window = moe_create_window(&frame, MOE_WS_PINCHABLE | MOE_WS_TRANSPARENT, window_level_popup, "POPUP");
     }
 
     // Popup barrier
     {
         moe_rect_t frame = wm_state.root->frame;
-        wm_state.popup_barrier = moe_create_view(&frame, NULL, WINDOW_TRANSPARENT | window_level_popup_barrier, "popup barrier");
+        wm_state.popup_barrier = create_window(&frame, NULL, MOE_WS_CLIENT_RECT | MOE_WS_TRANSPARENT | window_level_popup_barrier, "popup barrier");
         wm_state.popup_barrier->bgcolor = 0x80000000;
     }
 
+    // Event test window
+    {
+        int width = 160;
+        moe_rect_t frame = {{wm_state.root->frame.size.width - width - 8, 32}, {width, 56}};
+        event_test_window = moe_create_window(&frame, MOE_WS_CAPTION | MOE_WS_TRANSPARENT | MOE_WS_BORDER, window_level_higher, "Mouse Monitor");
+        moe_set_window_bgcolor(event_test_window, 0x80000000);
+        moe_show_window(event_test_window);
+    }
 
-    moe_create_thread(&window_thread, priority_highest, NULL, "Window Manager");
+    moe_create_thread(&window_thread, priority_high, NULL, "Window Manager");
 }
 
 
-void cmd_win() {
-    printf("ID context  attr     bitmap   bgcolor frame              title\n");
+int cmd_win(int argc, char **argv) {
+    printf("ID context  attr     bitmap   event    frame              title\n");
     moe_view_t *view = wm_state.root;
     do {
-        printf("%2d %08zx %08x %08zx %06x %4d %4d %4d %4d %s\n", 
-            view->index, (uintptr_t)view, view->state | view->flags,
-            (uintptr_t)(view->dib ? view->dib->dib : 0), view->bgcolor,
+        printf("%2d %08zx %08x %08zx %08zx %4d %4d %4d %4d %s\n", 
+            view->window_id, (uintptr_t)view, view->state | view->flags,
+            (uintptr_t)(view->dib ? view->dib->dib : 0), (uintptr_t)view->event_queue,
             view->frame.origin.x, view->frame.origin.y, view->frame.size.width, view->frame.size.height,
             view->title);
         view = view->next;
     } while(view);
+    return 0;
 }

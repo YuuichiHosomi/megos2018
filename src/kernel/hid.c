@@ -10,18 +10,11 @@ struct {
     int mouse_changed;
 } hid_state;
 
-moe_fifo_t* hid_fifo;
 extern int ps2_init();
 int ps2_exists = 0;
-extern void moe_ctrl_alt_del();
 extern int ps2_parse_data(moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* mouse_report);
 extern void move_mouse(moe_hid_mouse_report_t* mouse_report);
 
-
-int hid_getchar() {
-    const int EOF = -1;
-    return moe_fifo_read(hid_fifo, EOF);
-}
 
 #define SCAN_DELETE 0x4C
 
@@ -74,8 +67,6 @@ uint32_t hid_scan_to_unicode(uint8_t scan, uint8_t modifier) {
 
 // HID Thread
 _Noreturn void hid_thread(void *args) {
-    const uintptr_t fifo_size = 256;
-    hid_fifo = moe_fifo_init(fifo_size);
 
     ps2_exists = ps2_init();
 
@@ -84,10 +75,6 @@ _Noreturn void hid_thread(void *args) {
         do {
             moe_hid_mouse_report_t mouse_report;
             moe_hid_keyboard_report_t keyreport;
-
-            hid_state.mouse.old_buttons = hid_state.mouse.buttons;
-            hid_state.mouse.x = 0;
-            hid_state.mouse.y = 0;
 
             cont = 0;
             if (ps2_exists) {
@@ -98,18 +85,15 @@ _Noreturn void hid_thread(void *args) {
                         if (keyreport.keydata[0]) {
                             if ((keyreport.keydata[0] & 0x7F) == SCAN_DELETE &&
                                 (keyreport.modifier & (0x11)) != 0 && (keyreport.modifier & (0x44)) != 0) {
-                                moe_ctrl_alt_del();
+                                moe_reboot();
                             }
-                            uint32_t uni = hid_scan_to_unicode(keyreport.keydata[0], keyreport.modifier);
-                            if (uni != INVALID_UNICHAR) {
-                                moe_fifo_write(hid_fifo, uni);
-                            }
+                            moe_send_key_event(&keyreport);
                         }
                         break;
 
                     case 2:
                     {
-                        hid_state.mouse.buttons = mouse_report.buttons;
+                        hid_state.mouse.buttons |= mouse_report.buttons;
                         hid_state.mouse.x += mouse_report.x;
                         hid_state.mouse.y += mouse_report.y;
                         hid_state.mouse_changed = 1;
@@ -130,6 +114,10 @@ _Noreturn void hid_thread(void *args) {
                 move_mouse(&hid_state.mouse);
             }
             hid_state.mouse_changed = 0;
+            hid_state.mouse.old_buttons = hid_state.mouse.buttons;
+            hid_state.mouse.buttons = 0;
+            hid_state.mouse.x = 0;
+            hid_state.mouse.y = 0;
         }
 
         moe_yield();
@@ -137,5 +125,5 @@ _Noreturn void hid_thread(void *args) {
 }
 
 void hid_init() {
-    moe_create_thread(hid_thread, priority_highest, 0, "HID");
+    moe_create_thread(hid_thread, priority_realtime, 0, "HID");
 }
