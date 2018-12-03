@@ -284,7 +284,7 @@ int cmd_noiz2bg(int argc, char** argv) {
     scene_count = FPS * 10;
 
     moe_rect_t frame = {{-1, -1}, {SCREEN_W, SCREEN_H}};
-    moe_view_t *window = moe_create_window(&frame, MOE_WS_CLIENT_RECT | MOE_WS_CAPTION | MOE_WS_BORDER, 0, "Noiz2bg");
+    moe_window_t *window = moe_create_window(&frame, MOE_WS_CLIENT_RECT | MOE_WS_CAPTION | MOE_WS_BORDER, 0, "Noiz2bg");
     moe_set_active_window(window);
 
     if (!dib) {
@@ -292,7 +292,8 @@ int cmd_noiz2bg(int argc, char** argv) {
         dib = moe_create_dib(&size, 0, 0);
     }
 
-    while(1) {
+    uintptr_t event;
+    while ((event = moe_get_event(window, 1000))) {
         moveBackground();
         drawBackground((unsigned char *)dib->dib);
         moe_blt_to_window(window, dib);
@@ -302,9 +303,7 @@ int cmd_noiz2bg(int argc, char** argv) {
             scene_count = FPS * 20;
             setStageBackground( scene );
         }
-        moe_usleep(1000);
     }
-
     moe_destroy_window(window);
 
     return 0;

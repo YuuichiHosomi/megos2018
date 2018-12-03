@@ -227,7 +227,7 @@ static uint32_t ATOP_conv_glyph(uint32_t c) {
 
 static void ATOP_draw_char(ATOP_Context* self, int x, int y, wchar_t c, uint32_t color) {
     if(x<0 || x >= self->cols || y<0 || y >= self->rows) return;
-    const uint8_t* font = self->font_data + (c-0x20) * (self->font_w8 * font_h);
+    const uint8_t* font = self->font_data + (c-0x20) * (self->font_w8 * self->font_h);
     ATOP_draw_pattern(self, ATOP_col_to_x(self, x), ATOP_row_to_y(self, y)+self->font_offset, self->font_w, self->font_h, font, color);
 }
 
@@ -510,12 +510,12 @@ EFIAPI EFI_STATUS ATOP_init(
     ctx->mode.MaxMode = sizeof(mode_templates)/sizeof(mode_templates[0]);
     ctx->mode.Mode = -1;
 
-    ctx->font_w = font_w;
-    ctx->font_h = font_h;
-    ctx->font_w8 = (font_w+7)/8;
-    ctx->font_data = font_data;
-    ctx->line_height = font_h+((font_h*3)>>4);
-    ctx->font_offset = (ctx->line_height-font_h)/2;
+    ctx->font_w = bootfont_w;
+    ctx->font_h = bootfont_h;
+    ctx->font_w8 = (bootfont_w+7)/8;
+    ctx->font_data = bootfont_data;
+    ctx->line_height = bootfont_h+((bootfont_h*3)>>4);
+    ctx->font_offset = (ctx->line_height-bootfont_h)/2;
 
     buffer->Mode = (SIMPLE_TEXT_OUTPUT_MODE*)ctx;
     buffer->Reset = ATOP_RESET;

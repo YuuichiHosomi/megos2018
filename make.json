@@ -27,7 +27,8 @@
                 "shell",
                 "stdlib",
                 "noiz2bg",
-                "mkasm.asm"
+                "cpuid",
+                "moeasm.asm"
             ]
         }
     }

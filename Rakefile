@@ -21,6 +21,7 @@ end
 VENDOR_NAME     = "MOE"
 PATH_BIN        = "bin/"
 PATH_SRC        = "src/"
+PATH_SRC_FONTS  = "#{PATH_SRC}fonts/"
 PATH_OBJ        = "obj/"
 PATH_MNT        = "mnt/"
 PATH_EFI_BOOT   = "#{PATH_MNT}EFI/BOOT/"
@@ -49,7 +50,8 @@ else
   raise "UNKNOWN ARCH #{ARCH}"
 end
 
-BOOTFONT_INC  = "#{PATH_SRC}bootfont.h"
+BOOTFONT_INC  = "#{PATH_SRC_FONTS}bootfont.h"
+SMALLFONT_INC  = "#{PATH_SRC_FONTS}smallfont.h"
 
 if RUBY_PLATFORM =~ /darwin/ then
   LLVM_PREFIX     = `brew --prefix llvm`.gsub(/\n/, '')
@@ -59,17 +61,16 @@ else
   CC      = ENV['CC'] || "clang"
   LD      = ENV['LD'] || "lld-link-6.0"
 end
-CFLAGS  = "-Os -std=c11 -fno-stack-protector -fshort-wchar -mno-red-zone -nostdlibinc -I #{PATH_INC} -I #{PATH_SRC} -Wall -Wpedantic -fno-exceptions"
+CFLAGS  = "-Os -std=c11 -fno-stack-protector -fshort-wchar -mno-red-zone -nostdlibinc -I #{PATH_INC} -I #{PATH_SRC} -I #{PATH_SRC_FONTS} -Wall -Wpedantic -fno-exceptions"
 AS      = ENV['AS'] || "nasm"
 AFLAGS  = "-s -I #{ PATH_SRC }"
 LFLAGS  = "-subsystem:efi_application -nodefaultlib -entry:efi_main"
 
 INCS  = [FileList["#{PATH_SRC}*.h"], FileList["#{PATH_INC}*.h"]]
-INCS << BOOTFONT_INC
 
 CLEAN.include(FileList["#{PATH_BIN}**/*"])
 CLEAN.include(FileList["#{PATH_OBJ}**/*"])
-CLEAN.include(BOOTFONT_INC)
+CLEAN.include(FileList["#{PATH_SRC_FONTS}/*.h"])
 CLEAN.include(CP932_BIN)
 
 directory PATH_OBJ
@@ -104,21 +105,25 @@ task :format do
 end
 
 
-file BOOTFONT_INC => "#{PATH_SRC}bootfont.fnt" do |t|
-  bin = File.binread(t.prerequisites[0]).unpack('C*')
-  font_w = bin[14]
-  font_h = bin[15]
-  font_w8 = (font_w+7)/8;
-  bin.shift(17 + 32*font_w8*font_h)
-  data = 96.times.map do
-    (font_w8*font_h).times.map do
-      '0x%02x' % bin.shift()
-    end.join(',')
-  end
-  File.open(t.name, 'w') do |file|
-    file.puts '// AUTO GENERATED bootfont.h'
-    file.puts "const int font_w=#{font_w}, font_h=#{font_h};"
-    file.puts "const uint8_t font_data[] = {\n#{ data.join(",\n") }\n};"
+def font_def(dest, src)
+  name = File.basename(dest, '.h')
+  INCS << dest
+  file dest => src do |t|
+    bin = File.binread(t.prerequisites[0]).unpack('C*')
+    font_w = bin[14]
+    font_h = bin[15]
+    font_w8 = (font_w+7)/8;
+    bin.shift(17 + 32*font_w8*font_h)
+    data = 96.times.map do
+      (font_w8*font_h).times.map do
+        '0x%02x' % bin.shift()
+      end.join(',')
+    end
+    File.open(t.name, 'w') do |file|
+      file.puts "// AUTO GENERATED #{name}.h"
+      file.puts "const int #{name}_w=#{font_w}, #{name}_h=#{font_h};"
+      file.puts "const uint8_t #{name}_data[] = {\n#{ data.join(",\n") }\n};"
+    end
   end
 end
 
@@ -269,6 +274,9 @@ end
 namespace :main do
 
   targets = []
+
+  font_def BOOTFONT_INC, "#{PATH_SRC_FONTS}bootfont.fnt"
+  font_def SMALLFONT_INC, "#{PATH_SRC_FONTS}megh0608.fnt"
 
   json = File.open("make.json") do |file|
     JSON.load(file)

@@ -37,30 +37,36 @@ int pseudo_app_launch(pseudo_main main, int argc, char** argv) {
 }
 
 typedef struct {
-    char* name;
+    char *name;
     pseudo_main proc;
     int separate_thread;
+    char *tips; 
 } command_list_t;
 
 int cmd_ver(int argc, char **argv);
+int cmd_help(int argc, char **argv);
 int cmd_cls(int argc, char **argv);
 int cmd_reboot(int argc, char **argv);
+int cmd_exit(int argc, char **argv);
 extern int cmd_mem(int argc, char **argv);
 extern int cmd_win(int argc, char **argv);
 extern int cmd_ps(int argc, char **argv);
+extern int cmd_cpuid(int, char**);
 extern int cmd_noiz2bg(int, char**);
 extern int cmd_top(int argc, char **argv);
 
 command_list_t commands[] = {
-    { "cls", cmd_cls, 0 },
-    { "ver", cmd_ver, 0 },
-    { "memory", cmd_mem, 0 },
-    { "windows", cmd_win, 0 },
-    { "ps", cmd_ps, 0 },
-    { "noiz2bg", cmd_noiz2bg, 1 },
-    { "top", cmd_top, 1 },
-    { "reboot", cmd_reboot, 0 },
-    // { "exit", cmd_exit },
+    { "help", cmd_help, 0, "Show help" },
+    { "cls", cmd_cls, 0, "Clear screen" },
+    { "ver", cmd_ver, 0, "Display version info" },
+    { "reboot", cmd_reboot, 0, "Restart computer" },
+    { "exit", cmd_exit, 0, "Exit shell" },
+    { "memory", cmd_mem, 0, "Display memory info" },
+    { "windows", cmd_win, 0, "Display window list" },
+    { "ps", cmd_ps, 0, "Display thread list" },
+    { "cpuid", cmd_cpuid, 0, "Display cpuid info" },
+    { "noiz2bg", cmd_noiz2bg, 1, "DEMO" },
+    { "top", cmd_top, 1, "Graphical Task list" },
     { NULL, NULL },
 };
 
@@ -122,9 +128,9 @@ command_list_t commands[] = {
 // }
 
 
-int zgetchar(moe_view_t *window) {
+int zgetchar(moe_window_t *window) {
     for(;;) {
-        uintptr_t event = moe_get_event(window);
+        uintptr_t event = moe_get_event(window, -1);
         uint32_t c = moe_translate_key_event(window, event);
         if (c != INVALID_UNICHAR) {
             return c;
@@ -133,7 +139,7 @@ int zgetchar(moe_view_t *window) {
 }
 
 
-int read_cmdline(moe_view_t *window, char* buffer, size_t max_len) {
+int read_cmdline(moe_window_t *window, char* buffer, size_t max_len) {
     int cont_flag = 1;
     int len = 0, limit = max_len - 1;
 
@@ -186,6 +192,14 @@ int cmd_cls(int argc, char **argv) {
     return 0;
 }
 
+int cmd_help(int argc, char **argv) {
+    for (int i = 0; commands[i].name; i++) {
+        command_list_t cmd = commands[i];
+        printf("%s\t%s\n", cmd.name, cmd.tips);
+    }
+    return 0;
+}
+
 int cmd_ver(int argc, char **argv) {
     printf("%s v%d.%d.%d\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION);
     return 0;
@@ -196,16 +210,21 @@ int cmd_reboot(int argc, char **argv) {
     return 0;
 }
 
+int cmd_exit(int argc, char **argv) {
+    moe_shutdown_system();
+    return 0;
+}
+
 
 //  Pseudo shell
 #define MAX_CMDLINE 80
 #define MAX_ARGV    256
 #define MAX_ARGBUFF 256
 
-extern void console_init(moe_console_context_t *self, moe_view_t* view, moe_dib_t *dib, const moe_edge_insets_t* insets);
+extern void console_init(moe_console_context_t *self, moe_window_t* window, moe_dib_t *dib, const moe_edge_insets_t* insets);
 _Noreturn void pseudo_shell(void* args) {
 
-    moe_view_t *window;
+    moe_window_t *window;
 
     // Init root console
     {
@@ -220,7 +239,7 @@ _Noreturn void pseudo_shell(void* args) {
 
     int argc;
     char* argv[MAX_ARGV];
-    char cmdline[MAX_CMDLINE];
+    char con_buff[MAX_CMDLINE];
     char arg_buff[MAX_ARGBUFF];
 
     cmd_ver(0, 0);
@@ -229,10 +248,10 @@ _Noreturn void pseudo_shell(void* args) {
 
     for (;;) {
         printf("# ");
-        read_cmdline(window, cmdline, MAX_CMDLINE);
-        memset(arg_buff, 0, MAX_ARGBUFF);
+        read_cmdline(window, con_buff, MAX_CMDLINE);
+        strncpy(arg_buff, con_buff, MAX_ARGBUFF);
 
-        char *p = cmdline;
+        char *p = arg_buff;
         for (int cont = 1; cont; ) {
             char c = *p;
             switch(c) {
@@ -315,7 +334,7 @@ _Noreturn void statusbar_thread(void *args) {
 
     moe_size_t screen_size = moe_get_screen_size();
     moe_rect_t rect_statusbar = {{0, 0}, {screen_size.width, 22}};
-    moe_view_t *statusbar = moe_create_window(&rect_statusbar, MOE_WS_CLIENT_RECT, window_level_higher, "Statusbar");
+    moe_window_t *statusbar = moe_create_window(&rect_statusbar, MOE_WS_CLIENT_RECT, window_level_higher, "Statusbar");
     moe_set_window_bgcolor(statusbar, statusbar_bgcolor);
     moe_dib_t *statusbar_dib = moe_get_window_bitmap(statusbar);
 
@@ -332,7 +351,7 @@ _Noreturn void statusbar_thread(void *args) {
 
     {
         moe_point_t origin = {4, padding_y};
-        moe_draw_string(statusbar_dib, &origin, NULL, "@ | File  Edit  View  Window  Help", fgcolor);
+        moe_draw_string(statusbar_dib, NULL, &origin, NULL, "@ | File  Edit  View  Window  Help", fgcolor);
     }
 
     moe_edge_insets_t insets = {rect_statusbar.size.height, 0, 0, 0};
@@ -341,7 +360,8 @@ _Noreturn void statusbar_thread(void *args) {
 
     moe_rect_t rect_redraw = {{rect_u.origin.x, 0}, {rect_statusbar.size.width - rect_u.origin.x, rect_statusbar.size.height - 2}};
 
-    for (;;) {
+    uintptr_t event;
+    while ((event = moe_get_event(statusbar, 250000))) {
         moe_fill_rect(statusbar_dib, &rect_redraw, statusbar_bgcolor);
 
         uint32_t now = ((time_base + moe_get_measure()) / 1000000LL);
@@ -349,20 +369,20 @@ _Noreturn void statusbar_thread(void *args) {
         unsigned time1 = (now / 60) % 60;
         unsigned time2 = (now / 3600) % 24;
         snprintf(buff, size_buff, "%02d:%02d:%02d", time2, time1, time0);
-        moe_draw_string(statusbar_dib, NULL, &rect_c, buff, fgcolor);
+        moe_draw_string(statusbar_dib, NULL, NULL, &rect_c, buff, fgcolor);
 
         int usage = moe_get_usage();
         int usage0 = usage % 10;
         int usage1 = usage / 10;
         snprintf(buff, size_buff, "%3d.%1d%%", usage1, usage0);
-        moe_draw_string(statusbar_dib, NULL, &rect_u, buff, fgcolor);
+        moe_draw_string(statusbar_dib, NULL, NULL, &rect_u, buff, fgcolor);
 
         moe_invalidate_rect(statusbar, &rect_redraw);
-        moe_usleep(250000);
     }
+    moe_exit_thread(0);
 }
 
-_Noreturn void key_tester_thread(void *args) {
+_Noreturn void key_test_thread(void *args) {
     const size_t max_buff = 16;
     char buff[max_buff+1];
     memset(buff, 0, max_buff+1);
@@ -372,12 +392,12 @@ _Noreturn void key_tester_thread(void *args) {
 
     moe_size_t screen_size = moe_get_screen_size();
     int width = 160;
-    moe_rect_t frame = {{screen_size.width - width - 8, 96}, {width, 56}};
-    moe_view_t *window = moe_create_window(&frame, MOE_WS_CAPTION, 0, "Key Test");
+    moe_rect_t frame = {{screen_size.width - width - 8, 32}, {width, 56}};
+    moe_window_t *window = moe_create_window(&frame, MOE_WS_CAPTION, 0, "Key Test");
     moe_show_window(window);
 
     uintptr_t event;
-    while ((event = moe_get_event(window))) {
+    while ((event = moe_get_event(window, -1))) {
         uint32_t c = moe_translate_key_event(window, event);
         if (c != INVALID_UNICHAR) {
             if (c == '\b' && ptr > 0) {
@@ -387,7 +407,7 @@ _Noreturn void key_tester_thread(void *args) {
             }
             moe_rect_t rect = moe_get_client_rect(window);
             moe_fill_rect(moe_get_window_bitmap(window), &rect, bgcolor);
-            moe_draw_string(moe_get_window_bitmap(window), NULL, &rect, buff, fgcolor);
+            moe_draw_string(moe_get_window_bitmap(window), NULL, NULL, &rect, buff, fgcolor);
             moe_invalidate_rect(window, NULL);
         }
     }
@@ -399,8 +419,8 @@ _Noreturn void button_test_thread(void *args) {
 
     moe_size_t screen_size = moe_get_screen_size();
     int width = 160, height = 120;
-    moe_rect_t frame = {{screen_size.width - width - 8, 160}, {width, height}};
-    moe_view_t *window = moe_create_window(&frame, MOE_WS_CAPTION, 0, "Button Test");
+    moe_rect_t frame = {{screen_size.width - width - 8, 96}, {width, height}};
+    moe_window_t *window = moe_create_window(&frame, MOE_WS_CAPTION, 0, "Button Test");
 
     int button_width = 120, button_height = 24;
     int cursor = 0;
@@ -408,30 +428,33 @@ _Noreturn void button_test_thread(void *args) {
 
     {
         cursor+= button_height + 4;
+        moe_point_t origin = {32, 2};
         moe_rect_t rect = {{(width - button_width)/2, cursor}, {button_width, button_height}};
         moe_fill_round_rect(dib, &rect, 4, 0xFF3366FF);
         moe_draw_round_rect(dib, &rect, 4, 0xFF2244AA);
-        moe_draw_string(dib, NULL, &rect, " Default", 0xFFFFFFFF);
+        moe_draw_string(dib, NULL, &origin, &rect, "Default", 0xFFFFFFFF);
     }
 
     {
         cursor+= button_height + 4;
+        moe_point_t origin = {16, 2};
         moe_rect_t rect = {{(width - button_width)/2, cursor}, {button_width, button_height}};
         moe_fill_round_rect(dib, &rect, 4, 0xFFFF3366);
         moe_draw_round_rect(dib, &rect, 4, 0xFFAA2244);
-        moe_draw_string(dib, NULL, &rect, " Destructive", 0xFFFFFFFF);
+        moe_draw_string(dib, NULL, &origin, &rect, "Destructive", 0xFFFFFFFF);
     }
 
     {
         cursor+= button_height + 4;
+        moe_point_t origin = {40, 2};
         moe_rect_t rect = {{(width - button_width)/2, cursor}, {button_width, button_height}};
         moe_draw_round_rect(dib, &rect, 4, 0xFF777777);
-        moe_draw_string(dib, NULL, &rect, " Other", 0xFF555555);
+        moe_draw_string(dib, NULL, &origin, &rect, "Other", 0xFF555555);
     }
 
     moe_show_window(window);
     uintptr_t event;
-    while ((event = moe_get_event(window))) {
+    while ((event = moe_get_event(window, -1))) {
         ;
     }
     moe_exit_thread(0);
@@ -448,7 +471,7 @@ _Noreturn void start_init(void* args) {
 
     moe_create_thread(&statusbar_thread, 0, 0, "statusbar");
     moe_create_thread(&pseudo_shell, 0, 0, "shell");
-    moe_create_thread(&key_tester_thread, 0, 0, "key test");
+    moe_create_thread(&key_test_thread, 0, 0, "key test");
     moe_create_thread(&button_test_thread, 0, 0, "button test");
 
     for (;;) { moe_usleep(100000); }

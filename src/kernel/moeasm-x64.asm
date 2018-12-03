@@ -82,21 +82,21 @@ io_finit:
     clts
     fninit
     xorps xmm0, xmm0
-    movq xmm1, xmm0
-    movq xmm2, xmm0
-    movq xmm3, xmm0
-    movq xmm4, xmm0
-    movq xmm5, xmm0
-    movq xmm6, xmm0
-    movq xmm7, xmm0
-    movq xmm8, xmm0
-    movq xmm9, xmm0
-    movq xmm10, xmm0
-    movq xmm11, xmm0
-    movq xmm12, xmm0
-    movq xmm13, xmm0
-    movq xmm14, xmm0
-    movq xmm15, xmm0
+    xorps xmm1, xmm1
+    xorps xmm2, xmm2
+    xorps xmm3, xmm3
+    xorps xmm4, xmm4
+    xorps xmm5, xmm5
+    xorps xmm6, xmm6
+    xorps xmm7, xmm7
+    xorps xmm8, xmm8
+    xorps xmm9, xmm9
+    xorps xmm10, xmm10
+    xorps xmm11, xmm11
+    xorps xmm12, xmm12
+    xorps xmm13, xmm13
+    xorps xmm14, xmm14
+    xorps xmm15, xmm15
     ret
 
 
