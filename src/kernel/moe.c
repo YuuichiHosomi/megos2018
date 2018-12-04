@@ -14,8 +14,9 @@
 #define CLEANUP_LOAD_TIME   1000000
 #define DEFAULT_SCHEDULE_SIZE   1024
 #define DEFAULT_SCHEDULE_QUEUES 2
-#define PREEMPT_PENALTY     0
-// 10000
+#define PREEMPT_PENALTY     10000
+#define MAX_KARMAN          10
+#define MIN_KARMAN          -10
 
 
 typedef uint32_t moe_affinity_t;
@@ -161,25 +162,9 @@ moe_thread_t *sch_next(uint32_t cpuid) {
     return core_data[cpuid].idle;
 }
 
-void moe_unlock_core() {
-    uint32_t eflags = io_lock_irq();
-    int cpuid = moe_get_current_cpuid();
+static void unlock_core(uint32_t cpuid) {
     atomic_bit_test_and_clear(&thread_queue.core_lock, cpuid);
-    io_unlock_irq(eflags);
 }
-
-// moe_affinity_t lock_all_cores() {
-//     moe_affinity_t old_lock = 0;
-//     while (!atomic_compare_exchange_strong(&thread_queue.core_lock, &old_lock, system_affinity)) {
-//         io_pause();
-//     }
-//     return old_lock;
-// }
-
-// int unlock_all_cores(moe_affinity_t lock) {
-//     moe_affinity_t expected = system_affinity;
-//     return atomic_compare_exchange_strong(&thread_queue.core_lock, &expected, lock);
-// }
 
 //  Context Swicth
 static void next_thread(uint32_t cpuid, moe_thread_t* current, void *obj, moe_timer_t timer) {
@@ -208,15 +193,15 @@ static void next_thread(uint32_t cpuid, moe_thread_t* current, void *obj, moe_ti
                     MOE_ASSERT(false, "WTF? #%d %08zx(%d) != %08zx(%d)\n", cpuid, (uintptr_t)expected_current, expected_current->thid, (uintptr_t)current, current->thid);
                 }
             }
-            uint32_t new_cpuid = moe_get_current_cpuid();
+            cpuid = moe_get_current_cpuid();
             current->measure0 = moe_get_measure();
-            current->last_cpuid = new_cpuid;
+            current->last_cpuid = cpuid;
             current->running = 1;
-            sch_retire(core_data[new_cpuid].retired);
+            sch_retire(core_data[cpuid].retired);
         } else {
             current->measure0 = moe_get_measure();
         }
-        moe_unlock_core();
+        unlock_core(cpuid);
     }
 }
 
@@ -227,7 +212,7 @@ void on_thread_start() {
     current->last_cpuid = cpuid;
     current->running = 1;
     sch_retire(core_data[cpuid].retired);
-    moe_unlock_core();
+    unlock_core(cpuid);
 }
 
 //  Lazy FPU restore
@@ -258,9 +243,18 @@ void reschedule() {
         uint32_t load = atomic_fetch_add(&current->load00, cload);
         if (load + cload > CONSUME_QUANTUM_THRESHOLD) {
             atomic_fetch_sub(&current->load00, CONSUME_QUANTUM_THRESHOLD);
+            int8_t karman = current->karman;
+            karman--;
+            current->karman = MAX(karman, MIN_KARMAN);
             if (atomic_fetch_add(&current->quantum_left, -1) <= 0) {
-                uint8_t quantum = current->quantum;
-                current->quantum = MAX(quantum, current->quantum_min);
+                if (karman > 0) {
+                    current->karman = 0;
+                }
+                if (karman < 0) {
+                    uint8_t quantum = current->quantum;
+                    quantum--;
+                    current->quantum = MAX(quantum, current->quantum_min);
+                }
                 atomic_fetch_add(&current->quantum_left, current->quantum);
                 next_thread(cpuid, current, NULL, moe_create_interval_timer(PREEMPT_PENALTY));
             }
@@ -271,11 +265,11 @@ void reschedule() {
 }
 
 void moe_yield() {
-    if (!core_data) {
+    if (core_data) {
+        moe_usleep(0);
+    } else {
         io_hlt();
-        return;
     }
-    moe_usleep(0);
 }
 
 int moe_wait_for_object(void *obj, uint64_t us) {
@@ -289,13 +283,15 @@ int moe_wait_for_object(void *obj, uint64_t us) {
 }
 
 int moe_usleep(uint64_t us) {
-    if (!core_data) {
+    if (core_data) {
+        return moe_wait_for_object(NULL, us);
+    } else {
         moe_timer_t timer = moe_create_interval_timer(us);
         while (moe_check_timer(&timer)) {
             io_hlt();
         }
+        return 0;
     }
-    return moe_wait_for_object(NULL, us);
 }
 
 int moe_signal_object(moe_thread_t *thread, void *obj) {
@@ -325,7 +321,7 @@ moe_thread_t* create_thread(moe_thread_start start, moe_priority_level_t priorit
     new_thread->priority = priority;
     if (priority) {
         new_thread->quantum_min = priority;
-        new_thread->quantum_max = priority * priority * priority;
+        new_thread->quantum_max = DEFAULT_QUANTUM * priority * priority;
         new_thread->quantum = new_thread->quantum_max;
         new_thread->quantum_left = new_thread->quantum_max;
     }
@@ -339,6 +335,7 @@ moe_thread_t* create_thread(moe_thread_start start, moe_priority_level_t priorit
         uintptr_t* stack = mm_alloc_static(stack_size);
         memset(stack, 0, stack_size);
         uintptr_t* sp = stack + stack_count;
+        *--sp = 0;
         *--sp = 0x00007fffdeadbeef;
         *--sp = (uintptr_t)args;
         *--sp = (uintptr_t)start;
@@ -375,12 +372,21 @@ _Noreturn void scheduler_thread() {
         int64_t measure = moe_get_measure();
         if ((measure - last_cleanup_load_measure) >= CLEANUP_LOAD_TIME) {
 
-            //  Update load
             moe_thread_t* thread = root_thread;
             for (; thread; thread = thread->next) {
                 int load = atomic_load(&thread->load0);
                 atomic_store(&thread->load, load);
                 atomic_fetch_add(&thread->load0, -load);
+                if (thread->priority) {
+                    int8_t karman = thread->karman;
+                    karman++;
+                    thread->karman = MIN(karman, MAX_KARMAN);
+                    if (karman > 0) {
+                        uint8_t quantum = thread->quantum;
+                        quantum++;
+                        thread->quantum = MIN(quantum, thread->quantum_max);
+                    }
+                }
             }
 
             last_cleanup_load_measure = measure;
@@ -582,7 +588,8 @@ int cmd_top(int argc, char **argv) {
         moe_rect_t rect = moe_get_client_rect(window);
         moe_point_t cursor = *moe_point_zero;
         moe_set_window_bgcolor(window, bgcolor);
-        cursor = moe_draw_string(moe_get_window_bitmap(window), font, &cursor, &rect, "ID context  attr     signal   usage cpu time   name\n", fgcolor);
+        cursor = moe_draw_string(moe_get_window_bitmap(window), font, &cursor, &rect,
+        "ID context  attr     quan  usage cpu time   name\n", fgcolor);
 
         moe_thread_t* p = root_thread;
         for (; p; p = p->next) {
@@ -593,9 +600,10 @@ int cmd_top(int argc, char **argv) {
             int usage = p->load / 1000;
             if (usage > 999) usage = 999;
             int usage0 = usage % 10, usage1 = usage / 10;
-            snprintf(buff, buff_size, "%2d %08zx %08x %08zx %2d.%d%% %4u:%02u:%02u %s\n",
+            snprintf(buff, buff_size, "%2d %08zx %08x %2d/%2d %2d.%d%% %4u:%02u:%02u %s\n",
                 (int)p->thid, (uintptr_t)p, p->flags,
-                (uintptr_t)p->signal_object,
+                // (uintptr_t)p->signal_object,
+                p->quantum_left, p->quantum,
                 usage1, usage0, time2, time1, time0,
                 p->name);
             cursor = moe_draw_string(moe_get_window_bitmap(window), font, &cursor, &rect, buff, fgcolor);

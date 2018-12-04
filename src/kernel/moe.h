@@ -60,6 +60,7 @@ typedef struct moe_font_t moe_font_t;
 #define MOE_DIB_ALPHA       0x0001
 #define MOE_DIB_COLOR_KEY   0x0100
 #define MOE_DIB_ROTATE      0x0200
+#define MOE_DIB_UNMANAGED   0x1000
 
 extern const moe_point_t *moe_point_zero;
 extern const moe_size_t *moe_size_zero;

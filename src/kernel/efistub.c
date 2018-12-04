@@ -64,6 +64,7 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
         bootinfo.screen.width = gop->Mode->Info->HorizontalResolution;
         bootinfo.screen.height = gop->Mode->Info->VerticalResolution;
         bootinfo.screen.delta = gop->Mode->Info->PixelsPerScanLine;
+        bootinfo.screen.flags = MOE_DIB_UNMANAGED;
     }
 
     // Exit BootServices

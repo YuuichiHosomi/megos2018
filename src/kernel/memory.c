@@ -116,6 +116,7 @@ void mm_init(moe_bootinfo_mmap_t* mmap) {
 
     static_start = kma_base;
     free_memory = kma_size * PAGE_SIZE;
+    memset32((void*)static_start, 0xdeadbeef, free_memory / 4);
 
 }
 

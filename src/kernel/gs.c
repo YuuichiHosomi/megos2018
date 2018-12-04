@@ -82,9 +82,16 @@ moe_size_t get_glyph_size(moe_font_t *self, uint32_t code) {
     }
 }
 
+moe_size_t draw_glyph(moe_font_t *self, moe_dib_t *dib, moe_point_t *origin, uint32_t code, uint32_t color) {
+    moe_size_t size = {0,0};
+    return size;
+}
+
 void init_simple_font(moe_font_t *self, int width, int height, int line_height, uint8_t *data, uint32_t flags) {
     int font_w8 = (width + 7) >> 3;
+    self->vt_test_glyph = NULL;
     self->vt_get_glyph = NULL;
+    self->vt_get_glyph_size = NULL;
     self->context = data;
     self->ex = width;
     self->em = height;
@@ -660,7 +667,7 @@ moe_point_t moe_draw_string(moe_dib_t *dib, moe_font_t *font, moe_point_t *_curs
         }
         if (cursor.origin.y + cursor.size.height > bottom) break;
 
-        if (uc >= 0x20) {
+        if (test_glyph(font, uc)) {
             draw_pattern(dib, &font_rect, get_glyph(font, uc), color);
             cursor.origin.x += font_rect.size.width;
         }

@@ -371,9 +371,9 @@ _Noreturn void statusbar_thread(void *args) {
         snprintf(buff, size_buff, "%02d:%02d:%02d", time2, time1, time0);
         moe_draw_string(statusbar_dib, NULL, NULL, &rect_c, buff, fgcolor);
 
-        int usage = moe_get_usage();
-        int usage0 = usage % 10;
-        int usage1 = usage / 10;
+        unsigned usage = moe_get_usage();
+        unsigned usage0 = usage % 10;
+        unsigned usage1 = usage / 10;
         snprintf(buff, size_buff, "%3d.%1d%%", usage1, usage0);
         moe_draw_string(statusbar_dib, NULL, NULL, &rect_u, buff, fgcolor);
 

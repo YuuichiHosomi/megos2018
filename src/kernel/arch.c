@@ -7,9 +7,13 @@
 #include "x86.h"
 
 
-extern _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stacks);
-extern uint16_t gdt_init(void);
-extern void idt_load(volatile void*, size_t);
+typedef union {
+    uint64_t u64;
+    struct {
+        uint32_t eax, edx;
+    };
+} tuple_eax_edx_t;
+
 extern void* _int00;
 extern void* _int03;
 extern void* _int06;
@@ -21,17 +25,52 @@ extern void* _irq01;
 extern void* _irq02;
 extern void* _irq0C;
 extern void* _ipi_sche;
-uint64_t io_rdmsr(uint32_t addr);
-void io_wrmsr(uint32_t addr, uint64_t val);
 
-void io_out8(uint16_t port, uint8_t val);
-uint8_t io_in8(uint16_t port);
-void io_out32(uint16_t port, uint32_t val);
-uint32_t io_in32(uint16_t port);
+extern uint16_t gdt_init(void);
+extern void idt_load(volatile void*, size_t);
+extern _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stacks);
+extern void thread_init(int n_active_cpu);
+extern void reschedule();
 
-void thread_init(int n_active_cpu);
-void reschedule();
-extern int snprintf(char* buffer, size_t n, const char* format, ...);
+
+static uint8_t io_in8(uint16_t const port) {
+    uint8_t al;
+    if (port < 0x100) {
+        __asm__ volatile("inb %1, %%al": "=a"(al): "n"(port));
+    } else {
+        __asm__ volatile("inb %%dx, %%al": "=a"(al): "d"(port));
+    }
+    return al;
+}
+
+static void io_out8(uint16_t const port, uint8_t val) {
+    if (port < 0x100) {
+        __asm__ volatile("outb %%al, %0": : "n"(port), "a"(val));
+    } else {
+        __asm__ volatile("outb %%al, %%dx": : "d"(port), "a"(val));
+    }
+}
+
+
+static void io_out32(uint16_t const port, uint32_t val) {
+    __asm__ volatile("outl %%eax, %%dx": : "d"(port), "a"(val));
+}
+
+static uint32_t io_in32(uint16_t const port) {
+    uint32_t eax;
+    __asm__ volatile("inl %%dx, %%eax": "=a"(eax): "d"(port));
+    return eax;
+}
+
+static tuple_eax_edx_t io_rdmsr(uint32_t const addr) {
+    tuple_eax_edx_t result;
+    __asm__ volatile ("rdmsr": "=a"(result.eax), "=d"(result.edx) : "c"(addr));
+    return result;
+}
+
+static void io_wrmsr(uint32_t const addr, tuple_eax_edx_t val) {
+    __asm__ volatile ("wrmsr": : "c"(addr), "d"(val.edx), "a"(val.eax));
+}
 
 
 /*********************************************************************/
@@ -212,8 +251,8 @@ uintptr_t moe_get_current_cpuid() {
 }
 
 void apic_init_ap(uint8_t cpuid) {
-    uint64_t msr_lapic = io_rdmsr(IA32_APIC_BASE_MSR);
-    msr_lapic |= IA32_APIC_BASE_MSR_ENABLE;
+    tuple_eax_edx_t msr_lapic = io_rdmsr(IA32_APIC_BASE_MSR);
+    msr_lapic.u64 |= IA32_APIC_BASE_MSR_ENABLE;
     io_wrmsr(IA32_APIC_BASE_MSR, msr_lapic);
 
     uint8_t apicid = READ_PHYSICAL_UINT32(lapic_base + 0x20) >> 24;
@@ -239,10 +278,10 @@ void apic_init() {
         gsi_table[1] = gsi_irq01;
 
         //  Setup Local APIC
-        uint64_t msr_lapic = io_rdmsr(IA32_APIC_BASE_MSR);
-        msr_lapic |= IA32_APIC_BASE_MSR_ENABLE;
+        tuple_eax_edx_t msr_lapic = io_rdmsr(IA32_APIC_BASE_MSR);
+        msr_lapic.u64 |= IA32_APIC_BASE_MSR_ENABLE;
         io_wrmsr(IA32_APIC_BASE_MSR, msr_lapic);
-        lapic_base = msr_lapic & ~0xFFF;
+        lapic_base = msr_lapic.u64 & ~0xFFF;
 
         apic_ids[n_cpu++] = READ_PHYSICAL_UINT32(lapic_base + 0x20) >> 24;
 
@@ -305,13 +344,11 @@ void apic_init() {
 
         //  Disable Legacy PIC
         if (madt->Flags & ACPI_MADT_PCAT_COMPAT) {
-            __asm__ volatile (
-                // "cli\n"
-                "movb $0xFF, %%al\n"
-                "outb %%al, $0xA1\n"
-                "outb %%al, $0x21\n"
-                :::"%al");
+            io_out8(0xA1, 0xFF);
+            io_out8(0x21, 0xFF);
         }
+
+        // Then enable IRQ
         __asm__ volatile("sti");
 
     }

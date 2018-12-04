@@ -34,10 +34,7 @@
 ; int atomic_bit_test(void *p, uintptr_t bit);
     global atomic_bit_test
 atomic_bit_test:
-    mov rax, rdx
-    shr rax, 3
-    and edx, 7
-    bt [rcx+rax], edx
+    bt [rcx], edx
     sbb eax, eax
     neg eax
     ret
@@ -46,10 +43,7 @@ atomic_bit_test:
 ; int atomic_bit_test_and_set(void *p, uintptr_t bit);
     global atomic_bit_test_and_set
 atomic_bit_test_and_set:
-    mov rax, rdx
-    shr rax, 3
-    and edx, 7
-    lock bts [rcx+rax], edx
+    lock bts [rcx], edx
     sbb eax, eax
     neg eax
     ret
@@ -58,10 +52,7 @@ atomic_bit_test_and_set:
 ; int atomic_bit_test_and_clear(void *p, uintptr_t bit);
     global atomic_bit_test_and_clear
 atomic_bit_test_and_clear:
-    mov rax, rdx
-    shr rax, 3
-    and edx, 7
-    lock btr [rcx+rax], edx
+    lock btr [rcx], edx
     sbb eax, eax
     neg eax
     ret
@@ -129,7 +120,8 @@ _new_thread:
     sti
     pop rax
     pop rcx
-    jmp rax
+    call rax
+    ud2
 
 
 ; int _setjmp(jmp_buf env);
@@ -182,59 +174,6 @@ _longjmp:
     inc eax
 .nozero:
     jmp rdx
-
-
-; uint64_t io_rdmsr(uint32_t addr);
-    global io_rdmsr
-io_rdmsr:
-    rdmsr
-    mov eax, eax
-    shl rdx, 32
-    or rax, rdx
-    ret
-
-
-; void io_wrmsr(uint32_t addr, uint64_t val);
-    global io_wrmsr
-io_wrmsr:
-    mov rax, rdx
-    shr rdx, 32
-    wrmsr
-    ret
-
-
-; void io_out8(uint16_t port, uint8_t val);
-    global io_out8
-io_out8:
-    mov al, dl
-    mov edx, ecx
-    out dx, al
-    ret
-
-
-; uint8_t io_in8(uint16_t port);
-    global io_in8
-io_in8:
-    mov edx, ecx
-    in al, dx
-    ret
-
-
-; void io_out32(uint16_t port, uint32_t val);
-    global io_out32
-io_out32:
-    mov eax, edx
-    mov edx, ecx
-    out dx, eax
-    ret
-
-
-; uint32_t io_in32(uint16_t port);
-    global io_in32
-io_in32:
-    mov edx, ecx
-    in eax, dx
-    ret
 
 
 ; uint32_t io_lock_irq(void);
@@ -522,17 +461,6 @@ _startup_ap:
     ud2
 
 
-[BITS 32]
-_startup32:
-
-    ; enter to LM
-    mov eax, cr0
-    bts eax, 31
-    mov cr0, eax
-
-    jmp far [ebx + BOOTINFO_START64]
-
-
 [BITS 16]
 _mp_rm_payload:
     cli
@@ -541,15 +469,15 @@ _mp_rm_payload:
     mov ebx, BOOT_INFO
 
     ; acquire core-id
+    mov al, [bx]
     mov cl, [bx + BOOTINFO_MAX_CPU]
 .loop:
-    mov al, [bx]
     cmp al, cl
     jae .fail
     mov dl, al
     inc dx
     lock cmpxchg [bx], dl
-    jz .resolv
+    jz .core_ok
     pause
     jmp short .loop
 .fail:
@@ -557,7 +485,7 @@ _mp_rm_payload:
     hlt
     jmp short .forever
 
-.resolv:
+.core_ok:
     movzx ebp, al
 
 
@@ -586,6 +514,17 @@ _mp_rm_payload:
 
     jmp dword far [bx + BOOTINFO_START32]
 _end_mp_rm_payload:
+
+
+[BITS 32]
+_startup32:
+
+    ; enter to LM
+    mov eax, cr0
+    bts eax, 31
+    mov cr0, eax
+
+    jmp far [ebx + BOOTINFO_START64]
 
 
 [section .data]
