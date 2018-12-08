@@ -162,9 +162,9 @@ int moe_check_timer(moe_timer_t*);
 uint64_t moe_get_measure();
 
 typedef struct moe_fifo_t moe_fifo_t;
-moe_fifo_t *moe_fifo_init(uintptr_t capacity);
+moe_fifo_t *moe_fifo_init(size_t capacity);
 intptr_t moe_fifo_read(moe_fifo_t *self, intptr_t default_val);
 int moe_fifo_read_and_wait(moe_fifo_t* self, intptr_t* result, uint64_t us);
 int moe_fifo_write(moe_fifo_t *self, intptr_t data);
-uintptr_t moe_fifo_get_estimated_count(moe_fifo_t *self);
-uintptr_t moe_fifo_get_estimated_free(moe_fifo_t *self);
+size_t moe_fifo_get_estimated_count(moe_fifo_t *self);
+size_t moe_fifo_get_estimated_free(moe_fifo_t *self);

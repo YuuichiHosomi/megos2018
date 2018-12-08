@@ -51,9 +51,10 @@ uint32_t palette[] = {
 };
 
 #include "bootfont.h"
+#include "msgrfont.h"
 #include "smallfont.h"
 
-moe_font_t system_font, smallfont;
+moe_font_t system_font, smallfont, msgrfont;
 
 
 int test_glyph(moe_font_t *self, uint32_t code) {
@@ -109,7 +110,10 @@ moe_font_t *moe_get_system_font(int type) {
     switch (type) {
         case 1:
             return &smallfont;
-        
+
+        case 2:
+            return &msgrfont;
+
         default:
             return &system_font;
     }
@@ -136,10 +140,17 @@ static int row_to_y(moe_console_context_t *self, int y) {
 
 
 moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color) {
-    size_t dibsz = size->width * size->height * sizeof(uint32_t);
+
     moe_dib_t *self = mm_alloc_static(sizeof(moe_dib_t));
-    uint32_t *bitmap = mm_alloc_static(dibsz);
-    self->dib = bitmap;
+
+    if ((flags & MOE_DIB_UNMANAGED) == 0) {
+        size_t dibsz = size->width * size->height * sizeof(uint32_t);
+        uint32_t *bitmap = mm_alloc_static(dibsz);
+        self->dib = bitmap;
+        memset32(bitmap, color, size->width * size->height);
+    } else {
+        self->dib = 0;
+    }
     self->width = size->width;
     self->height = size->height;
     self->delta = size->width;
@@ -147,43 +158,42 @@ moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color) {
     if (flags & MOE_DIB_COLOR_KEY) {
         self->color_key = color;
     }
-    memset32(bitmap, color, self->height * self->delta);
     return self;
 }
 
 
-void blt_test(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect) {
-    unsigned dx = origin->x, dy = origin->y;
-    unsigned sx = rect->origin.x, sy = rect->origin.y, w = rect->size.width, h = rect->size.height;
+// void blt_test(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect) {
+//     unsigned dx = origin->x, dy = origin->y;
+//     unsigned sx = rect->origin.x, sy = rect->origin.y, w = rect->size.width, h = rect->size.height;
 
-    uint32_t *p = dest->dib;
-    p += dx + dy * dest->delta;
-    uint32_t *q = src->dib;
-    q += sx + sy * src->delta;
-    uintptr_t dd = dest->delta - w, sd = src->delta - w;
+//     uint32_t *p = dest->dib;
+//     p += dx + dy * dest->delta;
+//     uint32_t *q = src->dib;
+//     q += sx + sy * src->delta;
+//     uintptr_t dd = dest->delta - w, sd = src->delta - w;
 
-    if (1) {
+//     if (1) {
 
-        for (uintptr_t i = 0; i < h; i++) {
-            #pragma clang loop vectorize(enable) interleave(enable)
-            for (uintptr_t j = 0; j < w; j++) {
-                uint8_t *p0 = (uint8_t*)p;
-                uint8_t *q0 = (uint8_t*)q;
-                uint8_t alpha = q0[3];
-                uint8_t alpha_n = 255 - alpha;
-                p0[0] = (q0[0] * alpha + p0[0] * alpha_n) / 256;
-                p0[1] = (q0[1] * alpha + p0[1] * alpha_n) / 256;
-                p0[2] = (q0[2] * alpha + p0[2] * alpha_n) / 256;
-                p0[3] = (q0[3] * alpha + p0[3] * alpha_n) / 256;
-                // p0[3] = 0;
-                p++, q++;
-            }
-            p += dd;
-            q += sd;
-        }
+//         for (uintptr_t i = 0; i < h; i++) {
+//             #pragma clang loop vectorize(enable) interleave(enable)
+//             for (uintptr_t j = 0; j < w; j++) {
+//                 uint8_t *p0 = (uint8_t*)p;
+//                 uint8_t *q0 = (uint8_t*)q;
+//                 uint8_t alpha = q0[3];
+//                 uint8_t alpha_n = 255 - alpha;
+//                 p0[0] = (q0[0] * alpha + p0[0] * alpha_n) / 256;
+//                 p0[1] = (q0[1] * alpha + p0[1] * alpha_n) / 256;
+//                 p0[2] = (q0[2] * alpha + p0[2] * alpha_n) / 256;
+//                 p0[3] = (q0[3] * alpha + p0[3] * alpha_n) / 256;
+//                 // p0[3] = 0;
+//                 p++, q++;
+//             }
+//             p += dd;
+//             q += sd;
+//         }
 
-    }
-}
+//     }
+// }
 
 
 void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect, uint32_t options) {
@@ -816,8 +826,9 @@ void gs_init(moe_dib_t* screen) {
     main_screen_dib = *screen;
 
     init_simple_font(&system_font, bootfont_w, bootfont_h, 0, (void*)bootfont_data, 0);
+    init_simple_font(&msgrfont, msgrfont_w, msgrfont_h, 0, (void*)msgrfont_data, 0);
     init_simple_font(&smallfont, smallfont_w, smallfont_h, 0, (void*)smallfont_data, 0);
-    main_console.font = &system_font;
+    main_console.font = &msgrfont;
 
     current_console = &main_console;
     int padding_x = system_font.ex * 2;

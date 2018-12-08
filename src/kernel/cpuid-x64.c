@@ -1,6 +1,6 @@
 // CPUID pseudo application
+// License: WTFPL
 #include "moe.h"
-#include "x86.h"
 
 
 typedef union {
@@ -123,7 +123,6 @@ int cmd_cpuid(int argc, char **argv) {
         }
     }
     printf("\n");
-
 
     return 0;
 }

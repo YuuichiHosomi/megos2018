@@ -234,11 +234,11 @@ void reschedule() {
     //TODO: assert(cli)
     uint32_t cpuid = moe_get_current_cpuid();
     moe_thread_t* current = core_data[cpuid].current;
-    if (current->quantum > 0) {
-        if (current->priority < priority_high && moe_fifo_get_estimated_count(thread_queue.ready[0])) {
-            next_thread(cpuid, current, NULL, 0);
-            return;
-        }
+    if (current->priority >= priority_realtime) {
+        // do nothing
+    } else if (current->priority == priority_idle || (current->priority < priority_high && moe_fifo_get_estimated_count(thread_queue.ready[0]))) {
+        next_thread(cpuid, current, NULL, 0);
+    } else {
         uint32_t cload = moe_get_thread_load(current);
         uint32_t load = atomic_fetch_add(&current->load00, cload);
         if (load + cload > CONSUME_QUANTUM_THRESHOLD) {
@@ -259,8 +259,6 @@ void reschedule() {
                 next_thread(cpuid, current, NULL, moe_create_interval_timer(PREEMPT_PENALTY));
             }
         }
-    } else {
-        next_thread(cpuid, current, NULL, 0);
     }
 }
 
@@ -300,7 +298,6 @@ int moe_signal_object(moe_thread_t *thread, void *obj) {
         thread->block = 0;
         return 0;
     } else {
-        // MOE_ASSERT(false, "BAD SIGNAL (%d %08zx %08zx)\n", thread->thid, expected, obj);
         return -1;
     }
 }
@@ -408,8 +405,7 @@ void thread_init(int _n_active_cpu) {
 
     char name[THREAD_NAME_SIZE];
     n_active_cpu = _n_active_cpu;
-    uintptr_t size = n_active_cpu * sizeof(core_specific_data_t);
-
+    size_t size = n_active_cpu * sizeof(core_specific_data_t);
     core_specific_data_t* _core_data = mm_alloc_static(size);
     memset(_core_data, 0, size);
 
@@ -446,7 +442,7 @@ typedef struct moe_fifo_t {
 } moe_fifo_t;
 
 
-moe_fifo_t* moe_fifo_init(uintptr_t capacity) {
+moe_fifo_t* moe_fifo_init(size_t capacity) {
     moe_fifo_t* self = mm_alloc_static(sizeof(moe_fifo_t));
     self->waiting = NULL;
     self->data = mm_alloc_static(capacity * sizeof(uintptr_t));
@@ -484,29 +480,25 @@ intptr_t moe_fifo_read(moe_fifo_t* self, intptr_t default_val) {
 }
 
 int moe_fifo_read_and_wait(moe_fifo_t* self, intptr_t* result, uint64_t us) {
-    if (fifo_read(self, result)) {
-        return 1;
-    }
     if (us) {
         moe_thread_t *current = get_current_thread();
-        moe_thread_t *expected = NULL;
-        if (atomic_compare_exchange_strong(&self->waiting, &expected, current)) {
-            moe_wait_for_object(self, us);
-            expected = current;
-            if (atomic_compare_exchange_strong(&self->waiting, &expected, NULL)) {
-                current->signal_object = NULL;
-            }
-            if (fifo_read(self, result)) {
-                return 1;
-            } else {
-                return 0;
-            }
+        self->waiting = current;
+        if (fifo_read(self, result)) {
+            return 1;
+        }
+        moe_wait_for_object(self, us);
+        if (fifo_read(self, result)) {
+            return 1;
         } else {
-            MOE_ASSERT(false, "FIFO ALREADY IN USE (%d %d)\n", expected->thid, current->thid);
             return 0;
         }
-    } else {
         return 0;
+    } else {
+        if (fifo_read(self, result)) {
+            return 1;
+        } else {
+            return 0;
+        }
     }
 }
 
@@ -519,14 +511,7 @@ int moe_fifo_write(moe_fifo_t* self, intptr_t data) {
             atomic_fetch_add_explicit(&self->count, 1, memory_order_seq_cst);
 
             moe_thread_t *waiting = atomic_load(&self->waiting);
-            while (waiting) {
-                if (atomic_compare_exchange_strong(&self->waiting, &waiting, NULL)) {
-                    moe_signal_object(waiting, self);
-                    break;
-                } else {
-                    io_pause();
-                }
-            }
+            moe_signal_object(waiting, self);
 
             return 0;
         } else {
@@ -536,11 +521,11 @@ int moe_fifo_write(moe_fifo_t* self, intptr_t data) {
     return -1;
 }
 
-uintptr_t moe_fifo_get_estimated_count(moe_fifo_t* self) {
+size_t moe_fifo_get_estimated_count(moe_fifo_t* self) {
     return atomic_load(&self->count);
 }
 
-uintptr_t moe_fifo_get_estimated_free(moe_fifo_t* self) {
+size_t moe_fifo_get_estimated_free(moe_fifo_t* self) {
     return atomic_load(&self->free);
 }
 

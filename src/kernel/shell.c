@@ -245,6 +245,7 @@ _Noreturn void pseudo_shell(void* args) {
     cmd_ver(0, 0);
     // printf("Hello, world!\n");
     // moe_alert("Hello", "Hello, world!", 0);
+    // cmd_ps(0, 0);
 
     for (;;) {
         printf("# ");

@@ -50,8 +50,9 @@ else
   raise "UNKNOWN ARCH #{ARCH}"
 end
 
-BOOTFONT_INC  = "#{PATH_SRC_FONTS}bootfont.h"
-SMALLFONT_INC  = "#{PATH_SRC_FONTS}smallfont.h"
+BOOTFONT_INC    = "#{PATH_SRC_FONTS}bootfont.h"
+SMALLFONT_INC   = "#{PATH_SRC_FONTS}smallfont.h"
+MSGRFONT_INC    = "#{PATH_SRC_FONTS}msgrfont.h"
 
 if RUBY_PLATFORM =~ /darwin/ then
   LLVM_PREFIX     = `brew --prefix llvm`.gsub(/\n/, '')
@@ -121,8 +122,8 @@ def font_def(dest, src)
     end
     File.open(t.name, 'w') do |file|
       file.puts "// AUTO GENERATED #{name}.h"
-      file.puts "const int #{name}_w=#{font_w}, #{name}_h=#{font_h};"
-      file.puts "const uint8_t #{name}_data[] = {\n#{ data.join(",\n") }\n};"
+      file.puts "static const int #{name}_w=#{font_w}, #{name}_h=#{font_h};"
+      file.puts "static const uint8_t #{name}_data[] = {\n#{ data.join(",\n") }\n};"
     end
   end
 end
@@ -277,6 +278,7 @@ namespace :main do
 
   font_def BOOTFONT_INC, "#{PATH_SRC_FONTS}bootfont.fnt"
   font_def SMALLFONT_INC, "#{PATH_SRC_FONTS}megh0608.fnt"
+  font_def MSGRFONT_INC, "#{PATH_SRC_FONTS}megmsgr.fnt"
 
   json = File.open("make.json") do |file|
     JSON.load(file)

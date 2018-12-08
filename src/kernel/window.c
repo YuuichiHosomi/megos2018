@@ -11,6 +11,8 @@
 #define MAX_EVENT_QUEUE     64
 #define DEFAULT_WAIT_EVENT_TIME 1000000
 
+#define MOE_EVENT_CHAR_MIN  0x00000001
+#define MOE_EVENT_CHAR_MAX  0x0000FFFF
 #define MOE_EVENT_KEY_MIN   0x00010000
 #define MOE_EVENT_KEY_MAX   0x0001FFFF
 #define MOE_EVENT_TIMEOUT   0x000FFFFE
@@ -690,6 +692,10 @@ int moe_send_key_event(moe_hid_keyboard_report_t *report) {
     return -1;
 }
 
+int moe_send_char_event(moe_window_t *window, uint32_t code) {
+    return moe_send_event(window, code);
+}
+
 int moe_send_event(moe_window_t *window, uintptr_t event) {
     int result = moe_fifo_write(window->event_queue, event);
     if (result) set_not_responding_window(window);
@@ -772,7 +778,9 @@ _Noreturn void window_thread(void* args) {
             move_window(mouse_cursor, &mouse_point);
         }
 
-        uintptr_t event = moe_get_event(wm_state.root, 0);
+        uintptr_t event;
+        event = moe_get_event(wm_state.root, 0);
+        event = moe_get_event(mouse_cursor, 0);
 
         if (atomic_bit_test_and_clear(&wm_state.global_flags, global_flag_redraw_request)) {
             int sl = -1;

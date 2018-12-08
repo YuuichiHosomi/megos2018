@@ -10,9 +10,11 @@ struct {
     int mouse_changed;
 } hid_state;
 
-extern int ps2_init();
+static moe_fifo_t *ps2_fifo = NULL;
+
+extern int ps2_init(moe_fifo_t **fifo);
 int ps2_exists = 0;
-extern int ps2_parse_data(moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* mouse_report);
+extern int ps2_parse_data(intptr_t data, moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* mouse_report);
 extern void move_mouse(moe_hid_mouse_report_t* mouse_report);
 
 
@@ -68,8 +70,6 @@ uint32_t hid_scan_to_unicode(uint8_t scan, uint8_t modifier) {
 // HID Thread
 _Noreturn void hid_thread(void *args) {
 
-    ps2_exists = ps2_init();
-
     for (;;) {
         int cont;
         do {
@@ -77,11 +77,12 @@ _Noreturn void hid_thread(void *args) {
             moe_hid_keyboard_report_t keyreport;
 
             cont = 0;
-            if (ps2_exists) {
-                int state = ps2_parse_data(&keyreport, &mouse_report);
+            intptr_t ps2_data;
+            if (moe_fifo_read_and_wait(ps2_fifo, &ps2_data, 1000000)) {
+                int state = ps2_parse_data(ps2_data, &keyreport, &mouse_report);
 
                 switch(state) {
-                    case 1:
+                    case hid_ps2_key_report_enabled:
                         if (keyreport.keydata[0]) {
                             if ((keyreport.keydata[0] & 0x7F) == SCAN_DELETE &&
                                 (keyreport.modifier & (0x11)) != 0 && (keyreport.modifier & (0x44)) != 0) {
@@ -91,7 +92,7 @@ _Noreturn void hid_thread(void *args) {
                         }
                         break;
 
-                    case 2:
+                    case hid_ps2_mouse_report_enabled:
                     {
                         hid_state.mouse.buttons |= mouse_report.buttons;
                         hid_state.mouse.x += mouse_report.x;
@@ -100,7 +101,7 @@ _Noreturn void hid_thread(void *args) {
                     }
                         break;
 
-                    case 3:
+                    case hid_ps2_continued:
                         cont = 1;
                 }
             }
@@ -120,10 +121,12 @@ _Noreturn void hid_thread(void *args) {
             hid_state.mouse.y = 0;
         }
 
-        moe_yield();
     }
 }
 
 void hid_init() {
-    moe_create_thread(hid_thread, priority_realtime, 0, "HID");
+    ps2_init(&ps2_fifo);
+    if (ps2_fifo) {
+        moe_create_thread(hid_thread, priority_realtime, 0, "hid-ps2");
+    }
 }
