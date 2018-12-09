@@ -1,7 +1,8 @@
 // MEG-OS Boot Loader for EFI
-// Copyright (c) 1998,2000,2018 MEG-OS project, All rights reserved.
+// Copyright (c) 2018 MEG-OS project, All rights reserved.
 // License: BSD
 #include "osldr.h"
+#include "acpi.h"
 #include "rsrc.h"
 
 
@@ -29,6 +30,7 @@ CONST EFI_GUID EfiEdidActiveProtocolGuid = EFI_EDID_ACTIVE_PROTOCOL_GUID;
 CONST EFI_GUID EfiEdidDiscoveredProtocolGuid = EFI_EDID_DISCOVERED_PROTOCOL_GUID;
 CONST EFI_GUID EfiDevicePathProtocolGuid = EFI_DEVICE_PATH_PROTOCOL_GUID;
 CONST EFI_GUID EfiDevicePathToTextProtocolGuid = EFI_DEVICE_PATH_TO_TEXT_PROTOCOL_GUID;
+CONST EFI_GUID efi_acpi_20_table_guid = EFI_ACPI_20_TABLE_GUID;
 
 
 int printf(const char*, ...);
@@ -60,6 +62,44 @@ EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL* cout = NULL;
 EFI_GRAPHICS_OUTPUT_PROTOCOL* gop = NULL;
 int edid_x = 0, edid_y = 0;
 EFI_FILE_HANDLE sysdrv = NULL;
+
+acpi_rsd_ptr_t* rsdp = NULL;
+acpi_xsdt_t* xsdt = NULL;
+int n_entries_xsdt = 0;
+
+
+static inline int IsEqualGUID(CONST EFI_GUID* guid1, CONST EFI_GUID* guid2) {
+    uint64_t* p = (uint64_t*)guid1;
+    uint64_t* q = (uint64_t*)guid2;
+    return (p[0] == q[0]) && (p[1] == q[1]);
+}
+
+static void* efi_find_config_table(EFI_SYSTEM_TABLE *st, CONST EFI_GUID* guid) {
+    for (int i = 0; i < st->NumberOfTableEntries; i++) {
+        EFI_CONFIGURATION_TABLE* tab = st->ConfigurationTable + i;
+        if (IsEqualGUID(&tab->VendorGuid, guid)) {
+            return tab->VendorTable;
+        }
+    }
+    return NULL;
+}
+
+static int is_equal_signature(const void* p1, const void* p2) {
+    const uint32_t* _p1 = (const uint32_t*)p1;
+    const uint32_t* _p2 = (const uint32_t*)p2;
+    return (*_p1 == *_p2);
+}
+
+void* acpi_find_table(const char* signature) {
+    if (!xsdt) return NULL;
+    for (int i = 0; i < n_entries_xsdt; i++) {
+        acpi_header_t *entry = (acpi_header_t *)xsdt->Entry[i];
+        if (is_equal_signature(entry->signature, signature)) {
+            return entry;
+        }
+    }
+    return NULL;
+}
 
 
 CHAR16 *devicePathToText(EFI_DEVICE_PATH_PROTOCOL* path) {
@@ -520,6 +560,38 @@ EFI_STATUS start_os() {
 }
 
 
+void efi_blt_bmp(uint8_t *bmp, int offset_x, int offset_y) {
+    int bmp_w = *((uint32_t*)(bmp + 18));
+    int bmp_h = *((uint32_t*)(bmp + 22));
+    int bmp_bpp = *((uint16_t*)(bmp + 28));
+    int bmp_bpp8 = (bmp_bpp + 7) / 8;
+    int bmp_delta = (bmp_bpp8 * bmp_w + 3) & 0xFFFFFFFC;
+    const uint8_t* msdib = bmp + *((uint32_t*)(bmp + 10));
+
+    EFI_GRAPHICS_OUTPUT_BLT_PIXEL *blt_buffer = malloc(bmp_w * bmp_h * sizeof(EFI_GRAPHICS_OUTPUT_BLT_PIXEL));
+    uint32_t *q = (uint32_t*)blt_buffer;
+    UINTN blt_delta = bmp_w * sizeof(EFI_GRAPHICS_OUTPUT_BLT_PIXEL);
+
+    switch (bmp_bpp) {
+        case 24:
+        case 32:
+            for (int i = bmp_h - 1; i >= 0; i--) {
+                const uint8_t* p = msdib + (i * bmp_delta);
+                for (int j = 0; j < bmp_w; j++) {
+                    uint32_t rgb = (p[j * bmp_bpp8 + 0]) + (p[j * bmp_bpp8 + 1] << 8) + (p[j * bmp_bpp8 + 2] << 16);
+                    *q++ = rgb;
+                }
+            }
+            break;
+    }
+
+    gop->Blt(gop, blt_buffer, EfiBltBufferToVideo, 0, 0, offset_x, offset_y, bmp_w, bmp_h, blt_delta);
+
+    free(blt_buffer);
+}
+
+
+
 EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE _image, IN EFI_SYSTEM_TABLE *st) {
     EFI_STATUS status;
 
@@ -529,6 +601,10 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE _image, IN EFI_SYSTEM_TABLE *st) {
     gRT = st->RuntimeServices;
     image = _image;
     cout = gST->ConOut;
+
+    rsdp = efi_find_config_table(st, &efi_acpi_20_table_guid);
+    xsdt = (acpi_xsdt_t*)(rsdp->xsdtaddr);
+    n_entries_xsdt = (xsdt->Header.length - 0x24) / sizeof(xsdt->Entry[0]);
 
     //	Prepare filesystem
     {
@@ -574,8 +650,14 @@ cp932_exit:
     BOOLEAN menu_flag = FALSE;
     // cout->SetAttribute(cout, 0x17);
     cout->ClearScreen(cout);
-    printf("%d %d", edid_x, edid_y);
-    print_center(-5, get_string(rsrc_starting));
+    // printf("%d %d", edid_x, edid_y);
+    acpi_bgrt_t* bgrt = NULL;
+    if (gop) bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
+    if (bgrt) {
+        efi_blt_bmp((uint8_t *)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
+    } else {
+        print_center(-5, get_string(rsrc_starting));
+    }
     for(int t = 2; t>0; t--) {
         char buffer[256];
         snprintf(buffer, 256, get_string(rsrc_press_esc_to_menu), t);
