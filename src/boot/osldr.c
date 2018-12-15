@@ -658,7 +658,7 @@ cp932_exit:
     } else {
         print_center(-5, get_string(rsrc_starting));
     }
-    for(int t = 2; t>0; t--) {
+    for(int t = 2; t > 0; t--) {
         char buffer[256];
         snprintf(buffer, 256, get_string(rsrc_press_esc_to_menu), t);
         print_center(-2, buffer);

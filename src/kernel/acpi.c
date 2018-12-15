@@ -1,5 +1,5 @@
 // Minimal ACPI Support
-// Copyright (c) 1998,2018 MEG-OS project, All rights reserved.
+// Copyright (c) 2018 MEG-OS project, All rights reserved.
 // License: BSD
 #include "moe.h"
 #include "kernel.h"

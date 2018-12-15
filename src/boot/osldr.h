@@ -1,5 +1,5 @@
 // Include file for MEG-OS Loader
-// Copyright (c) 1998,2000,2018 MEG-OS project, All rights reserved.
+// Copyright (c) 2018 MEG-OS project, All rights reserved.
 // License: BSD
 #pragma once
 

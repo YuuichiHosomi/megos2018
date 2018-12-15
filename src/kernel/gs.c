@@ -162,6 +162,12 @@ moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color) {
 }
 
 
+// int rgb32_to_luminance(uint32_t rgb) {
+//     uint32_t r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+//     return ((r * 19589 + g * 38444 + b * 7502) + 32767) >> 16;
+// }
+
+
 // void blt_test(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect) {
 //     unsigned dx = origin->x, dy = origin->y;
 //     unsigned sx = rect->origin.x, sy = rect->origin.y, w = rect->size.width, h = rect->size.height;
@@ -568,7 +574,7 @@ void moe_draw_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t
 
     int d = 1 - radius, dh = 3, dd = 5 - 2 * radius;
     int cx = 0, cy = radius;
-    int bx, by, dw, qh = h - 1;
+    int qh = h - 1;
 
     for (; cx <= cy; cx++) {
         if (d < 0) {
@@ -581,9 +587,9 @@ void moe_draw_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t
             cy--;
         }
 
-        bx = radius - cy, by = radius - cx;
         {
-            dw = w - bx * 2 - 1;
+            int bx = radius - cy, by = radius - cx;
+            int dw = w - bx * 2 - 1;
             moe_point_t points[] = {
                 {dx + bx, dy + by },
                 {dx + bx, dy + qh - by },
@@ -593,9 +599,9 @@ void moe_draw_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t
             moe_draw_multi_pixels(dest, 4, points, color);
         }
 
-        bx = radius - cx, by = radius - cy;
         {
-            dw = w - bx * 2 - 1;
+            int bx = radius - cx, by = radius - cy;
+            int dw = w - bx * 2 - 1;
             moe_point_t points[] = {
                 {dx + bx, dy + by },
                 {dx + bx, dy + qh - by },
@@ -828,7 +834,7 @@ void gs_init(moe_dib_t* screen) {
     init_simple_font(&system_font, bootfont_w, bootfont_h, 0, (void*)bootfont_data, 0);
     init_simple_font(&msgrfont, msgrfont_w, msgrfont_h, 0, (void*)msgrfont_data, 0);
     init_simple_font(&smallfont, smallfont_w, smallfont_h, 0, (void*)smallfont_data, 0);
-    main_console.font = &msgrfont;
+    main_console.font = &system_font;
 
     current_console = &main_console;
     int padding_x = system_font.ex * 2;

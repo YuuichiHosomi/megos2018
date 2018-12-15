@@ -60,7 +60,7 @@ if RUBY_PLATFORM =~ /darwin/ then
   LD      = ENV['LD'] || "#{LLVM_PREFIX}/bin/lld-link"
 else
   CC      = ENV['CC'] || "clang"
-  LD      = ENV['LD'] || "lld-link-6.0"
+  LD      = ENV['LD'] || "lld-link-7.0"
 end
 CFLAGS  = "-Os -std=c11 -fno-stack-protector -fshort-wchar -mno-red-zone -nostdlibinc -I #{PATH_INC} -I #{PATH_SRC} -I #{PATH_SRC_FONTS} -Wall -Wpedantic -fno-exceptions"
 AS      = ENV['AS'] || "nasm"

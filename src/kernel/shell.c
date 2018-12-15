@@ -73,60 +73,6 @@ command_list_t commands[] = {
 
 /*********************************************************************/
 
-// int rgb32_to_luminance(uint32_t rgb) {
-//     uint32_t r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
-//     return ((r * 19589 + g * 38444 + b * 7502) + 32767) >> 16;
-// }
-
-// void draw_logo_bitmap(moe_dib_t* screen, const uint8_t* bmp, int offset_x, int offset_y) {
-//     uintptr_t offset = *((uint32_t*)(bmp + 10));
-//     int bmp_w = *((uint32_t*)(bmp + 18));
-//     int bmp_h = *((uint32_t*)(bmp + 22));
-//     int bmp_bpp = *((uint16_t*)(bmp + 28));
-//     int bmp_bpp8 = (bmp_bpp + 7) / 8;
-//     int bmp_ppl = (bmp_bpp8 * bmp_w + 3) & 0xFFFFFFFC;
-//     int delta = screen->delta;
-//     const uint8_t* dib = bmp+offset;
-
-//     if (offset_x < 0) offset_x = (screen->width - bmp_w) / 2;
-//     if (offset_y < 0) offset_y = (screen->height - bmp_h) / 2;
-
-//     moe_rect_t rect = { { offset_x, offset_y}, {bmp_w, bmp_h} };
-//     uint32_t* vram = screen->dib;
-//     vram += offset_x + offset_y * delta;
-
-//     switch (bmp_bpp) {
-//         case 24:
-//         case 32:
-//             for (int i = bmp_h-1; i >= 0; i--) {
-//                 const uint8_t* p = dib + (i * bmp_ppl);
-//                 for (int j = 0; j < bmp_w; j++) {
-//                     uint32_t rgb = (p[j * bmp_bpp8 + 0]) + (p[j * bmp_bpp8 + 1] * 0x100) + (p[j * bmp_bpp8 + 2] * 0x10000);
-//                     if (rgb) {
-//                         uint8_t b = 255 - rgb32_to_luminance(rgb);
-//                         vram[j] = b + (b<<8) + (b<<16);
-//                     }
-//                 }
-//                 vram += delta;
-//             }
-//             break;
-
-//         case 8:
-//             for (int i = bmp_h-1; i >= 0; i--) {
-//                 const uint8_t* p = dib + (i * bmp_ppl);
-//                 for (int j = 0; j < bmp_w; j++) {
-//                     float alpha = p[j * bmp_bpp8 + 0] / 255.0;
-//                     uint8_t* vram8 = (uint8_t*)(vram+j);
-//                     for (int k = 0; k < 3; k++) {
-//                         vram8[k] = vram8[k] * alpha;
-//                     }
-//                 }
-//                 vram += delta;
-//             }
-//             break;
-//     }
-// }
-
 
 int zgetchar(moe_window_t *window) {
     for(;;) {
