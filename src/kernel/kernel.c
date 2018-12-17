@@ -31,7 +31,8 @@ extern void arch_init();
 extern void acpi_init(acpi_rsd_ptr_t* rsd);
 extern void gs_init(moe_dib_t* screen);
 extern void mm_init(moe_bootinfo_mmap_t* mmap);
-extern void hid_init();
+extern void lpc_init();
+// extern void hid_init();
 extern void window_init();
 
 extern void display_threads();
@@ -98,7 +99,8 @@ _Noreturn void start_kernel(moe_bootinfo_t* bootinfo) {
     arch_init();
 
     window_init();
-    hid_init();
+    // hid_init();
+    lpc_init();
 
     moe_create_thread(&start_init, 0, 0, "init");
 

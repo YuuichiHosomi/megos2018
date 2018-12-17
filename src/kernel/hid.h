@@ -5,6 +5,10 @@
 
 
 #define INVALID_UNICHAR     0xFFFE
+
+#define HID_USAGE_DELETE    0x004C
+#define HID_USAGE_MOD_MIN   0x00E0
+#define HID_USAGE_MOD_MAX   0x00E7
 #define HID_MOD_LCTRL       0x0001
 #define HID_MOD_LSHIFT      0x0002
 #define HID_MOD_LALT        0x0004

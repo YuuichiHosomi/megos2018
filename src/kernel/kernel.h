@@ -26,7 +26,9 @@ typedef struct {
 
 
 //  Architecture Specific
-typedef int (*IRQ_HANDLER)(int irq, void* context);
+typedef int (*MOE_IRQ_HANDLER)(int irq);
+int moe_enable_irq(uint8_t irq, MOE_IRQ_HANDLER handler);
+int moe_disable_irq(uint8_t irq);
 
 static inline void io_hlt() { __asm__ volatile("hlt"); }
 static inline void io_pause() { __asm__ volatile("pause"); }
@@ -47,3 +49,7 @@ int acpi_get_number_of_table_entries();
 void* acpi_enum_table_entry(int index);
 
 
+//  PCI
+uint32_t pci_get_register_address(uint8_t bus, uint8_t dev, uint8_t func, uint8_t reg);
+uint32_t pci_read_config_register(uint32_t base, uint8_t reg);
+void pci_write_config_register(uint32_t base, uint8_t reg, uint32_t val);

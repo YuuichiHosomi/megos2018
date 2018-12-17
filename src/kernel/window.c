@@ -18,8 +18,7 @@
 #define MOE_EVENT_TIMEOUT   0x000FFFFE
 #define NULL_EVENT          0x000FFFFF
 
-int getchar();
-uint32_t hid_scan_to_unicode(uint8_t scan, uint8_t modifier);
+uint32_t hid_usage_to_unicode(uint8_t usage, uint8_t modifier);
 
 #define IS_NOT_RESPONDING(window) atomic_bit_test(&window->state, window_state_not_responding)
 
@@ -53,6 +52,7 @@ typedef struct moe_window_t {
     moe_window_t *next;
     moe_dib_t *dib;
     moe_fifo_t *event_queue;
+    moe_view_t *view;
     void *context;
     moe_rect_t frame;
     union {
@@ -104,7 +104,7 @@ enum {
 
 #define MOUSE_CURSOR_WIDTH  12
 #define MOUSE_CURSOR_HEIGHT  20
-uint32_t mouse_cursor_palette[] = { 0x00FF00FF, 0xFF000000, 0xFFFFFFFF };
+uint32_t mouse_cursor_palette[] = { 0x00FF00FF, 0xFFFFFFFF, 0x80000000 };
 uint8_t mouse_cursor_source[MOUSE_CURSOR_HEIGHT][MOUSE_CURSOR_WIDTH] = {
     { 1, },
     { 1, 1, },
@@ -735,9 +735,9 @@ uintptr_t moe_get_event(moe_window_t *window, int wait) {
 
 uint32_t moe_translate_key_event(moe_window_t *window, uintptr_t event) {
     if (event > MOE_EVENT_KEY_MIN && event < MOE_EVENT_KEY_MAX) {
-        uint8_t scan = event;
+        uint8_t usage = event;
         uint8_t modifier = event >> 8;
-        uint32_t c = hid_scan_to_unicode(scan, modifier);
+        uint32_t c = hid_usage_to_unicode(usage, modifier);
         return c;
     }
     return INVALID_UNICHAR;

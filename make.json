@@ -23,6 +23,7 @@
                 "arch",
                 "page",
                 "hid",
+                "lpc",
                 "acpi",
                 "shell",
                 "stdlib",
