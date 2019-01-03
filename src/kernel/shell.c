@@ -7,11 +7,10 @@
 #include "hid.h"
 
 
-#define VER_SYSTEM_NAME     "Minimal Operating Environment"
-#define VER_SYSTEM_SHORT_NAME   "MOE"
+#define VER_SYSTEM_NAME     "codename MOE"
 #define VER_SYSTEM_MAJOR    0
 #define VER_SYSTEM_MINOR    5
-#define VER_SYSTEM_REVISION 3
+#define VER_SYSTEM_REVISION 4
 
 
 extern int putchar(char);
@@ -410,16 +409,10 @@ _Noreturn void button_test_thread(void *args) {
 
 _Noreturn void start_init(void* args) {
 
-    // //  Show BGRT (Boot Graphics Resource Table) from ACPI
-    // acpi_bgrt_t* bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
-    // if (bgrt) {
-    //     draw_logo_bitmap(?, (uint8_t*)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
-    // }
-
     moe_create_thread(&statusbar_thread, 0, 0, "statusbar");
     moe_create_thread(&pseudo_shell, 0, 0, "shell");
     moe_create_thread(&key_test_thread, 0, 0, "key test");
     moe_create_thread(&button_test_thread, 0, 0, "button test");
 
-    for (;;) { moe_usleep(100000); }
+    for (;;) { moe_usleep(1000000); }
 }

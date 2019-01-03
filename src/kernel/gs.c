@@ -51,10 +51,9 @@ uint32_t palette[] = {
 };
 
 #include "bootfont.h"
-#include "msgrfont.h"
 #include "smallfont.h"
 
-moe_font_t system_font, smallfont, msgrfont;
+moe_font_t system_font, smallfont;
 
 
 int test_glyph(moe_font_t *self, uint32_t code) {
@@ -110,9 +109,6 @@ moe_font_t *moe_get_system_font(int type) {
     switch (type) {
         case 1:
             return &smallfont;
-
-        case 2:
-            return &msgrfont;
 
         default:
             return &system_font;
@@ -832,7 +828,6 @@ void gs_init(moe_dib_t* screen) {
     main_screen_dib = *screen;
 
     init_simple_font(&system_font, bootfont_w, bootfont_h, 0, (void*)bootfont_data, 0);
-    init_simple_font(&msgrfont, msgrfont_w, msgrfont_h, 0, (void*)msgrfont_data, 0);
     init_simple_font(&smallfont, smallfont_w, smallfont_h, 0, (void*)smallfont_data, 0);
     main_console.font = &system_font;
 

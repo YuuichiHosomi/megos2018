@@ -8,20 +8,12 @@
 
 static uint8_t io_in8(uint16_t const port) {
     uint8_t al;
-    if (port < 0x100) {
-        __asm__ volatile("inb %1, %%al": "=a"(al): "n"(port));
-    } else {
-        __asm__ volatile("inb %%dx, %%al": "=a"(al): "d"(port));
-    }
+    __asm__ volatile("inb %1, %%al": "=a"(al): "n"(port));
     return al;
 }
 
 static void io_out8(uint16_t const port, uint8_t val) {
-    if (port < 0x100) {
-        __asm__ volatile("outb %%al, %0": : "n"(port), "a"(val));
-    } else {
-        __asm__ volatile("outb %%al, %%dx": : "d"(port), "a"(val));
-    }
+    __asm__ volatile("outb %%al, %0": : "n"(port), "a"(val));
 }
 
 
@@ -104,7 +96,7 @@ int ps2m_irq_handler(int irq) {
 }
 
 
-int ps2_parse_data(intptr_t data, moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* mouse_report) {
+static int ps2_parse_data(intptr_t data, moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* mouse_report) {
 
     if (data >= PS2_FIFO_MOUSE_MIN) {
         int m = (data - PS2_FIFO_MOUSE_MIN);

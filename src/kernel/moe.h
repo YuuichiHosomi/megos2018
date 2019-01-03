@@ -54,8 +54,10 @@ typedef struct moe_dib_t {
 } moe_dib_t;
 
 typedef struct moe_window_t moe_window_t;
+typedef struct moe_view_t moe_view_t;
 typedef struct moe_console_context_t moe_console_context_t;
 typedef struct moe_font_t moe_font_t;
+typedef struct moe_hid_keyboard_report_t moe_hid_keyboard_report_t;
 
 #define MOE_DIB_ALPHA       0x0001
 #define MOE_DIB_COLOR_KEY   0x0100
@@ -120,7 +122,6 @@ void moe_set_active_window(moe_window_t *window);
 void moe_set_window_title(moe_window_t *window, const char *title);
 int moe_alert(const char *title, const char *message, uint32_t flags);
 
-typedef struct moe_hid_keyboard_report_t moe_hid_keyboard_report_t;
 int moe_send_key_event(moe_hid_keyboard_report_t* report);
 int moe_send_event(moe_window_t *window, uintptr_t event);
 uintptr_t moe_get_event(moe_window_t *window, int wait);

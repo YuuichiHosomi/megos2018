@@ -74,6 +74,20 @@ enum {
     window_state_used = 31,
 };
 
+typedef struct moe_view_t {
+    moe_window_t *window;
+    moe_view_t *parent;
+    moe_rect_t frame;
+    union {
+        uint32_t flags;
+        struct {
+            int hoge;
+        };
+    };
+    uint32_t bgcolor;
+    int tag;
+} moe_view_t;
+
 
 extern moe_dib_t main_screen_dib;
 

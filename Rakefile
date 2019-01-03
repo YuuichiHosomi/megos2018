@@ -52,7 +52,6 @@ end
 
 BOOTFONT_INC    = "#{PATH_SRC_FONTS}bootfont.h"
 SMALLFONT_INC   = "#{PATH_SRC_FONTS}smallfont.h"
-MSGRFONT_INC    = "#{PATH_SRC_FONTS}msgrfont.h"
 
 if RUBY_PLATFORM =~ /darwin/ then
   LLVM_PREFIX     = `brew --prefix llvm`.gsub(/\n/, '')
@@ -278,7 +277,6 @@ namespace :main do
 
   font_def BOOTFONT_INC, "#{PATH_SRC_FONTS}bootfont.fnt"
   font_def SMALLFONT_INC, "#{PATH_SRC_FONTS}megh0608.fnt"
-  font_def MSGRFONT_INC, "#{PATH_SRC_FONTS}megmsgr.fnt"
 
   json = File.open("make.json") do |file|
     JSON.load(file)

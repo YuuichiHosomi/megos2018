@@ -95,7 +95,7 @@ typedef struct _acpi_madt_t {
 typedef struct _acpi_bgrt_t {
     acpi_header_t   Header;
     uint16_t    Version;
-    uint8_t     Starus, Image_Type;
+    uint8_t     Status, Image_Type;
     uint64_t    Image_Address;
     uint32_t    Image_Offset_X, Image_Offset_Y;
 } __attribute__((packed)) acpi_bgrt_t;
