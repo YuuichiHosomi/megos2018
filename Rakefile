@@ -28,6 +28,7 @@ PATH_EFI_BOOT   = "#{PATH_MNT}EFI/BOOT/"
 PATH_EFI_VENDOR = "#{PATH_MNT}EFI/#{VENDOR_NAME}/"
 PATH_INC        = "#{PATH_SRC}include/"
 CP932_BIN       = "#{PATH_EFI_VENDOR}cp932.bin"
+TARGET_ISO      = "var/moe.iso"
 
 case ARCH.to_sym
 when :x64
@@ -88,10 +89,15 @@ desc "Defaults"
 task :default => [PATH_OBJ, PATH_BIN, TASKS].flatten
 
 desc "Install to #{PATH_MNT}"
-task :install => [:default, PATH_EFI_BOOT, PATH_EFI_VENDOR, PATH_OVMF, CP932_BIN] do
+task :install => [:default, PATH_MNT, PATH_EFI_BOOT, PATH_EFI_VENDOR, PATH_OVMF, CP932_BIN] do
   (target, efi_suffix) = convert_arch(ARCH)
   FileUtils.cp("#{PATH_BIN}boot#{efi_suffix}.efi", "#{PATH_EFI_BOOT}boot#{efi_suffix}.efi")
   FileUtils.cp("#{PATH_BIN}krnl#{efi_suffix}.efi", "#{PATH_EFI_VENDOR}krnl#{efi_suffix}.efi")
+end
+
+desc "Make ISO image"
+task :iso => [PATH_MNT, :install] do
+  sh "mkisofs -r -J -o #{TARGET_ISO} #{PATH_MNT}"
 end
 
 desc "Run with QEMU"
