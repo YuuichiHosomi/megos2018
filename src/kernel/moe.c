@@ -432,36 +432,22 @@ void thread_init(int _n_active_cpu) {
 
 
 /*********************************************************************/
-//  First In, First Out method
+// Semaphore
 
-typedef struct moe_fifo_t {
+typedef struct moe_semaphore_t {
     _Atomic (moe_thread_t *) waiting;
-    _Atomic intptr_t *data;
-    _Atomic uint32_t read, write, free, count;
-    uint32_t mask;
-} moe_fifo_t;
+    _Atomic intptr_t value;
+} moe_semaphore_t;
 
-
-moe_fifo_t* moe_fifo_init(size_t capacity) {
-    moe_fifo_t* self = mm_alloc_static(sizeof(moe_fifo_t));
+void moe_sem_init(moe_semaphore_t* self, intptr_t value) {
+    self->value = value;
     self->waiting = NULL;
-    self->data = mm_alloc_static(capacity * sizeof(uintptr_t));
-    self->read = 0;
-    self->write = 0;
-    self->free = capacity - 1;
-    self->count = 0;
-    self->mask = capacity - 1;
-    return self;
 }
 
-int fifo_read(moe_fifo_t* self, intptr_t* result) {
-    uint32_t count = atomic_load(&self->count);
-    while (count > 0) {
-        if (atomic_compare_exchange_weak(&self->count, &count, count - 1)) {
-            uintptr_t read_ptr = atomic_fetch_add_explicit(&self->read, 1, memory_order_seq_cst);
-            intptr_t retval = atomic_load_explicit(&self->data[read_ptr & self->mask], memory_order_seq_cst);
-            atomic_fetch_add_explicit(&self->free, 1, memory_order_seq_cst);
-            *result = retval;
+int moe_sem_trywait(moe_semaphore_t *self) {
+    intptr_t value = atomic_load(&self->value);
+    while (value > 0) {
+        if (atomic_compare_exchange_weak(&self->value, &value, value - 1)) {
             return 1;
         } else {
             io_pause();
@@ -470,35 +456,91 @@ int fifo_read(moe_fifo_t* self, intptr_t* result) {
     return 0;
 }
 
+int moe_sem_wait(moe_semaphore_t* self, uint64_t us) {
+    if (moe_sem_trywait(self)) {
+        return 1;
+    }
+    const uint64_t time_div = 100000;
+    moe_thread_t* desired = get_current_thread();
+    while (us > 0) {
+        moe_thread_t* expected = NULL;
+        if (atomic_compare_exchange_weak(&self->waiting, &expected, desired)) {
+            if (moe_sem_trywait(self)) {
+                atomic_compare_exchange_weak(&self->waiting, &desired, NULL);
+                return 1;
+            }
+            moe_wait_for_object(self, us);
+            atomic_compare_exchange_weak(&self->waiting, &desired, NULL);
+            return moe_sem_trywait(self);
+        } else {
+            MOE_ASSERT(false, "DOUBLE WAIT %08x %08x\n", expected, desired);
+            for (;;) moe_wait_for_object(NULL, UINT64_MAX);
+            if (us > time_div) {
+                moe_usleep(time_div);
+                us -= time_div;
+            } else {
+                moe_usleep(us);
+                us = 0;
+            }
+        }
+    }
+    return 0;
+}
+
+void moe_sem_signal(moe_semaphore_t* self) {
+    atomic_fetch_add(&self->value, 1);
+
+    moe_thread_t* waiting = self->waiting;
+    if (waiting && atomic_compare_exchange_weak(&self->waiting, &waiting, NULL)) {
+        moe_signal_object(waiting, self);
+    }
+
+}
+
+
+/*********************************************************************/
+//  First In, First Out method
+
+typedef struct moe_fifo_t {
+    moe_semaphore_t read_sem;
+    _Atomic intptr_t *data;
+    _Atomic uint32_t read, write, free;
+    uint32_t mask;
+} moe_fifo_t;
+
+
+moe_fifo_t* moe_fifo_init(size_t capacity) {
+    moe_fifo_t* self = mm_alloc_static(sizeof(moe_fifo_t));
+    moe_sem_init(&self->read_sem, 0);
+    self->data = mm_alloc_static(capacity * sizeof(uintptr_t));
+    self->read = 0;
+    self->write = 0;
+    self->free = capacity - 1;
+    self->mask = capacity - 1;
+    return self;
+}
+
+intptr_t fifo_read_main(moe_fifo_t* self) {
+    uintptr_t read_ptr = atomic_fetch_add_explicit(&self->read, 1, memory_order_seq_cst);
+    intptr_t retval = atomic_load_explicit(&self->data[read_ptr & self->mask], memory_order_seq_cst);
+    atomic_fetch_add_explicit(&self->free, 1, memory_order_seq_cst);
+    return retval;
+}
+
 intptr_t moe_fifo_read(moe_fifo_t* self, intptr_t default_val) {
-    intptr_t result;
-    if (fifo_read(self, &result)) {
-        return result;
+    if (moe_sem_trywait(&self->read_sem)) {
+        return fifo_read_main(self);
     } else {
         return default_val;
     }
 }
 
-int moe_fifo_read_and_wait(moe_fifo_t* self, intptr_t* result, uint64_t us) {
-    if (us) {
-        moe_thread_t *current = get_current_thread();
-        self->waiting = current;
-        if (fifo_read(self, result)) {
-            return 1;
-        }
-        moe_wait_for_object(self, us);
-        if (fifo_read(self, result)) {
-            return 1;
-        } else {
-            return 0;
-        }
-        return 0;
+int moe_fifo_wait(moe_fifo_t* self, intptr_t* result, uint64_t us) {
+    if (moe_sem_wait(&self->read_sem, us)) {
+        *result = fifo_read_main(self);
+        return 1;
     } else {
-        if (fifo_read(self, result)) {
-            return 1;
-        } else {
-            return 0;
-        }
+        return 0;
     }
 }
 
@@ -508,11 +550,7 @@ int moe_fifo_write(moe_fifo_t* self, intptr_t data) {
         if (atomic_compare_exchange_weak(&self->free, &free, free - 1)) {
             uintptr_t write_ptr = atomic_fetch_add_explicit(&self->write, 1, memory_order_seq_cst);
             atomic_store_explicit(&self->data[write_ptr & self->mask], data, memory_order_seq_cst);
-            atomic_fetch_add_explicit(&self->count, 1, memory_order_seq_cst);
-
-            moe_thread_t *waiting = atomic_load(&self->waiting);
-            moe_signal_object(waiting, self);
-
+            moe_sem_signal(&self->read_sem);
             return 0;
         } else {
             io_pause();
@@ -522,7 +560,7 @@ int moe_fifo_write(moe_fifo_t* self, intptr_t data) {
 }
 
 size_t moe_fifo_get_estimated_count(moe_fifo_t* self) {
-    return atomic_load(&self->count);
+    return atomic_load(&self->read_sem.value);
 }
 
 size_t moe_fifo_get_estimated_free(moe_fifo_t* self) {

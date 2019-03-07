@@ -183,7 +183,7 @@ _Noreturn void ps2_hid_thread(void *args) {
 
             cont = 0;
             intptr_t ps2_data;
-            if (moe_fifo_read_and_wait(ps2_fifo, &ps2_data, 1000000)) {
+            if (moe_fifo_wait(ps2_fifo, &ps2_data, 1000000)) {
                 int state = ps2_parse_data(ps2_data, &keyreport, &mouse_report);
 
                 switch(state) {

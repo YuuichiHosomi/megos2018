@@ -731,14 +731,14 @@ uintptr_t moe_get_event(moe_window_t *window, int wait) {
 
     uint64_t wait_timer = 0;
 
-    if (moe_fifo_read_and_wait(window->event_queue, (intptr_t*)&event, 0)) {
+    if (moe_fifo_wait(window->event_queue, (intptr_t*)&event, 0)) {
         if (event != NULL_EVENT) return event;
     }
 
     redraw_if_needed(window);
 
     wait_timer = (wait < 0) ? DEFAULT_WAIT_EVENT_TIME : wait;
-    if (moe_fifo_read_and_wait(window->event_queue, (intptr_t*)&event, wait_timer)) {
+    if (moe_fifo_wait(window->event_queue, (intptr_t*)&event, wait_timer)) {
         if (event != NULL_EVENT) return event;
     }
 
