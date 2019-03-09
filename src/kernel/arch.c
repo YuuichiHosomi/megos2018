@@ -32,6 +32,7 @@ extern void idt_load(volatile void*, size_t);
 extern _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stacks);
 extern void thread_init(int n_active_cpu);
 extern void reschedule();
+extern void acpi_init_sci();
 
 
 static void io_out32(uint16_t const port, uint32_t val) {
@@ -346,6 +347,8 @@ void apic_init() {
 
 //  because to initialize AP needs Timer
 void apic_init_mp() {
+    // thread_init(1);
+    // return;
     if (n_cpu > 1) {
         uint8_t vector_sipi = 0x10;
         const uintptr_t stack_chunk_size = 0x4000;
@@ -441,7 +444,6 @@ void pci_write_config_register(uint32_t base, uint8_t reg, uint32_t val) {
 
 /*********************************************************************/
 
-extern void acpi_init_sci();
 void arch_init() {
     cs_sel = gdt_init();
     idt_init();

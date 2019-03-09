@@ -159,8 +159,8 @@ void acpi_reset() {
     }
 }
 
-// ACPI Sx
-void acpi_set_sleep(int state) {
+// Enter ACPI Sleeping State Sx
+void acpi_enter_sleep_state(int state) {
     if (state != 5) return; // I want S5 only
     if (!acpi_enable(1)) return;
     if (fadt->Flags & ACPI_FADT_HW_REDUCED_ACPI) {
@@ -179,8 +179,12 @@ void acpi_init(acpi_rsd_ptr_t* _rsdp) {
     xsdt = (acpi_xsdt_t*)PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(rsdp->xsdtaddr);
     n_entries_xsdt = (xsdt->Header.length - 0x24 /* offset_of Entry */ ) / sizeof(xsdt->Entry[0]);
 
-    fadt = acpi_enum_table_entry(0);
+    fadt = mm_alloc_static_page(sizeof(acpi_fadt_t));
     MOE_ASSERT(fadt, "FADT NOT FOUND");
+    acpi_fadt_t *p = acpi_enum_table_entry(0);
+    MOE_ASSERT(p, "FADT NOT FOUND");
+    memset(fadt, 0, sizeof(acpi_fadt_t));
+    memcpy(fadt, p, MIN(p->Header.length, sizeof(acpi_fadt_t)));
 
     dsdt = (void*)(uintptr_t)fadt->DSDT;
     if (dsdt == NULL) {
@@ -213,20 +217,27 @@ void acpi_init(acpi_rsd_ptr_t* _rsdp) {
 
 int irq_sci(int irq) {
 
-    printf("ACPI_SCI: ");
+    uint16_t pm1_evt = 0;
 
     if (fadt->PM1a_EVT_BLK) {
-        uint16_t eax = 0;
+        uint16_t ax;
         uint32_t edx = fadt->PM1a_EVT_BLK;
-        acpi_outw(edx, eax = acpi_inw(edx));
-        printf("a: %04x", eax);
+        acpi_outw(edx, ax = acpi_inw(edx));
+        pm1_evt |= ax;
     }
 
     if (fadt->PM1b_EVT_BLK) {
-        uint16_t eax = 0;
+        uint16_t ax;
         uint32_t edx = fadt->PM1b_EVT_BLK;
-        acpi_outw(edx, eax = acpi_inw(edx));
-        printf("b: %04x", eax);
+        acpi_outw(edx, ax = acpi_inw(edx));
+        pm1_evt |= ax;
+    }
+
+    printf("ACPI_SCI: %04x", pm1_evt);
+
+    // Power button
+    if (pm1_evt & 0x0100) {
+        moe_shutdown_system();
     }
 
     if (fadt->GPE0_BLK) {
@@ -244,42 +255,42 @@ int irq_sci(int irq) {
     return 0;
 }
 
-void acpi_init_sci() {
 
-    return;
+void acpi_init_sci() {
 
     if (fadt->SCI_INT) {
         moe_enable_irq(fadt->SCI_INT, irq_sci);
     }
 
+    // printf("ACPI %08llx %08x %02x %04x %02x %04x %02x %04x\n", (uintptr_t)fadt, fadt->Flags, fadt->SCI_INT, fadt->SMI_CMD, fadt->ACPI_ENABLE, fadt->PM1a_CNT_BLK, SLP_TYP5a, (uint16_t)fadt->SLEEP_CONTROL_REG.address);
+    // for (int i = 0; i < 15; i++) {
+    //     moe_usleep(1000000);
+    //     printf(".");
+    // }
+    // acpi_set_sleep(5);
+
     acpi_enable(1);
 
-        // enable POWER BUTTON
-        if (fadt->PM1a_EVT_BLK) {
-            uintptr_t pm_evt_blk = fadt->PM1a_EVT_BLK;
-            uintptr_t pm_evt_len = fadt->PM1_EVT_LEN / 2;
-            uint32_t eax = 0x0300;
-            __asm__ volatile ("outw %%ax, %%dx" :: "a"(eax), "d"(pm_evt_blk));
-            __asm__ volatile ("outw %%ax, %%dx" :: "a"(eax), "d"(pm_evt_blk + pm_evt_len));
-        }
+    // enable power button
+    if (fadt->PM1a_EVT_BLK) {
+        uint32_t edx = fadt->PM1a_EVT_BLK;
+        uint32_t len = fadt->PM1_EVT_LEN / 2;
+        acpi_outw(edx + len, 0x0300);
+    }
 
-        // disable pm1b event
-        if (fadt->PM1b_EVT_BLK) {
-            uintptr_t pm_evt_blk = fadt->PM1b_EVT_BLK;
-            uintptr_t pm_evt_len = fadt->PM1_EVT_LEN / 2;
-            uint32_t eax = 0x0300;
-            __asm__ volatile ("outw %%ax, %%dx" :: "a"(eax), "d"(pm_evt_blk));
-            __asm__ volatile ("outw %%ax, %%dx" :: "a"(eax), "d"(pm_evt_blk + pm_evt_len));
-        }
+    if (fadt->PM1b_EVT_BLK) {
+        uint32_t edx = fadt->PM1b_EVT_BLK;
+        uint32_t len = fadt->PM1_EVT_LEN / 2;
+        acpi_outw(edx + len, 0x0300);
+    }
 
-    // DISABLE GPE
-    // if (fadt->GPE0_BLK) {
-    //     uintptr_t gpe_blk = fadt->GPE0_BLK;
-    //     uintptr_t gpe_len = fadt->GPE0_BLK_LEN / 2;
-    //     for (int i = 0; i < gpe_len; i++) {
-    //         __asm__ volatile ("outb %%al, %%dx" :: "a"(0x00), "d"(gpe_blk + i));
-    //         __asm__ volatile ("outb %%al, %%dx" :: "a"(0x00), "d"(gpe_blk + i + gpe_len));
-    //     }
-    // }
+    //  disable all GPE
+    if (fadt->GPE0_BLK) {
+        uintptr_t gpe_blk = fadt->GPE0_BLK;
+        uintptr_t gpe_len = fadt->GPE0_BLK_LEN / 2;
+        for (int i = 0; i < gpe_len; i++) {
+            acpi_outb(gpe_blk + gpe_len + i, 0);
+        }
+    }
 
 }

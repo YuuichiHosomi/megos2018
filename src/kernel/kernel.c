@@ -35,6 +35,9 @@ extern void lpc_init();
 // extern void hid_init();
 extern void window_init();
 
+extern void acpi_enter_sleep_state(int state);
+extern void acpi_reset();
+
 extern void display_threads();
 
 extern char *strchr(const char *s, int c);
@@ -53,16 +56,13 @@ void memset32(uint32_t* p, uint32_t v, size_t n) {
 }
 
 
-extern void acpi_set_sleep(int state);
-extern void acpi_reset();
-
 _Noreturn void moe_reboot() {
     acpi_reset();
     gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
 }
 
 _Noreturn void moe_shutdown_system() {
-    acpi_set_sleep(5);
+    acpi_enter_sleep_state(5);
     gRT->ResetSystem(EfiResetShutdown, 0, 0, NULL);
 }
 
@@ -101,9 +101,7 @@ _Noreturn void start_kernel(moe_bootinfo_t* bootinfo) {
     mm_init(&bootinfo->mmap);
     acpi_init(bootinfo->acpi);
     arch_init();
-
     window_init();
-    // hid_init();
     lpc_init();
 
     moe_create_thread(&start_init, 0, 0, "init");
