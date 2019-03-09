@@ -325,23 +325,28 @@ _int07: ; #NM
     iretq
 
 
-    global _irq00, _irq01, _irq02, _irq0C
-_irq00:
+    global _irq00, _irq01, _irq02, _irq09, _irq0C
+_irq00: ; LEGACY PIT
     push rcx
     mov cl, 0x00
     jmp short _irqXX
 
-_irq01:
+_irq01: ; PS2 keyboard
     push rcx
     mov cl, 0x01
     jmp short _irqXX
 
-_irq02:
+_irq02: ; HPET
     push rcx
     mov cl, 0x02
     jmp short _irqXX
 
-_irq0C:
+_irq09: ; ACPI SCI
+    push rcx
+    mov cl, 0x09
+    jmp short _irqXX
+
+_irq0C: ; PS2 mouse
     push rcx
     mov cl, 0x0C
     jmp short _irqXX

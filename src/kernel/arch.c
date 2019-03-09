@@ -23,6 +23,7 @@ extern void* _int0E;
 extern void* _irq00;
 extern void* _irq01;
 extern void* _irq02;
+extern void* _irq09;
 extern void* _irq0C;
 extern void* _ipi_sche;
 
@@ -332,6 +333,7 @@ void apic_init() {
         idt_set_kernel_handler(IRQ_BASE, (uintptr_t)&_irq00, 0);
         idt_set_kernel_handler(IRQ_BASE+1, (uintptr_t)&_irq01, 0);
         idt_set_kernel_handler(IRQ_BASE+2, (uintptr_t)&_irq02, 0);
+        idt_set_kernel_handler(IRQ_BASE+9, (uintptr_t)&_irq09, 0);
         idt_set_kernel_handler(IRQ_BASE+12, (uintptr_t)&_irq0C, 0);
         idt_set_kernel_handler(IRQ_SCHDULE, (uintptr_t)&_ipi_sche, 0);
 
@@ -439,10 +441,12 @@ void pci_write_config_register(uint32_t base, uint8_t reg, uint32_t val) {
 
 /*********************************************************************/
 
+extern void acpi_init_sci();
 void arch_init() {
     cs_sel = gdt_init();
     idt_init();
     apic_init();
     hpet_init();
+    acpi_init_sci();
     apic_init_mp();
 }

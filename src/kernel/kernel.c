@@ -53,12 +53,16 @@ void memset32(uint32_t* p, uint32_t v, size_t n) {
 }
 
 
-void moe_reboot() {
+extern void acpi_set_sleep(int state);
+extern void acpi_reset();
+
+_Noreturn void moe_reboot() {
+    acpi_reset();
     gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
 }
 
-
-void moe_shutdown_system() {
+_Noreturn void moe_shutdown_system() {
+    acpi_set_sleep(5);
     gRT->ResetSystem(EfiResetShutdown, 0, 0, NULL);
 }
 
