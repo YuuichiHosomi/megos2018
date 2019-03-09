@@ -18,3 +18,5 @@ temp
 *.efi
 
 rsrc.h
+
+.vscode
