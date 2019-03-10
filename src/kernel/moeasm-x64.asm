@@ -8,7 +8,7 @@
 
 %define BOOT_INFO           0x0800
 %define BOOTINFO_MAX_CPU    0x04
-;define BOOTINFO_xxxx       0x08
+%define BOOTINFO_EFER       0x08
 %define BOOTINFO_STACK_SIZE 0x0C
 %define BOOTINFO_STACKS     0x10
 %define BOOTINFO_CR3        0x18
@@ -407,11 +407,11 @@ smp_setup_init:
     mov ecx, _end_mp_rm_payload - _mp_rm_payload
     rep movsb
 
-    mov eax, BOOT_INFO
-    mov [rax + BOOTINFO_MAX_CPU], edx
-    mov [rax + BOOTINFO_STACK_SIZE], r8d
-    mov [rax + BOOTINFO_STACKS], r9
-    lea edx, [rax + BOOTINFO_GDTR]
+    mov r8d, BOOT_INFO
+    mov [r8 + BOOTINFO_MAX_CPU], edx
+    mov [r8 + BOOTINFO_STACK_SIZE], r8d
+    mov [r8 + BOOTINFO_STACKS], r9
+    lea edx, [r8 + BOOTINFO_GDTR]
     lea rsi, [rel __GDT]
     mov edi, edx
     mov ecx, (__end_GDT - __GDT)/4
@@ -420,22 +420,26 @@ smp_setup_init:
     mov word [edx], (__end_GDT - __GDT)-1
 
     mov edx, 1
-    mov [rax], edx
+    mov [r8], edx
     mov rdx, cr4
-    mov [rax + BOOTINFO_CR4], edx
+    mov [r8 + BOOTINFO_CR4], edx
     mov rdx, cr3
-    mov [rax + BOOTINFO_CR3], rdx
-    sidt [rax + BOOTINFO_IDT]
+    mov [r8 + BOOTINFO_CR3], rdx
+    sidt [r8 + BOOTINFO_IDT]
+    mov ecx, MSR_EFER
+    rdmsr
+    mov [r8 + BOOTINFO_EFER], eax
 
     lea ecx, [rel _startup32]
     mov edx, LOADER_CS32
-    mov [rax + BOOTINFO_START32], ecx
-    mov [rax + BOOTINFO_START32 + 4], edx
+    mov [r8 + BOOTINFO_START32], ecx
+    mov [r8 + BOOTINFO_START32 + 4], edx
     lea ecx, [rel _startup_ap]
     mov edx, LOADER_CS64
-    mov [rax + BOOTINFO_START64], ecx
-    mov [rax + BOOTINFO_START64 + 4], edx
+    mov [r8 + BOOTINFO_START64], ecx
+    mov [r8 + BOOTINFO_START64 + 4], edx
 
+    mov eax, r8d
     pop rdi
     pop rsi
     ret
@@ -512,9 +516,8 @@ _mp_rm_payload:
     mov cr3 ,eax
 
     mov ecx, MSR_EFER
-    rdmsr
-    bts eax, 8 ; LME
-    bts eax, 11 ; NXE
+    xor edx, edx
+    mov eax, [bx+ BOOTINFO_EFER]
     wrmsr
 
     jmp dword far [bx + BOOTINFO_START32]

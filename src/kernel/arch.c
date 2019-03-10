@@ -347,10 +347,8 @@ void apic_init() {
 
 //  because to initialize AP needs Timer
 void apic_init_mp() {
-    // thread_init(1);
-    // return;
     if (n_cpu > 1) {
-        uint8_t vector_sipi = 0x10;
+        uint8_t vector_sipi = 0x10; // TODO: dynamic
         const uintptr_t stack_chunk_size = 0x4000;
         uintptr_t* stacks = mm_alloc_static_page(stack_chunk_size * n_cpu);
         _Atomic uint32_t* wait_p = smp_setup_init(vector_sipi, MAX_CPU, stack_chunk_size, stacks);
