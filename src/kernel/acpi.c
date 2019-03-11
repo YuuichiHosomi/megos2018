@@ -181,14 +181,14 @@ void acpi_init(acpi_rsd_ptr_t* _rsdp) {
 
     fadt = mm_alloc_static_page(sizeof(acpi_fadt_t));
     MOE_ASSERT(fadt, "FADT NOT FOUND");
-    acpi_fadt_t *p = acpi_enum_table_entry(0);
+    acpi_fadt_t *p = acpi_find_table(ACPI_FADT_SIGNATURE);
     MOE_ASSERT(p, "FADT NOT FOUND");
     memset(fadt, 0, sizeof(acpi_fadt_t));
     memcpy(fadt, p, MIN(p->Header.length, sizeof(acpi_fadt_t)));
 
-    dsdt = (void*)(uintptr_t)fadt->DSDT;
+    dsdt = (void*)(uintptr_t)fadt->X_DSDT;
     if (dsdt == NULL) {
-        dsdt = (void*)(uintptr_t)fadt->X_DSDT;
+        dsdt = (void*)(uintptr_t)fadt->DSDT;
     }
     MOE_ASSERT(dsdt, "DSDT NOT FOUND");
 
