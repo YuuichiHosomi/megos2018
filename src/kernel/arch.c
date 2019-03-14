@@ -442,9 +442,25 @@ void pci_write_config_register(uint32_t base, uint8_t reg, uint32_t val) {
 
 /*********************************************************************/
 
+#define IA32_MISC_ENABLE_MSR    0x000001A0
+#define IA32_EFER_MSR           0xC0000080
+#define IA32_MISC_XD_DISABLE    (1ULL<<34)
+#define IA32_EFER_NXE           (1<<11)
+
 void arch_init() {
     cs_sel = gdt_init();
     idt_init();
+
+    // clear XD Disable bit
+    tuple_eax_edx_t misc = io_rdmsr(IA32_MISC_ENABLE_MSR);
+    if (misc.u64 & IA32_MISC_XD_DISABLE) {
+        misc.u64 ^= IA32_MISC_XD_DISABLE;
+        io_wrmsr(IA32_MISC_ENABLE_MSR, misc);
+        tuple_eax_edx_t efer = io_rdmsr(IA32_EFER_MSR);
+        efer.eax |= IA32_EFER_NXE;
+        io_wrmsr(IA32_EFER_MSR, efer);
+    }
+
     apic_init();
     hpet_init();
     acpi_init_sci();

@@ -16,12 +16,14 @@
 %define BOOTINFO_CR4        0x2C
 %define BOOTINFO_START32    0x30
 %define BOOTINFO_START64    0x38
-%define BOOTINFO_GDTR       0x40
+%define BOOTINFO_MSR_MISC   0x40
+%define BOOTINFO_GDTR       0x50
 
 %define	EFLAGS_IF   0x00000200
-%define MSR_EFER    0xC0000080
 %define IA32_APIC_BASE_MSR          0x0000001B
 %define IA32_APIC_BASE_MSR_ENABLE   0x00000800
+%define IA32_MISC_MSR   0x000001A0
+%define IA32_EFER_MSR   0xC0000080
 
 [BITS 64]
 [section .text]
@@ -426,9 +428,13 @@ smp_setup_init:
     mov rdx, cr3
     mov [r8 + BOOTINFO_CR3], rdx
     sidt [r8 + BOOTINFO_IDT]
-    mov ecx, MSR_EFER
+    mov ecx, IA32_EFER_MSR
     rdmsr
     mov [r8 + BOOTINFO_EFER], eax
+    mov ecx, IA32_MISC_MSR
+    rdmsr
+    mov [r8 + IA32_MISC_MSR], eax
+    mov [r8 + IA32_MISC_MSR + 4], edx
 
     lea ecx, [rel _startup32]
     mov edx, LOADER_CS32
@@ -515,7 +521,12 @@ _mp_rm_payload:
     mov eax, [bx + BOOTINFO_CR3]
     mov cr3 ,eax
 
-    mov ecx, MSR_EFER
+    mov eax, [bx + BOOTINFO_MSR_MISC]
+    mov edx, [bx + BOOTINFO_MSR_MISC + 4]
+    mov ecx, IA32_MISC_MSR
+    wrmsr
+
+    mov ecx, IA32_EFER_MSR
     xor edx, edx
     mov eax, [bx+ BOOTINFO_EFER]
     wrmsr
