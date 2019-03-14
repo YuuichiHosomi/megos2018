@@ -327,31 +327,106 @@ _int07: ; #NM
     iretq
 
 
-    global _irq00, _irq01, _irq02, _irq09, _irq0C
-_irq00: ; LEGACY PIT
-    push rcx
-    mov cl, 0x00
-    jmp short _irqXX
+	global _irq0, _irq1, _irq2, _irq3, _irq4, _irq5, _irq6, _irq7
+    global _irq8, _irq9, _irq10, _irq11, _irq12, _irq13, _irq14, _irq15
+    global _irq16, _irq17, _irq18, _irq19, _irq20, _irq21, _irq22, _irq23
 
-_irq01: ; PS2 keyboard
-    push rcx
-    mov cl, 0x01
-    jmp short _irqXX
-
-_irq02: ; HPET
-    push rcx
-    mov cl, 0x02
-    jmp short _irqXX
-
-_irq09: ; ACPI SCI
-    push rcx
-    mov cl, 0x09
-    jmp short _irqXX
-
-_irq0C: ; PS2 mouse
-    push rcx
-    mov cl, 0x0C
-    jmp short _irqXX
+_irq23:
+	push rcx
+	mov cl, 23
+	jmp short _irqXX
+_irq22:
+	push rcx
+	mov cl, 22
+	jmp short _irqXX
+_irq21:
+	push rcx
+	mov cl, 21
+	jmp short _irqXX
+_irq20:
+	push rcx
+	mov cl, 20
+	jmp short _irqXX
+_irq19:
+	push rcx
+	mov cl, 19
+	jmp short _irqXX
+_irq18:
+	push rcx
+	mov cl, 18
+	jmp short _irqXX
+_irq17:
+	push rcx
+	mov cl, 17
+	jmp short _irqXX
+_irq16:
+	push rcx
+	mov cl, 16
+	jmp short _irqXX
+_irq15:
+	push rcx
+	mov cl, 15
+	jmp short _irqXX
+_irq14:
+	push rcx
+	mov cl, 14
+	jmp short _irqXX
+_irq13:
+	push rcx
+	mov cl, 13
+	jmp short _irqXX
+_irq12:
+	push rcx
+	mov cl, 12
+	jmp short _irqXX
+_irq11:
+	push rcx
+	mov cl, 11
+	jmp short _irqXX
+_irq10:
+	push rcx
+	mov cl, 10
+	jmp short _irqXX
+_irq9:
+	push rcx
+	mov cl, 9
+	jmp short _irqXX
+_irq8:
+	push rcx
+	mov cl, 8
+	jmp short _irqXX
+_irq7:
+	push rcx
+	mov cl, 7
+	jmp short _irqXX
+_irq6:
+	push rcx
+	mov cl, 6
+	jmp short _irqXX
+_irq5:
+	push rcx
+	mov cl, 5
+	jmp short _irqXX
+_irq4:
+	push rcx
+	mov cl, 4
+	jmp short _irqXX
+_irq3:
+	push rcx
+	mov cl, 3
+	jmp short _irqXX
+_irq2:
+	push rcx
+	mov cl, 2
+	jmp short _irqXX
+_irq1:
+	push rcx
+	mov cl, 1
+	jmp short _irqXX
+_irq0:
+	push rcx
+	mov cl, 0
+;	jmp short _irqXX
 
 _irqXX:
     push rax

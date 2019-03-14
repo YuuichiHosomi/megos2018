@@ -14,18 +14,38 @@ typedef union {
     };
 } tuple_eax_edx_t;
 
-extern void* _int00;
-extern void* _int03;
-extern void* _int06;
-extern void* _int07;
-extern void* _int0D;
-extern void* _int0E;
-extern void* _irq00;
-extern void* _irq01;
-extern void* _irq02;
-extern void* _irq09;
-extern void* _irq0C;
-extern void* _ipi_sche;
+extern void *_int00;
+extern void *_int03;
+extern void *_int06;
+extern void *_int07;
+extern void *_int0D;
+extern void *_int0E;
+extern void *_ipi_sche;
+
+extern void *_irq0;
+extern void *_irq1;
+extern void *_irq2;
+extern void *_irq3;
+extern void *_irq4;
+extern void *_irq5;
+extern void *_irq6;
+extern void *_irq7;
+extern void *_irq8;
+extern void *_irq9;
+extern void *_irq10;
+extern void *_irq11;
+extern void *_irq12;
+extern void *_irq13;
+extern void *_irq14;
+extern void *_irq15;
+extern void *_irq16;
+extern void *_irq17;
+extern void *_irq18;
+extern void *_irq19;
+extern void *_irq20;
+extern void *_irq21;
+extern void *_irq22;
+extern void *_irq23;
 
 extern uint16_t gdt_init(void);
 extern void idt_load(volatile void*, size_t);
@@ -331,11 +351,30 @@ void apic_init() {
         }
 
         //  Install IDT handler
-        idt_set_kernel_handler(IRQ_BASE, (uintptr_t)&_irq00, 0);
-        idt_set_kernel_handler(IRQ_BASE+1, (uintptr_t)&_irq01, 0);
-        idt_set_kernel_handler(IRQ_BASE+2, (uintptr_t)&_irq02, 0);
-        idt_set_kernel_handler(IRQ_BASE+9, (uintptr_t)&_irq09, 0);
-        idt_set_kernel_handler(IRQ_BASE+12, (uintptr_t)&_irq0C, 0);
+        idt_set_kernel_handler(IRQ_BASE+0, (uintptr_t)&_irq0, 0);
+        idt_set_kernel_handler(IRQ_BASE+1, (uintptr_t)&_irq1, 0);
+        idt_set_kernel_handler(IRQ_BASE+2, (uintptr_t)&_irq2, 0);
+        idt_set_kernel_handler(IRQ_BASE+3, (uintptr_t)&_irq3, 0);
+        idt_set_kernel_handler(IRQ_BASE+4, (uintptr_t)&_irq4, 0);
+        idt_set_kernel_handler(IRQ_BASE+5, (uintptr_t)&_irq5, 0);
+        idt_set_kernel_handler(IRQ_BASE+6, (uintptr_t)&_irq6, 0);
+        idt_set_kernel_handler(IRQ_BASE+7, (uintptr_t)&_irq7, 0);
+        idt_set_kernel_handler(IRQ_BASE+8, (uintptr_t)&_irq8, 0);
+        idt_set_kernel_handler(IRQ_BASE+9, (uintptr_t)&_irq9, 0);
+        idt_set_kernel_handler(IRQ_BASE+10, (uintptr_t)&_irq10, 0);
+        idt_set_kernel_handler(IRQ_BASE+11, (uintptr_t)&_irq11, 0);
+        idt_set_kernel_handler(IRQ_BASE+12, (uintptr_t)&_irq12, 0);
+        idt_set_kernel_handler(IRQ_BASE+13, (uintptr_t)&_irq13, 0);
+        idt_set_kernel_handler(IRQ_BASE+14, (uintptr_t)&_irq14, 0);
+        idt_set_kernel_handler(IRQ_BASE+15, (uintptr_t)&_irq15, 0);
+        idt_set_kernel_handler(IRQ_BASE+16, (uintptr_t)&_irq16, 0);
+        idt_set_kernel_handler(IRQ_BASE+17, (uintptr_t)&_irq17, 0);
+        idt_set_kernel_handler(IRQ_BASE+18, (uintptr_t)&_irq18, 0);
+        idt_set_kernel_handler(IRQ_BASE+19, (uintptr_t)&_irq19, 0);
+        idt_set_kernel_handler(IRQ_BASE+20, (uintptr_t)&_irq20, 0);
+        idt_set_kernel_handler(IRQ_BASE+21, (uintptr_t)&_irq21, 0);
+        idt_set_kernel_handler(IRQ_BASE+22, (uintptr_t)&_irq22, 0);
+        idt_set_kernel_handler(IRQ_BASE+23, (uintptr_t)&_irq23, 0);
         idt_set_kernel_handler(IRQ_SCHDULE, (uintptr_t)&_ipi_sche, 0);
 
         // Then enable IRQ
