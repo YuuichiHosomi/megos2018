@@ -748,6 +748,9 @@ uintptr_t moe_get_event(moe_window_t *window, int wait) {
 }
 
 uint32_t moe_translate_key_event(moe_window_t *window, uintptr_t event) {
+    if (event >= MOE_EVENT_CHAR_MIN && event <= MOE_EVENT_CHAR_MAX) {
+        return event;
+    }
     if (event > MOE_EVENT_KEY_MIN && event < MOE_EVENT_KEY_MAX) {
         uint8_t usage = event;
         uint8_t modifier = event >> 8;
