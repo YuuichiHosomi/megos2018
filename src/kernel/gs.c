@@ -241,11 +241,34 @@ void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *r
     }
 
     // Transfer
+
+    if (dest->flags & MOE_DIB_ROTATE) { // Rotation
+        int temp = dx;
+        dx = dest->height - dy;
+        dy = temp;
+        uint32_t *p = dest->dib;
+        p += dx + dy * dest->delta - h;
+        uint32_t *q = src->dib;
+        q += sx + (sy + h - 1) * src->delta;
+        uintptr_t sdy = src->delta, ddy = dest->delta - h;
+        #pragma clang loop vectorize(enable) interleave(enable)
+        for (uintptr_t i = 0; i < w; i++) {
+            uint32_t *q0 = q + i;
+            for (uintptr_t j = 0; j < h; j++) {
+                *p++ = *q0;
+                q0 -= sdy;
+            }
+            p += ddy;
+        }
+        return;
+    }
+
     uint32_t *p = dest->dib;
     p += dx + dy * dest->delta;
     uint32_t *q = src->dib;
     q += sx + sy * src->delta;
-    uintptr_t dd = dest->delta - w, sd = src->delta - w;
+    uintptr_t sd = src->delta - w;
+    uintptr_t dd = dest->delta - w;
 
     if (src->flags & MOE_DIB_ALPHA) { // ARGB Transparency
         for (uintptr_t i = 0; i < h; i++) {
@@ -343,6 +366,15 @@ void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color) {
         if (r >= dest->width) w = dest->width - dx;
         if (b >= dest->height) h = dest->height - dy;
         if (w <= 0 || h <= 0) return;
+    }
+
+    if (dest->flags & MOE_DIB_ROTATE) {
+        int temp = dx;
+        dx = dest->height - dy;
+        dy = temp;
+        temp = w;
+        w = h;
+        h = temp;
     }
 
     uint32_t *p = dest->dib;
@@ -826,6 +858,12 @@ void mgs_bsod(const char *s) {
 void gs_init(moe_dib_t* screen) {
 
     main_screen_dib = *screen;
+    if (main_screen_dib.width < main_screen_dib.height) {
+        int temp = main_screen_dib.width;
+        main_screen_dib.width = main_screen_dib.height;
+        main_screen_dib.height = temp;
+        main_screen_dib.flags |= MOE_DIB_ROTATE;
+    }
 
     init_simple_font(&system_font, bootfont_w, bootfont_h, 0, (void*)bootfont_data, 0);
     init_simple_font(&smallfont, smallfont_w, smallfont_h, 0, (void*)smallfont_data, 0);
