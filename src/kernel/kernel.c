@@ -32,13 +32,7 @@ extern void acpi_init(acpi_rsd_ptr_t* rsd);
 extern void gs_init(moe_dib_t* screen);
 extern void mm_init(moe_bootinfo_mmap_t* mmap);
 extern void lpc_init();
-// extern void hid_init();
 extern void window_init();
-
-extern void acpi_enter_sleep_state(int state);
-extern void acpi_reset();
-
-extern void display_threads();
 
 extern char *strchr(const char *s, int c);
 extern int vprintf(const char *format, va_list args);

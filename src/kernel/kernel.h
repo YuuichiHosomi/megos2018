@@ -47,6 +47,8 @@ void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v);
 void* acpi_find_table(const char* signature);
 int acpi_get_number_of_table_entries();
 void* acpi_enum_table_entry(int index);
+void acpi_enter_sleep_state(int state);
+void acpi_reset();
 
 
 //  PCI
