@@ -52,6 +52,6 @@ void acpi_reset();
 
 
 //  PCI
-uint32_t pci_get_register_address(uint8_t bus, uint8_t dev, uint8_t func, uint8_t reg);
-uint32_t pci_read_config_register(uint32_t base, uint8_t reg);
-void pci_write_config_register(uint32_t base, uint8_t reg, uint32_t val);
+uint32_t pci_make_reg_addr(uint8_t bus, uint8_t dev, uint8_t func, uintptr_t reg);
+uint32_t pci_read_config(uint32_t addr);
+void pci_write_config(uint32_t addr, uint32_t val);

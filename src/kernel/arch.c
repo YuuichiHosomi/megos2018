@@ -461,19 +461,19 @@ void hpet_init() {
 #define PCI_CONFIG_DATA     0x0CFC
 #define PCI_ADDRESS_ENABLE  0x80000000
 
-uint32_t pci_get_register_address(uint8_t bus, uint8_t dev, uint8_t func, uint8_t reg) {
-    return (reg & 0xFC) | ((func) << 8) | ((dev) << 11) | (bus << 16);
+uint32_t pci_make_reg_addr(uint8_t bus, uint8_t dev, uint8_t func, uintptr_t reg) {
+    return (reg & 0xFC) | ((func) << 8) | ((dev) << 11) | (bus << 16) | ((reg & 0xF00) << 16);
 }
 
-uint32_t pci_read_config_register(uint32_t base, uint8_t reg) {
-    io_out32(PCI_CONFIG_ADDRESS, PCI_ADDRESS_ENABLE | base | reg);
+uint32_t pci_read_config(uint32_t addr) {
+    io_out32(PCI_CONFIG_ADDRESS, PCI_ADDRESS_ENABLE | addr);
     uint32_t retval = io_in32(PCI_CONFIG_DATA);
     io_out32(PCI_CONFIG_ADDRESS, 0);
     return retval;
 }
 
-void pci_write_config_register(uint32_t base, uint8_t reg, uint32_t val) {
-    io_out32(PCI_CONFIG_ADDRESS, PCI_ADDRESS_ENABLE | base | reg);
+void pci_write_config(uint32_t addr, uint32_t val) {
+    io_out32(PCI_CONFIG_ADDRESS, PCI_ADDRESS_ENABLE | addr);
     io_out32(PCI_CONFIG_DATA, val);
     io_out32(PCI_CONFIG_ADDRESS, 0);
 }

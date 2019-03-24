@@ -8,12 +8,12 @@
 
 static uint8_t io_in8(uint16_t const port) {
     uint8_t al;
-    __asm__ volatile("inb %1, %%al": "=a"(al): "n"(port));
+    __asm__ volatile("inb %1, %%al": "=a"(al): "i"(port));
     return al;
 }
 
 static void io_out8(uint16_t const port, uint8_t val) {
-    __asm__ volatile("outb %%al, %0": : "n"(port), "a"(val));
+    __asm__ volatile("outb %%al, %0": : "i"(port), "a"(val));
 }
 
 
