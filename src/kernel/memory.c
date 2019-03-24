@@ -112,7 +112,7 @@ void mm_init(moe_bootinfo_mmap_t* mmap) {
         // moe_mmap_t mem = { efi_mem->PhysicalStart, efi_mem->NumberOfPages*0x1000, mm_type_for_count(efi_mem->Type) };
         // printf("%016llx %08zx %08zx\n", mem.base, mem.size, mem.type);
     }
-    gRT->SetVirtualAddressMap(mmap->size, mmap->desc_size, mmap->desc_version, mmap->mmap);
+    if (gRT) gRT->SetVirtualAddressMap(mmap->size, mmap->desc_size, mmap->desc_version, mmap->mmap);
 
     static_start = kma_base;
     free_memory = kma_size * PAGE_SIZE;

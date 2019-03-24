@@ -33,6 +33,7 @@ extern void gs_init(moe_dib_t* screen);
 extern void mm_init(moe_bootinfo_mmap_t* mmap);
 extern void lpc_init();
 extern void window_init();
+_Noreturn void arch_do_reset();
 
 extern char *strchr(const char *s, int c);
 extern int vprintf(const char *format, va_list args);
@@ -52,19 +53,26 @@ void memset32(uint32_t* p, uint32_t v, size_t n) {
 
 _Noreturn void moe_reboot() {
     acpi_reset();
-    gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
+    if (gRT) gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
+    arch_do_reset();
 }
 
 _Noreturn void moe_shutdown_system() {
     acpi_enter_sleep_state(5);
-    gRT->ResetSystem(EfiResetShutdown, 0, 0, NULL);
+    if (gRT) gRT->ResetSystem(EfiResetShutdown, 0, 0, NULL);
+    moe_usleep(3000000);
+    moe_reboot();
 }
 
 
 uint64_t fw_get_time() {
-    EFI_TIME etime;
-    gRT->GetTime(&etime, NULL);
-    return 1000000LL * (etime.Second + etime.Minute * 60 + etime.Hour * 3600) + (etime.Nanosecond / 1000);
+    if (gRT) {
+        EFI_TIME etime;
+        gRT->GetTime(&etime, NULL);
+        return 1000000LL * (etime.Second + etime.Minute * 60 + etime.Hour * 3600) + (etime.Nanosecond / 1000);
+    } else {
+        return 0;
+    }
 }
 
 

@@ -486,6 +486,17 @@ void pci_write_config_register(uint32_t base, uint8_t reg, uint32_t val) {
 #define IA32_MISC_XD_DISABLE    (1ULL<<34)
 #define IA32_EFER_NXE           (1<<11)
 
+
+_Noreturn void arch_do_reset() {
+    // WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x00084500);
+    __asm__ volatile ("outb %%al, %%dx": : "d"(0xCF9), "a"(0x06));
+    moe_usleep(10000);
+    __asm__ volatile ("outb %%al, $0x92": : "a"(0x01));
+    moe_usleep(10000);
+    for (;;) { io_hlt(); }
+}
+
+
 void arch_init() {
     cs_sel = gdt_init();
     idt_init();
