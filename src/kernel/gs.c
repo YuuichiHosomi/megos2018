@@ -164,34 +164,29 @@ moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color) {
 // }
 
 
-// void blt_test(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect) {
-//     unsigned dx = origin->x, dy = origin->y;
-//     unsigned sx = rect->origin.x, sy = rect->origin.y, w = rect->size.width, h = rect->size.height;
-
-//     uint32_t *p = dest->dib;
-//     p += dx + dy * dest->delta;
-//     uint32_t *q = src->dib;
-//     q += sx + sy * src->delta;
-//     uintptr_t dd = dest->delta - w, sd = src->delta - w;
+// test for blt
+// void blt_test(moe_dib_t* dest, moe_dib_t* src, intptr_t dx, intptr_t dy, intptr_t sx, intptr_t sy, intptr_t w, intptr_t h) {
 
 //     if (1) {
 
-//         for (uintptr_t i = 0; i < h; i++) {
+//         intptr_t temp = dx;
+//         dx = dest->height - dy;
+//         dy = temp;
+//         uint32_t *p = dest->dib;
+//         p += dx + dy * dest->delta - h;
+//         uint32_t *q = src->dib;
+//         q += sx + (sy + h - 1) * src->delta;
+//         uintptr_t sdy = src->delta, ddy = dest->delta - h;
+//         #pragma clang loop vectorize(enable) interleave(enable)
+//         for (uintptr_t i = w; i > 0; i--) {
+//             uint32_t *q0 = q;
 //             #pragma clang loop vectorize(enable) interleave(enable)
-//             for (uintptr_t j = 0; j < w; j++) {
-//                 uint8_t *p0 = (uint8_t*)p;
-//                 uint8_t *q0 = (uint8_t*)q;
-//                 uint8_t alpha = q0[3];
-//                 uint8_t alpha_n = 255 - alpha;
-//                 p0[0] = (q0[0] * alpha + p0[0] * alpha_n) / 256;
-//                 p0[1] = (q0[1] * alpha + p0[1] * alpha_n) / 256;
-//                 p0[2] = (q0[2] * alpha + p0[2] * alpha_n) / 256;
-//                 p0[3] = (q0[3] * alpha + p0[3] * alpha_n) / 256;
-//                 // p0[3] = 0;
-//                 p++, q++;
+//             for (uintptr_t j = h; j > 0; j--) {
+//                 *p++ = *q0;
+//                 q0 -= sdy;
 //             }
-//             p += dd;
-//             q += sd;
+//             p += ddy;
+//             q++;
 //         }
 
 //     }
@@ -200,7 +195,7 @@ moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color) {
 
 void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *rect, uint32_t options) {
 
-    int dx, dy, w, h, sx, sy;
+    intptr_t dx, dy, w, h, sx, sy;
     if (origin) {
         dx = origin->x;
         dy = origin->y;
@@ -232,8 +227,8 @@ void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *r
         }
         if (w > src->width) w = src->width;
         if (h > src->height) h = src->height;
-        int r = dx + w;
-        int b = dy + h;
+        intptr_t r = dx + w;
+        intptr_t b = dy + h;
         if (r >= dest->width) w = dest->width - dx;
         if (b >= dest->height) h = dest->height - dy;
         // printf("\r{%5d %5d %5d %5d %5d %5d %5d %5d}", dx, dy, sx, sy, w, h, r, b);
@@ -243,7 +238,7 @@ void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *r
     // Transfer
 
     if (dest->flags & MOE_DIB_ROTATE) { // Rotation
-        int temp = dx;
+        intptr_t temp = dx;
         dx = dest->height - dy;
         dy = temp;
         uint32_t *p = dest->dib;
@@ -340,7 +335,7 @@ void moe_blt(moe_dib_t* dest, moe_dib_t* src, moe_point_t *origin, moe_rect_t *r
 
 
 void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color) {
-    int dx, dy, w, h;
+    intptr_t dx, dy, w, h;
     if (rect) {
         dx = rect->origin.x;
         dy = rect->origin.y;
@@ -361,16 +356,16 @@ void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color) {
             h += dy;
             dy = 0;
         }
-        int r = dx + w;
-        int b = dy + h;
+        intptr_t r = dx + w;
+        intptr_t b = dy + h;
         if (r >= dest->width) w = dest->width - dx;
         if (b >= dest->height) h = dest->height - dy;
         if (w <= 0 || h <= 0) return;
     }
 
     if (dest->flags & MOE_DIB_ROTATE) {
-        int temp = dx;
-        dx = dest->height - dy;
+        intptr_t temp = dx;
+        dx = dest->height - dy - h;
         dy = temp;
         temp = w;
         w = h;
@@ -384,13 +379,13 @@ void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color) {
     if (dd == 0) {
         uintptr_t limit = w * h;
         #pragma clang loop vectorize(enable) interleave(enable)
-        for (int i = 0; i < limit; i++) {
+        for (uintptr_t i = 0; i < limit; i++) {
             *p++ = color;
         }
     } else {
-        for (int i = 0; i < h; i++) {
+        for (uintptr_t i = 0; i < h; i++) {
             #pragma clang loop vectorize(enable) interleave(enable)
-            for (int j = 0; j < w; j++) {
+            for (uintptr_t j = 0; j < w; j++) {
                 *p++ = color;
             }
             p += dd;
@@ -399,7 +394,7 @@ void moe_fill_rect(moe_dib_t* dest, moe_rect_t *rect, uint32_t color) {
 }
 
 void moe_blend_rect(moe_dib_t *dest, moe_rect_t *rect, uint32_t color) {
-    int dx, dy, w, h;
+    intptr_t dx, dy, w, h;
     if (rect) {
         dx = rect->origin.x;
         dy = rect->origin.y;
@@ -420,40 +415,50 @@ void moe_blend_rect(moe_dib_t *dest, moe_rect_t *rect, uint32_t color) {
             h += dy;
             dy = 0;
         }
-        int r = dx + w;
-        int b = dy + h;
+        intptr_t r = dx + w;
+        intptr_t b = dy + h;
         if (r >= dest->width) w = dest->width - dx;
         if (b >= dest->height) h = dest->height - dy;
         if (w <= 0 || h <= 0) return;
+    }
+
+    if (dest->flags & MOE_DIB_ROTATE) {
+        intptr_t temp = dx;
+        dx = dest->height - dy - h;
+        dy = temp;
+        temp = w;
+        w = h;
+        h = temp;
     }
 
     uint32_t *p = dest->dib;
     p += dx + dy * dest->delta;
     uintptr_t dd = dest->delta - w;
 
-    unsigned alpha = (color & 0xFF000000) >> 24;
-    unsigned alpha_n = 255 - alpha;
-    uint8_t _b = color & 0xFF;
-    uint8_t _g = (color >> 8) & 0xFF;
-    uint8_t _r = (color >> 16) & 0xFF;
+    uint32_t alpha = (color >> 24) & 0xFF;
+    uint32_t alpha_n = 255 - alpha;
+    uint32_t _b = (color & 0xFF) * alpha;
+    uint32_t _g = ((color >> 8) & 0xFF) * alpha;
+    uint32_t _r = ((color >> 16) & 0xFF) * alpha;
+    uint32_t _a = alpha * alpha;
 
-        for (int i = 0; i < h; i++) {
-            #pragma clang loop vectorize(enable) interleave(enable)
-            for (int j = 0; j < w; j++) {
-                uint8_t *p0 = (uint8_t*)p;
-                p0[0] = (_b * alpha + p0[0] * alpha_n) / 256;
-                p0[1] = (_g * alpha + p0[1] * alpha_n) / 256;
-                p0[2] = (_r * alpha + p0[2] * alpha_n) / 256;
-                p0[3] = (alpha * alpha + p0[3] * alpha_n) / 256;
-                p++;
-            }
-            p += dd;
+    for (uintptr_t i = 0; i < h; i++) {
+        #pragma clang loop vectorize(enable) interleave(enable)
+        for (uintptr_t j = 0; j < w; j++) {
+            uint8_t *p0 = (uint8_t*)p;
+            p0[0] = (_b + p0[0] * alpha_n) / 256;
+            p0[1] = (_g + p0[1] * alpha_n) / 256;
+            p0[2] = (_r + p0[2] * alpha_n) / 256;
+            p0[3] = (_a + p0[3] * alpha_n) / 256;
+            p++;
         }
+        p += dd;
+    }
 
 }
 
 
-void moe_draw_pixel(moe_dib_t* dest, int dx, int dy, uint32_t color) {
+void moe_draw_pixel(moe_dib_t* dest, intptr_t dx, intptr_t dy, uint32_t color) {
     moe_point_t point = {dx, dy};
     moe_draw_multi_pixels(dest, 1, &point, color);
 }
@@ -470,8 +475,8 @@ void moe_draw_multi_pixels(moe_dib_t *dest, size_t count, moe_point_t *points, u
 }
 
 
-void draw_hline(moe_dib_t *dest, int x, int y, int width, uint32_t color) {
-    int dx = x, dy = y, w = width;
+void draw_hline(moe_dib_t *dest, intptr_t x, intptr_t y, intptr_t width, uint32_t color) {
+    intptr_t dx = x, dy = y, w = width;
 
     {
         if (dy < 0 || dy >= dest->height) return;
@@ -479,7 +484,7 @@ void draw_hline(moe_dib_t *dest, int x, int y, int width, uint32_t color) {
             w += dx;
             dx = 0;
         }
-        int r = dx + w;
+        intptr_t r = dx + w;
         if (r >= dest->width) w = dest->width - dx;
         if (w <= 0) return;
     }
@@ -488,14 +493,14 @@ void draw_hline(moe_dib_t *dest, int x, int y, int width, uint32_t color) {
     p += dx + dy * dest->delta;
 
     #pragma clang loop vectorize(enable) interleave(enable)
-    for (int j = 0; j < w; j++) {
+    for (uintptr_t j = 0; j < w; j++) {
         *p++ = color;
     }
 }
 
 
-void draw_vline(moe_dib_t *dest, int x, int y, int height, uint32_t color) {
-    int dx = x, dy = y, h = height, dd = dest->delta;
+void draw_vline(moe_dib_t *dest, intptr_t x, intptr_t y, intptr_t height, uint32_t color) {
+    intptr_t dx = x, dy = y, h = height, dd = dest->delta;
 
     {
         if (dx < 0 || dx >= dest->width) return;
@@ -503,7 +508,7 @@ void draw_vline(moe_dib_t *dest, int x, int y, int height, uint32_t color) {
             h += dy;
             dy = 0;
         }
-        int b = dy + h;
+        intptr_t b = dy + h;
         if (b >= dest->height) h = dest->height - dy;
         if (h <= 0) return;
     }
@@ -511,16 +516,16 @@ void draw_vline(moe_dib_t *dest, int x, int y, int height, uint32_t color) {
     uint32_t *p = dest->dib;
     p += dx + dy * dd;
 
-    for (int j = 0; j < h; j++) {
+    for (uintptr_t j = 0; j < h; j++) {
         *p = color;
         p += dd;
     }
 }
 
 
-void moe_fill_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t color) {
+void moe_fill_round_rect(moe_dib_t* dest, moe_rect_t *rect, intptr_t radius, uint32_t color) {
 
-    int dx, dy, w, h;
+    intptr_t dx, dy, w, h;
     if (rect) {
         dx = rect->origin.x;
         dy = rect->origin.y;
@@ -535,15 +540,15 @@ void moe_fill_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t
     if (radius * 2 > w) radius = w / 2;
     if (radius * 2 > h) radius = h / 2;
 
-    int lh = h - radius * 2;
+    intptr_t lh = h - radius * 2;
     if (lh > 0) {
         moe_rect_t rect_line = {{dx, dy + radius}, {w, lh}};
         moe_fill_rect(dest, &rect_line, color);
     }
 
-    int d = 1 - radius, dh = 3, dd = 5 - 2 * radius;
-    int cx = 0, cy = radius;
-    int bx, by, dw, qh = h - 1;
+    intptr_t d = 1 - radius, dh = 3, dd = 5 - 2 * radius;
+    intptr_t cx = 0, cy = radius;
+    intptr_t bx, by, dw, qh = h - 1;
 
     for (; cx <= cy; cx++) {
         if (d < 0) {
@@ -572,9 +577,9 @@ void moe_fill_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t
     }
 }
 
-void moe_draw_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t color) {
+void moe_draw_round_rect(moe_dib_t* dest, moe_rect_t *rect, intptr_t radius, uint32_t color) {
 
-    int dx, dy, w, h;
+    intptr_t dx, dy, w, h;
     if (rect) {
         dx = rect->origin.x;
         dy = rect->origin.y;
@@ -589,20 +594,20 @@ void moe_draw_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t
     if (radius * 2 > w) radius = w / 2;
     if (radius * 2 > h) radius = h / 2;
 
-    int lh = h - radius * 2;
+    intptr_t lh = h - radius * 2;
     if (lh > 0) {
         draw_vline(dest, dx, dy + radius, lh, color);
         draw_vline(dest, dx + w - 1, dy + radius, lh, color);
     }
-    int lw = w - radius * 2;
+    intptr_t lw = w - radius * 2;
     if (lw > 0) {
         draw_hline(dest, dx + radius, dy, lw, color);
         draw_hline(dest, dx + radius, dy + h - 1, lw, color);
     }
 
-    int d = 1 - radius, dh = 3, dd = 5 - 2 * radius;
-    int cx = 0, cy = radius;
-    int qh = h - 1;
+    intptr_t d = 1 - radius, dh = 3, dd = 5 - 2 * radius;
+    intptr_t cx = 0, cy = radius;
+    intptr_t qh = h - 1;
 
     for (; cx <= cy; cx++) {
         if (d < 0) {
@@ -616,8 +621,8 @@ void moe_draw_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t
         }
 
         {
-            int bx = radius - cy, by = radius - cx;
-            int dw = w - bx * 2 - 1;
+            intptr_t bx = radius - cy, by = radius - cx;
+            intptr_t dw = w - bx * 2 - 1;
             moe_point_t points[] = {
                 {dx + bx, dy + by },
                 {dx + bx, dy + qh - by },
@@ -628,8 +633,8 @@ void moe_draw_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t
         }
 
         {
-            int bx = radius - cx, by = radius - cy;
-            int dw = w - bx * 2 - 1;
+            intptr_t bx = radius - cx, by = radius - cy;
+            intptr_t dw = w - bx * 2 - 1;
             moe_point_t points[] = {
                 {dx + bx, dy + by },
                 {dx + bx, dy + qh - by },
@@ -642,31 +647,54 @@ void moe_draw_round_rect(moe_dib_t* dest, moe_rect_t *rect, int radius, uint32_t
 }
 
 
-void draw_pattern(moe_dib_t *dib, moe_rect_t* rect, const uint8_t* pattern, uint32_t fgcolor) {
+void draw_pattern(moe_dib_t *dest, moe_rect_t* rect, const uint8_t* pattern, uint32_t fgcolor) {
 
-    int x = rect->origin.x, y = rect->origin.y, w = rect->size.width, h = rect->size.height;
-    int delta = dib->delta;
-    int w8 = (w+7)/8;
+    intptr_t x = rect->origin.x, y = rect->origin.y, w = rect->size.width, h = rect->size.height;
+    uintptr_t delta = dest->delta;
+    uintptr_t w8 = (w + 7) / 8;
 
     if ( x < 0 || y < 0) return;
 
-    int wl = delta - w;
-    uint32_t* p = dib->dib + y * delta + x;
+    if (dest->flags & MOE_DIB_ROTATE) {
+        y = dest->height - y - h;
+        uintptr_t wl = delta - h;
+        uint32_t* p = dest->dib + x * delta + y;
 
-    for(int i=0; i<h; i++) {
-        int l=w;
-        #pragma clang loop vectorize(enable) interleave(enable)
-        for(int k=0; k<w8; k++, l-=8) {
-            int m = (l>8) ? 8 : l;
-            uint8_t font_pattern = *pattern++;
+        uintptr_t l = w;
+        for(uintptr_t k = 0; k < w8; k++, l -= 8) {
+            uintptr_t m = (l > 8) ? 8 : l;
             #pragma clang loop vectorize(enable) interleave(enable)
-            for(int j=0; j<m; j++, p++) {
-                if(font_pattern & (0x80>>j)) {
-                    *p = fgcolor;
+            for(uintptr_t i = 0; i < m; i++) {
+                uint32_t mask = 0x80 >> i;
+                #pragma clang loop vectorize(enable) interleave(enable)
+                for(intptr_t j = h - 1; j >= 0; j--, p++) {
+                    if(pattern[j * w8 + k] & mask) {
+                        *p = fgcolor;
+                    }
                 }
+                p += wl;
             }
         }
-        p += wl;
+
+    } else {
+        uintptr_t wl = delta - w;
+        uint32_t* p = dest->dib + y * delta + x;
+
+        for(uintptr_t i = 0; i < h; i++) {
+            uintptr_t l = w;
+            #pragma clang loop vectorize(enable) interleave(enable)
+            for(uintptr_t k = 0; k < w8; k++, l -= 8) {
+                uintptr_t m = (l > 8) ? 8 : l;
+                uint8_t font_pattern = *pattern++;
+                #pragma clang loop vectorize(enable) interleave(enable)
+                for(uintptr_t j = 0; j < m; j++, p++) {
+                    if(font_pattern & (0x80 >> j)) {
+                        *p = fgcolor;
+                    }
+                }
+            }
+            p += wl;
+        }
     }
 
 }
@@ -870,7 +898,7 @@ void gs_init(moe_dib_t* screen) {
     main_console.font = &system_font;
 
     current_console = &main_console;
-    int padding_x = system_font.ex * 2;
+    int padding_x = system_font.ex * 1;
     int padding_y = system_font.line_height;
     moe_edge_insets_t insets = { padding_y, padding_x, padding_y, padding_x };
     main_console_insets = insets;
