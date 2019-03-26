@@ -578,33 +578,12 @@ _mp_rm_payload:
 .core_ok:
     movzx ebp, al
 
+    lgdt [bx + BOOTINFO_GDTR]
 
     ; enter to PM
     mov eax, cr0
     or al, 0x01
     mov cr0, eax
-
-    lgdt [bx + BOOTINFO_GDTR]
-
-    mov ax, LOADER_SS
-    mov ss, ax
-    mov ds, ax
-    mov es, ax
-
-    mov eax, [bx + BOOTINFO_CR4]
-    mov cr4, eax
-    mov eax, [bx + BOOTINFO_CR3]
-    mov cr3 ,eax
-
-    mov eax, [bx + BOOTINFO_MSR_MISC]
-    mov edx, [bx + BOOTINFO_MSR_MISC + 4]
-    mov ecx, IA32_MISC_MSR
-    wrmsr
-
-    mov ecx, IA32_EFER_MSR
-    xor edx, edx
-    mov eax, [bx+ BOOTINFO_EFER]
-    wrmsr
 
     jmp dword far [bx + BOOTINFO_START32]
 _end_mp_rm_payload:
@@ -612,6 +591,26 @@ _end_mp_rm_payload:
 
 [BITS 32]
 _startup32:
+
+    mov eax, LOADER_SS
+    mov ss, eax
+    mov ds, eax
+    mov es, eax
+
+    mov eax, [ebx + BOOTINFO_CR4]
+    mov cr4, eax
+    mov eax, [ebx + BOOTINFO_CR3]
+    mov cr3 ,eax
+
+    mov eax, [ebx + BOOTINFO_MSR_MISC]
+    mov edx, [ebx + BOOTINFO_MSR_MISC + 4]
+    mov ecx, IA32_MISC_MSR
+    wrmsr
+
+    mov ecx, IA32_EFER_MSR
+    xor edx, edx
+    mov eax, [ebx+ BOOTINFO_EFER]
+    wrmsr
 
     ; enter to LM
     mov eax, cr0

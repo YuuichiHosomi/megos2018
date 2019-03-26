@@ -24,12 +24,18 @@ enum {
     CPUID_F81C,
 };
 
+cpuid_feature_table_t impl_table[] = {
+    {CPUID_F81D, 29, "AMD64"},
+    {CPUID_F01D, 0,  "FPU"},
+    {CPUID_F01D, 23, "MMX"},
+    {CPUID_F01D, 25, "SSE"},
+    {CPUID_F01D, 6,  "PAE"},
+    {CPUID_F01D, 24, "FXSR"},
+    {CPUID_FEND}
+};
+
 cpuid_feature_table_t isa_table[] = {
     {CPUID_F01D, 30, "IA64"},
-    {CPUID_F81D, 29, "AMD64"},
-    // {CPUID_F01D, 0,  "FPU"},
-    // {CPUID_F01D, 23, "MMX"},
-    // {CPUID_F01D, 25, "SSE"},
     {CPUID_F01D, 26, "SSE2"},
     {CPUID_F01C, 0,  "SSE3"},
     {CPUID_F01C, 9,  "SSSE3"},
@@ -44,11 +50,9 @@ cpuid_feature_table_t isa_table[] = {
 };
 
 cpuid_feature_table_t sysisa_table[] = {
-    {CPUID_F01D, 6,  "PAE"},
     {CPUID_F81D, 20, "NX"},
     {CPUID_F81D, 26, "PDPE1GB"},
     {CPUID_F01D, 28, "HT"},
-    {CPUID_F01D, 24, "FXSR"},
     {CPUID_F01C, 21, "x2APIC"},
     {CPUID_F01C, 26, "XSAVE"},
     {CPUID_F01C, 27, "OSXSAVE"},
@@ -109,6 +113,13 @@ int cmd_cpuid(int argc, char **argv) {
     printf("CPUID: %.12s %08x %s\n", cpuid_vendor, cpuid_01.eax, brand_string);
 
     uint32_t feature_regs[] = { 0, cpuid_01.edx, cpuid_01.ecx, cpuid_07.edx, cpuid_81.edx, cpuid_81.ecx, };
+
+    for (int i = 0; impl_table[i].reg_index; i++) {
+        cpuid_feature_table_t feature = impl_table[i];
+        if ((feature_regs[feature.reg_index] & (1 << feature.bit_index)) == 0) {
+            printf("MISSING: %s\n", feature.label);
+        }
+    }
 
     printf("ISA:");
     for (int i = 0; isa_table[i].reg_index; i++) {
