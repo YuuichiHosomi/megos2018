@@ -46,6 +46,30 @@ extern void *_irq20;
 extern void *_irq21;
 extern void *_irq22;
 extern void *_irq23;
+extern void *_irq24;
+extern void *_irq25;
+extern void *_irq26;
+extern void *_irq27;
+extern void *_irq28;
+extern void *_irq29;
+extern void *_irq30;
+extern void *_irq31;
+extern void *_irq32;
+extern void *_irq33;
+extern void *_irq34;
+extern void *_irq35;
+extern void *_irq36;
+extern void *_irq37;
+extern void *_irq38;
+extern void *_irq39;
+extern void *_irq40;
+extern void *_irq41;
+extern void *_irq42;
+extern void *_irq43;
+extern void *_irq44;
+extern void *_irq45;
+extern void *_irq46;
+extern void *_irq47;
 
 extern uint16_t gdt_init(void);
 extern void idt_load(volatile void*, size_t);
@@ -143,7 +167,7 @@ void idt_init() {
 //  Advanced Programmable Interrupt Controller
 
 #define IRQ_BASE                    0x40
-#define MAX_IRQ                     24
+#define MAX_IRQ                     48
 #define MAX_CPU                     32
 #define INVALID_CPUID               0xFF
 #define IRQ_SCHDULE                 0xFC
@@ -375,6 +399,30 @@ void apic_init() {
         idt_set_kernel_handler(IRQ_BASE+21, (uintptr_t)&_irq21, 0);
         idt_set_kernel_handler(IRQ_BASE+22, (uintptr_t)&_irq22, 0);
         idt_set_kernel_handler(IRQ_BASE+23, (uintptr_t)&_irq23, 0);
+        idt_set_kernel_handler(IRQ_BASE+24, (uintptr_t)&_irq24, 0);
+        idt_set_kernel_handler(IRQ_BASE+25, (uintptr_t)&_irq25, 0);
+        idt_set_kernel_handler(IRQ_BASE+26, (uintptr_t)&_irq26, 0);
+        idt_set_kernel_handler(IRQ_BASE+27, (uintptr_t)&_irq27, 0);
+        idt_set_kernel_handler(IRQ_BASE+28, (uintptr_t)&_irq28, 0);
+        idt_set_kernel_handler(IRQ_BASE+29, (uintptr_t)&_irq29, 0);
+        idt_set_kernel_handler(IRQ_BASE+30, (uintptr_t)&_irq30, 0);
+        idt_set_kernel_handler(IRQ_BASE+31, (uintptr_t)&_irq31, 0);
+        idt_set_kernel_handler(IRQ_BASE+32, (uintptr_t)&_irq32, 0);
+        idt_set_kernel_handler(IRQ_BASE+33, (uintptr_t)&_irq33, 0);
+        idt_set_kernel_handler(IRQ_BASE+34, (uintptr_t)&_irq34, 0);
+        idt_set_kernel_handler(IRQ_BASE+35, (uintptr_t)&_irq35, 0);
+        idt_set_kernel_handler(IRQ_BASE+36, (uintptr_t)&_irq36, 0);
+        idt_set_kernel_handler(IRQ_BASE+37, (uintptr_t)&_irq37, 0);
+        idt_set_kernel_handler(IRQ_BASE+38, (uintptr_t)&_irq38, 0);
+        idt_set_kernel_handler(IRQ_BASE+39, (uintptr_t)&_irq39, 0);
+        idt_set_kernel_handler(IRQ_BASE+40, (uintptr_t)&_irq40, 0);
+        idt_set_kernel_handler(IRQ_BASE+41, (uintptr_t)&_irq41, 0);
+        idt_set_kernel_handler(IRQ_BASE+42, (uintptr_t)&_irq42, 0);
+        idt_set_kernel_handler(IRQ_BASE+43, (uintptr_t)&_irq43, 0);
+        idt_set_kernel_handler(IRQ_BASE+44, (uintptr_t)&_irq44, 0);
+        idt_set_kernel_handler(IRQ_BASE+45, (uintptr_t)&_irq45, 0);
+        idt_set_kernel_handler(IRQ_BASE+46, (uintptr_t)&_irq46, 0);
+        idt_set_kernel_handler(IRQ_BASE+47, (uintptr_t)&_irq47, 0);
         idt_set_kernel_handler(IRQ_SCHDULE, (uintptr_t)&_ipi_sche, 0);
 
         // Then enable IRQ

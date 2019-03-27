@@ -327,106 +327,205 @@ _int07: ; #NM
     iretq
 
 
-	global _irq0, _irq1, _irq2, _irq3, _irq4, _irq5, _irq6, _irq7
+    global _irq0, _irq1, _irq2, _irq3, _irq4, _irq5, _irq6, _irq7
     global _irq8, _irq9, _irq10, _irq11, _irq12, _irq13, _irq14, _irq15
     global _irq16, _irq17, _irq18, _irq19, _irq20, _irq21, _irq22, _irq23
+    global _irq24, _irq25, _irq26, _irq27, _irq28, _irq29, _irq30, _irq31
+    global _irq32, _irq33, _irq34, _irq35, _irq36, _irq37, _irq38, _irq39
+    global _irq40, _irq41, _irq42, _irq43, _irq44, _irq45, _irq46, _irq47
 
+_irq47:
+	push rcx
+	mov cl, 47
+	jmp _irqXX
+_irq46:
+	push rcx
+	mov cl, 46
+	jmp _irqXX
+_irq45:
+	push rcx
+	mov cl, 45
+	jmp _irqXX
+_irq44:
+	push rcx
+	mov cl, 44
+	jmp _irqXX
+_irq43:
+	push rcx
+	mov cl, 43
+	jmp _irqXX
+_irq42:
+	push rcx
+	mov cl, 42
+	jmp _irqXX
+_irq41:
+	push rcx
+	mov cl, 41
+	jmp _irqXX
+_irq40:
+	push rcx
+	mov cl, 40
+	jmp _irqXX
+_irq39:
+	push rcx
+	mov cl, 39
+	jmp _irqXX
+_irq38:
+	push rcx
+	mov cl, 38
+	jmp _irqXX
+_irq37:
+	push rcx
+	mov cl, 37
+	jmp _irqXX
+_irq36:
+	push rcx
+	mov cl, 36
+	jmp _irqXX
+_irq35:
+	push rcx
+	mov cl, 35
+	jmp _irqXX
+_irq34:
+	push rcx
+	mov cl, 34
+	jmp _irqXX
+_irq33:
+	push rcx
+	mov cl, 33
+	jmp _irqXX
+_irq32:
+	push rcx
+	mov cl, 32
+	jmp _irqXX
+_irq31:
+	push rcx
+	mov cl, 31
+	jmp _irqXX
+_irq30:
+	push rcx
+	mov cl, 30
+	jmp _irqXX
+_irq29:
+	push rcx
+	mov cl, 29
+	jmp _irqXX
+_irq28:
+	push rcx
+	mov cl, 28
+	jmp _irqXX
+_irq27:
+	push rcx
+	mov cl, 27
+	jmp _irqXX
+_irq26:
+	push rcx
+	mov cl, 26
+	jmp _irqXX
+_irq25:
+	push rcx
+	mov cl, 25
+	jmp _irqXX
+_irq24:
+	push rcx
+	mov cl, 24
+	jmp _irqXX
 _irq23:
 	push rcx
 	mov cl, 23
-	jmp short _irqXX
+	jmp _irqXX
 _irq22:
 	push rcx
 	mov cl, 22
-	jmp short _irqXX
+	jmp _irqXX
 _irq21:
 	push rcx
 	mov cl, 21
-	jmp short _irqXX
+	jmp _irqXX
 _irq20:
 	push rcx
 	mov cl, 20
-	jmp short _irqXX
+	jmp _irqXX
 _irq19:
 	push rcx
 	mov cl, 19
-	jmp short _irqXX
+	jmp _irqXX
 _irq18:
 	push rcx
 	mov cl, 18
-	jmp short _irqXX
+	jmp _irqXX
 _irq17:
 	push rcx
 	mov cl, 17
-	jmp short _irqXX
+	jmp _irqXX
 _irq16:
 	push rcx
 	mov cl, 16
-	jmp short _irqXX
+	jmp _irqXX
 _irq15:
 	push rcx
 	mov cl, 15
-	jmp short _irqXX
+	jmp _irqXX
 _irq14:
 	push rcx
 	mov cl, 14
-	jmp short _irqXX
+	jmp _irqXX
 _irq13:
 	push rcx
 	mov cl, 13
-	jmp short _irqXX
+	jmp _irqXX
 _irq12:
 	push rcx
 	mov cl, 12
-	jmp short _irqXX
+	jmp _irqXX
 _irq11:
 	push rcx
 	mov cl, 11
-	jmp short _irqXX
+	jmp _irqXX
 _irq10:
 	push rcx
 	mov cl, 10
-	jmp short _irqXX
+	jmp _irqXX
 _irq9:
 	push rcx
 	mov cl, 9
-	jmp short _irqXX
+	jmp _irqXX
 _irq8:
 	push rcx
 	mov cl, 8
-	jmp short _irqXX
+	jmp _irqXX
 _irq7:
 	push rcx
 	mov cl, 7
-	jmp short _irqXX
+	jmp _irqXX
 _irq6:
 	push rcx
 	mov cl, 6
-	jmp short _irqXX
+	jmp _irqXX
 _irq5:
 	push rcx
 	mov cl, 5
-	jmp short _irqXX
+	jmp _irqXX
 _irq4:
 	push rcx
 	mov cl, 4
-	jmp short _irqXX
+	jmp _irqXX
 _irq3:
 	push rcx
 	mov cl, 3
-	jmp short _irqXX
+	jmp _irqXX
 _irq2:
 	push rcx
 	mov cl, 2
-	jmp short _irqXX
+	jmp _irqXX
 _irq1:
 	push rcx
 	mov cl, 1
-	jmp short _irqXX
+	jmp _irqXX
 _irq0:
 	push rcx
 	mov cl, 0
-;	jmp short _irqXX
+;	jmp _irqXX
 
 _irqXX:
     push rax
