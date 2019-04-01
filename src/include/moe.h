@@ -23,6 +23,8 @@ int atomic_bit_test_and_clear(void *p, uintptr_t bit);
 int atomic_bit_test(void *p, uintptr_t bit);
 
 
+const char *moe_kname();
+
 void moe_assert(const char *file, uintptr_t line, ...);
 #define MOE_ASSERT(cond, ...) if (!(cond)) { moe_assert(__FILE__, __LINE__, __VA_ARGS__); }
 void moe_reboot();
@@ -131,6 +133,7 @@ uint32_t moe_translate_key_event(moe_window_t *window, uintptr_t event);
 //  Minimal Memory Subsystem
 void *mm_alloc_static_page(size_t n);
 void *mm_alloc_static(size_t n);
+uintptr_t moe_alloc_physical_page(size_t n);
 
 
 //  Threading Service

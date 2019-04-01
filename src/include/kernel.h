@@ -1,0 +1,95 @@
+// Minimal Operating Environment
+// Copyright (c) 1998,2018 MEG-OS project, All rights reserved.
+// License: BSD
+#pragma once
+
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include "acpi.h"
+
+
+typedef struct {
+    void* mmap; // EFI_MEMORY_DESCRIPTOR
+    uintptr_t size, desc_size;
+    uint32_t desc_version;
+} moe_bootinfo_mmap_t;
+
+typedef struct {
+    moe_dib_t screen;
+    acpi_rsd_ptr_t* acpi;
+
+    void* efiRT; // EFI_RUNTIME_SERVICES
+    moe_bootinfo_mmap_t mmap;
+} moe_bootinfo_t;
+
+
+//  Architecture Specific
+static inline void io_out8(uintptr_t port, uint8_t value) {
+    __asm__ volatile ("outb %%al, %%dx":: "a"(value), "d"(port));
+}
+
+static inline void io_out16(uintptr_t port, uint16_t value) {
+    __asm__ volatile ("outw %%ax, %%dx":: "a"(value), "d"(port));
+}
+
+static inline void io_out32(uintptr_t port, uint32_t value) {
+    __asm__ volatile ("outl %%eax, %%dx":: "a"(value), "d"(port));
+}
+
+static inline uint8_t io_in8(uintptr_t port) {
+    uint16_t value;
+    __asm__ volatile ("inb %%dx, %%al": "=a"(value) :"d"(port));
+    return value;
+}
+
+static inline uint16_t io_in16(uintptr_t port) {
+    uint16_t value;
+    __asm__ volatile ("inw %%dx, %%ax": "=a"(value) :"d"(port));
+    return value;
+}
+
+static inline uint32_t io_in32(uintptr_t port) {
+    uint32_t value;
+    __asm__ volatile ("inl %%dx, %%eax": "=a"(value) :"d"(port));
+    return value;
+}
+
+static inline void io_hlt() { __asm__ volatile("hlt"); }
+static inline void io_pause() { __asm__ volatile("pause"); }
+
+typedef void (*MOE_IRQ_HANDLER)(int irq);
+int moe_enable_irq(uint8_t irq, MOE_IRQ_HANDLER handler);
+int moe_disable_irq(uint8_t irq);
+int moe_install_msi(MOE_IRQ_HANDLER handler);
+uint8_t moe_make_msi_data(int irq, int mode, uint64_t *addr, uint32_t *data);
+
+typedef uintptr_t MOE_PHYSICAL_ADDRESS;
+void *MOE_PA2VA(MOE_PHYSICAL_ADDRESS va);
+uint8_t READ_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p);
+void WRITE_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p, uint8_t v);
+uint16_t READ_PHYSICAL_UINT16(MOE_PHYSICAL_ADDRESS _p);
+void WRITE_PHYSICAL_UINT16(MOE_PHYSICAL_ADDRESS _p, uint16_t v);
+uint32_t READ_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p);
+void WRITE_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p, uint32_t v);
+uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p);
+void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v);
+
+
+//  ACPI
+void* acpi_find_table(const char* signature);
+int acpi_get_number_of_table_entries();
+void* acpi_enum_table_entry(int index);
+void acpi_enter_sleep_state(int state);
+void acpi_reset();
+
+
+//  PCI
+uint32_t pci_make_reg_addr(uint8_t bus, uint8_t dev, uint8_t func, uintptr_t reg);
+uint32_t pci_read_config(uint32_t addr);
+void pci_write_config(uint32_t addr, uint32_t val);
+int pci_parse_bar(uint32_t _base, unsigned idx, uint64_t *_bar, uint64_t *_size);
+uint32_t pci_find_by_class(uint32_t cls, uint32_t mask);
+void pci_dump_config(uint32_t base, void *p);
+uint32_t pci_find_capability(uint32_t base, uint8_t id);

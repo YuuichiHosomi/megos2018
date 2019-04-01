@@ -64,7 +64,6 @@ enum {
     thread_flags_running = 31,
 };
 
-extern void io_set_lazy_fpu_restore();
 extern void io_finit();
 extern void io_fsave(void*);
 extern void io_fload(void*);
@@ -182,7 +181,6 @@ static void next_thread(uint32_t cpuid, moe_thread_t* current, void *obj, moe_ti
                     io_fsave(current->fpu_context);
                     current->fpu_used = 0;
                 }
-                io_set_lazy_fpu_restore();
                 moe_thread_t* expected_current = current;
                 if (atomic_compare_exchange_strong(&core_data[cpuid].current, &expected_current, next)) {
                     current->block = timer;
@@ -601,7 +599,7 @@ int cmd_top(int argc, char **argv) {
 
     moe_rect_t frame = {{-1, -1}, {384, 256}};
 
-    moe_window_t *window = moe_create_window(&frame, MOE_WS_TRANSPARENT | MOE_WS_CAPTION, window_level_higher, "Top");
+    moe_window_t *window = moe_create_window(&frame, MOE_WS_TRANSPARENT | MOE_WS_CAPTION, window_level_higher, "Task Manager");
     moe_set_window_bgcolor(window, bgcolor);
     moe_show_window(window);
 

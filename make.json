@@ -27,6 +27,7 @@
                 "acpi",
                 "shell",
                 "stdlib",
+                "dbghlp",
                 "noiz2bg",
                 "cpuid",
                 "moeasm.asm"

@@ -41,10 +41,3 @@ typedef struct moe_hid_keyboard_report_t {
     uint8_t RESERVED_1;
     uint8_t keydata[6];
 } moe_hid_keyboard_report_t;
-
-typedef enum {
-    hid_ps2_nodata,
-    hid_ps2_key_report_enabled,
-    hid_ps2_mouse_report_enabled,
-    hid_ps2_continued,
-} moe_hid_ps2_state_t;

@@ -18,6 +18,7 @@ extern void *_int00;
 extern void *_int03;
 extern void *_int06;
 extern void *_int07;
+extern void *_int08;
 extern void *_int0D;
 extern void *_int0E;
 extern void *_ipi_sche;
@@ -77,17 +78,8 @@ extern _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t
 extern void thread_init(int n_active_cpu);
 extern void reschedule();
 extern void acpi_init_sci();
+extern void lpc_init();
 
-
-static void io_out32(uint16_t const port, uint32_t val) {
-    __asm__ volatile("outl %%eax, %%dx": : "d"(port), "a"(val));
-}
-
-static uint32_t io_in32(uint16_t const port) {
-    uint32_t eax;
-    __asm__ volatile("inl %%dx, %%eax": "=a"(eax): "d"(port));
-    return eax;
-}
 
 static tuple_eax_edx_t io_rdmsr(uint32_t const addr) {
     tuple_eax_edx_t result;
@@ -156,6 +148,7 @@ void idt_init() {
     SET_SYSTEM_INT_HANDLER(03); // #BP Breakpoint
     SET_SYSTEM_INT_HANDLER(06); // #UD Undefined Opcode
     SET_SYSTEM_INT_HANDLER(07); // #NM Device not Available
+    SET_SYSTEM_INT_HANDLER(08); // #DF Double Fault
     SET_SYSTEM_INT_HANDLER(0D); // #GP General Protection Fault
     SET_SYSTEM_INT_HANDLER(0E); // #PF Page Fault
 
@@ -167,14 +160,20 @@ void idt_init() {
 //  Advanced Programmable Interrupt Controller
 
 #define IRQ_BASE                    0x40
-#define MAX_IRQ                     48
+#define MAX_IOAPIC_IRQ              24
+#define MAX_MSI                     24
+#define MAX_IRQ                     (MAX_IOAPIC_IRQ + MAX_MSI)
+#define IRQ_SCHDULE                 0xFC
+
 #define MAX_CPU                     32
 #define INVALID_CPUID               0xFF
-#define IRQ_SCHDULE                 0xFC
 
 #define IA32_APIC_BASE_MSR          0x1B
 #define IA32_APIC_BASE_MSR_BSP      0x100
 #define IA32_APIC_BASE_MSR_ENABLE   0x800
+
+#define MSI_BASE        0xFEE00000
+
 
 // type 00 Processor Local APIC
 typedef struct {
@@ -210,6 +209,7 @@ int n_cpu = 0;
 MOE_PHYSICAL_ADDRESS lapic_base = 0;
 MOE_PHYSICAL_ADDRESS ioapic_base   = 0;
 int smp_mode = 0;
+_Atomic uint8_t next_msi = 0;
 
 
 void apic_set_io_redirect(uint8_t irq, uint8_t vector, uint8_t trigger, int mask, apic_id_t desination) {
@@ -248,17 +248,41 @@ int moe_disable_irq(uint8_t irq) {
     return 0;
 }
 
+int moe_install_msi(MOE_IRQ_HANDLER handler) {
+    uint8_t acquired_msi = atomic_load(&next_msi);
+    while (acquired_msi < MAX_MSI) {
+        uint8_t _next_msi = acquired_msi + 1;
+        if (atomic_compare_exchange_weak(&next_msi, &acquired_msi, _next_msi)) {
+            uint8_t irq = MAX_IRQ - _next_msi;
+            irq_handler[irq] = handler;
+            return irq - MAX_IRQ;
+        } else {
+            io_pause();
+        }
+    }
+    return 0;
+}
+
+uint8_t moe_make_msi_data(int irq, int mode, uint64_t *addr, uint32_t *data) {
+    uint8_t vec = IRQ_BASE + MAX_IRQ + irq;
+    *addr = MSI_BASE | (apic_ids[0] << 12);
+    *data = (mode << 12) | vec;
+    return vec;
+}
+
 void _irq_main(uint8_t irq, void* p) {
     MOE_IRQ_HANDLER handler = irq_handler[irq];
     if (handler) {
         handler(irq);
         apic_end_of_irq(irq);
     } else {
-        moe_disable_irq(irq);
+        if (irq < MAX_IOAPIC_IRQ) {
+            moe_disable_irq(irq);
+        }
         //  TODO: Simulate GPF
         x64_context_t regs;
         regs.err = ((IRQ_BASE + irq) << 3) | ERROR_IDT | ERROR_EXT;
-        regs.intnum = 0x0D;
+        regs.intnum = IRQ_BASE + irq;
         default_int_handler(&regs);
     }
     if (irq == 2) {
@@ -275,7 +299,7 @@ void ipi_sche_main() {
 }
 
 uintptr_t moe_get_current_cpuid() {
-    int apicid = (READ_PHYSICAL_UINT32(lapic_base + 0x20) >> 24);
+    uint32_t apicid = (READ_PHYSICAL_UINT32(lapic_base + 0x20) >> 24);
     return apicid_to_cpuids[apicid];
 }
 
@@ -297,12 +321,8 @@ void apic_init() {
 
         //  Disable Legacy PIC
         if (madt->Flags & ACPI_MADT_PCAT_COMPAT) {
-            __asm__ volatile(
-                "mov $0xFF, %%al;\n"
-                "outb %%al, $0xA1;\n"
-                "pause;\n"
-                "outb %%al, $0x21;\n"
-                :::"al");
+            io_out8(0xA1, 0xFF);
+            io_out8(0x21, 0xFF);
         }
 
         //  Init IRQ table
@@ -370,7 +390,7 @@ void apic_init() {
         //  Setup IO APIC
 
         //  Mask all IRQ
-        for (int i = 0; i < MAX_IRQ; i++) {
+        for (int i = 0; i < MAX_IOAPIC_IRQ; i++) {
             moe_disable_irq(i);
         }
 
@@ -457,13 +477,12 @@ void apic_init_mp() {
 #define HPET_DIV    5
 MOE_PHYSICAL_ADDRESS hpet_base = 0;
 uint32_t hpet_main_cnt_period = 0;
-volatile uint64_t hpet_count = 0;
+_Atomic uint64_t hpet_count = 0;
 static const uint64_t timer_div = 1000 * HPET_DIV;
 uint64_t measure_div;
 
-int hpet_irq_handler(int irq) {
+void hpet_irq_handler(int irq) {
     hpet_count++;
-    return 0;
 }
 
 moe_timer_t moe_create_interval_timer(uint64_t us) {
@@ -513,17 +532,132 @@ uint32_t pci_make_reg_addr(uint8_t bus, uint8_t dev, uint8_t func, uintptr_t reg
     return (reg & 0xFC) | ((func) << 8) | ((dev) << 11) | (bus << 16) | ((reg & 0xF00) << 16);
 }
 
-uint32_t pci_read_config(uint32_t addr) {
+static uint32_t _pci_read_config(uint32_t addr) {
     io_out32(PCI_CONFIG_ADDRESS, PCI_ADDRESS_ENABLE | addr);
-    uint32_t retval = io_in32(PCI_CONFIG_DATA);
+    return io_in32(PCI_CONFIG_DATA);
+}
+
+static void _pci_write_config(uint32_t addr, uint32_t val) {
+    io_out32(PCI_CONFIG_ADDRESS, PCI_ADDRESS_ENABLE | addr);
+    io_out32(PCI_CONFIG_DATA, val);
+}
+
+static void _pci_disable_config() {
     io_out32(PCI_CONFIG_ADDRESS, 0);
+}
+
+int pci_parse_bar(uint32_t _base, unsigned idx, uint64_t *_bar, uint64_t *_size) {
+
+    if (idx >= 6) return 0;
+
+    uint32_t base = (_base & ~0xFF) + 0x10 + idx * 4;
+    uint64_t bar0 = _pci_read_config(base);
+    uint64_t nbar;
+    int is_bar64 = ((bar0 & 7) == 0x04);
+
+    if (!_size) {
+        if (is_bar64) {
+            uint32_t bar1 = _pci_read_config(base + 4);
+            bar0 |= (uint64_t)bar1 << 32;
+        }
+        *_bar = bar0;
+        return is_bar64 ? 2 : 1;
+    }
+
+    if (is_bar64) {
+        uint32_t bar1 = _pci_read_config(base + 4);
+        _pci_write_config(base, UINT32_MAX);
+        _pci_write_config(base + 4, UINT32_MAX);
+        nbar = _pci_read_config(base) | ((uint64_t)_pci_read_config(base + 4) << 32);
+        _pci_write_config(base, bar0);
+        _pci_write_config(base + 4, bar1);
+        bar0 |= (uint64_t)bar1 << 32;
+    } else {
+        _pci_write_config(base, UINT32_MAX);
+        nbar = _pci_read_config(base);
+        _pci_write_config(base, bar0);
+    }
+    _pci_disable_config();
+    if (nbar) {
+        if (is_bar64) {
+            nbar ^= UINT64_MAX;
+        } else {
+            nbar ^= UINT32_MAX;
+        }
+        if (bar0 & 1) {
+            nbar = (nbar | 3) & UINT16_MAX;
+        } else {
+            nbar |= 15;
+        }
+        *_bar = bar0;
+        *_size = nbar;
+        return is_bar64 ? 2 : 1;
+    } else {
+        return 0;
+    }
+}
+
+
+uint32_t pci_find_by_class(uint32_t cls, uint32_t mask) {
+    int bus = 0;
+    for (int dev = 0; dev < 32; dev++) {
+        uint32_t data = _pci_read_config(pci_make_reg_addr(bus, dev, 0, 0));
+        if ((data & 0xFFFF) == 0xFFFF) continue;
+            uint32_t PCI0C = _pci_read_config(pci_make_reg_addr(bus, dev, 0, 0x0C));
+            int limit = (PCI0C & 0x00800000) ? 8 : 1;
+            for (int func = 0; func < limit; func++) {
+                uint32_t base = pci_make_reg_addr(bus, dev, func, 0);
+                uint32_t data = pci_read_config(base);
+                if ((data & 0xFFFF) != 0xFFFF) {
+                    uint32_t PCI08 = pci_read_config(base + 0x08);
+                    if ((PCI08 & mask) == cls) {
+                        _pci_disable_config();
+                        return PCI_ADDRESS_ENABLE | base;
+                    }
+                }
+            }
+    }
+    _pci_disable_config();
+    return 0;
+}
+
+uint32_t pci_find_capability(uint32_t base, uint8_t id) {
+    uint8_t cap_ptr = _pci_read_config(base + 0x34) & 0xFF;
+    while (cap_ptr) {
+        uint32_t data = _pci_read_config(base + cap_ptr);
+        if ((data & 0xFF) == id) {
+            _pci_disable_config();
+            return cap_ptr;
+        }
+        cap_ptr = (data >> 8) & 0xFF;
+    }
+    _pci_disable_config();
+    return 0;
+}
+
+void pci_dump_config(uint32_t base, void *p) {
+    uint32_t *d = (uint32_t *)p;
+    for (uint32_t i = 0; i < 256 / 4; i++) {
+        d[i] = _pci_read_config(base + i * 4);
+    }
+    _pci_disable_config();
+}
+
+
+uint32_t pci_read_config(uint32_t addr) {
+    uint32_t retval = _pci_read_config(addr);
+    _pci_disable_config();
     return retval;
 }
 
 void pci_write_config(uint32_t addr, uint32_t val) {
-    io_out32(PCI_CONFIG_ADDRESS, PCI_ADDRESS_ENABLE | addr);
-    io_out32(PCI_CONFIG_DATA, val);
-    io_out32(PCI_CONFIG_ADDRESS, 0);
+    _pci_write_config(addr, val);
+    _pci_disable_config();
+}
+
+
+void pci_init() {
+    // do nothing
 }
 
 
@@ -537,9 +671,9 @@ void pci_write_config(uint32_t addr, uint32_t val) {
 
 _Noreturn void arch_do_reset() {
     // WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x00084500);
-    __asm__ volatile ("outb %%al, %%dx": : "d"(0xCF9), "a"(0x06));
+    io_out8(0x0CF9, 0x06);
     moe_usleep(10000);
-    __asm__ volatile ("outb %%al, $0x92": : "a"(0x01));
+    io_out8(0x0092, 0x01);
     moe_usleep(10000);
     for (;;) { io_hlt(); }
 }
@@ -559,8 +693,10 @@ void arch_init() {
         io_wrmsr(IA32_EFER_MSR, efer);
     }
 
+    pci_init();
     apic_init();
     hpet_init();
     acpi_init_sci();
     apic_init_mp();
+    lpc_init();
 }

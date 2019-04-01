@@ -15,37 +15,6 @@ static uint8_t SLP_TYP5a = 0;
 static uint8_t SLP_TYP5b = 0;
 
 
-static void acpi_outb(uintptr_t port, uint8_t value) {
-    __asm__ volatile ("outb %%al, %%dx":: "a"(value), "d"(port));
-}
-
-static void acpi_outw(uintptr_t port, uint16_t value) {
-    __asm__ volatile ("outw %%ax, %%dx":: "a"(value), "d"(port));
-}
-
-static void acpi_outl(uintptr_t port, uint32_t value) {
-    __asm__ volatile ("outl %%eax, %%dx":: "a"(value), "d"(port));
-}
-
-static uint8_t acpi_inb(uintptr_t port) {
-    uint16_t value;
-    __asm__ volatile ("inb %%dx, %%al": "=a"(value) :"d"(port));
-    return value;
-}
-
-static uint16_t acpi_inw(uintptr_t port) {
-    uint16_t value;
-    __asm__ volatile ("inw %%dx, %%ax": "=a"(value) :"d"(port));
-    return value;
-}
-
-static uint32_t acpi_inl(uintptr_t port) {
-    uint32_t value;
-    __asm__ volatile ("inl %%dx, %%eax": "=a"(value) :"d"(port));
-    return value;
-}
-
-
 // Generic Address Structure
 void acpi_gas_output(acpi_gas_t *_gas, uintptr_t value) {
     acpi_gas_t gas = *_gas;
@@ -57,6 +26,9 @@ void acpi_gas_output(acpi_gas_t *_gas, uintptr_t value) {
                 case 8:
                     WRITE_PHYSICAL_UINT8(gas.address, value);
                     break;
+                case 16:
+                    WRITE_PHYSICAL_UINT16(gas.address, value);
+                    break;
                 case 32:
                     WRITE_PHYSICAL_UINT32(gas.address, value);
                     break;
@@ -67,13 +39,13 @@ void acpi_gas_output(acpi_gas_t *_gas, uintptr_t value) {
         case 1: // I/O
             switch(gas.bit_width) {
                 case 8:
-                    acpi_outb(gas.address, value);
+                    io_out8(gas.address, value);
                     break;
                 case 16:
-                    acpi_outw(gas.address, value);
+                    io_out16(gas.address, value);
                     break;
                 case 32:
-                    acpi_outl(gas.address, value);
+                    io_out32(gas.address, value);
                     break;
             }
             break;
@@ -96,13 +68,13 @@ int acpi_get_number_of_table_entries() {
 void* acpi_enum_table_entry(int index) {
     if (!xsdt) return NULL;
     if (index >= n_entries_xsdt) return NULL;
-    return PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(xsdt->Entry[index]);
+    return MOE_PA2VA(xsdt->Entry[index]);
 }
 
 void* acpi_find_table(const char* signature) {
     if (!xsdt) return NULL;
     for (int i = 0; i < n_entries_xsdt; i++) {
-        acpi_header_t* entry = PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(xsdt->Entry[i]);
+        acpi_header_t* entry = MOE_PA2VA(xsdt->Entry[i]);
         if (is_equal_signature(entry->signature, signature)) {
             return entry;
         }
@@ -120,14 +92,14 @@ int acpi_enable(int enabled) {
         return 0;
     }
     if (enabled) {
-        uint32_t ax = acpi_inw(PM1a_CNT);
+        uint32_t ax = io_in16(PM1a_CNT);
         if ((ax & ACPI_PM1_SCI_EN) != 0) {
             return 1;
         }
-        acpi_outb(SMI_CMD, ACPI_ENABLE);
+        io_out8(SMI_CMD, ACPI_ENABLE);
         moe_timer_t timer = moe_create_interval_timer(3000000);
         do {
-            ax = acpi_inw(PM1a_CNT);
+            ax = io_in16(PM1a_CNT);
             if ((ax & ACPI_PM1_SCI_EN) != 0) {
                 break;
             }
@@ -137,7 +109,7 @@ int acpi_enable(int enabled) {
         if (PM1b_CNT != 0) {
             moe_timer_t timer = moe_create_interval_timer(3000000);
             do {
-                ax = acpi_inw(PM1b_CNT);
+                ax = io_in16(PM1b_CNT);
                 if ((ax & ACPI_PM1_SCI_EN) != 0) {
                     break;
                 }
@@ -166,9 +138,9 @@ void acpi_enter_sleep_state(int state) {
     if (fadt->Flags & ACPI_FADT_HW_REDUCED_ACPI) {
         acpi_gas_output(&fadt->SLEEP_CONTROL_REG, ACPI_SCR_SLP_EN | (SLP_TYP5a << 2));
     } else {
-        acpi_outw(fadt->PM1a_CNT_BLK, ACPI_PM1_SLP_EN | (SLP_TYP5a << 10));
+        io_out16(fadt->PM1a_CNT_BLK, ACPI_PM1_SLP_EN | (SLP_TYP5a << 10));
         if (fadt->PM1b_CNT_BLK) {
-            acpi_outw(fadt->PM1b_CNT_BLK, ACPI_PM1_SLP_EN | (SLP_TYP5b << 10));
+            io_out16(fadt->PM1b_CNT_BLK, ACPI_PM1_SLP_EN | (SLP_TYP5b << 10));
         }
     }
     for(;;) { io_hlt(); }
@@ -176,7 +148,7 @@ void acpi_enter_sleep_state(int state) {
 
 void acpi_init(acpi_rsd_ptr_t* _rsdp) {
     rsdp = _rsdp;
-    xsdt = (acpi_xsdt_t*)PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(rsdp->xsdtaddr);
+    xsdt = (acpi_xsdt_t*)MOE_PA2VA(rsdp->xsdtaddr);
     n_entries_xsdt = (xsdt->Header.length - 0x24 /* offset_of Entry */ ) / sizeof(xsdt->Entry[0]);
 
     fadt = mm_alloc_static_page(sizeof(acpi_fadt_t));
@@ -196,11 +168,12 @@ void acpi_init(acpi_rsd_ptr_t* _rsdp) {
     {
         uint8_t *p = (uint8_t*)&dsdt->Structure;
         size_t maxlen = (dsdt->Header.length - 0x24);
-        for (size_t i = 0; i < maxlen; i++) {
+        for (size_t i = 0; i < maxlen;) {
             // NameOp(08) '_S5_' PackageOp(12)
-            if (!is_equal_signature(p+i, "_S5_")) continue;
-            if ((p[i+4] != 0x12) || ((p[i-1] != 0x08) && (p[i-2] != 0x08 || p[i-1] != '\\'))) continue;
-
+            if (p[i++] != 0x08) continue;
+            if (p[i] == '\\') i++;
+            if (!is_equal_signature(p + i, "_S5_")) continue;
+            if (p[i+4] != 0x12) continue;
             i += 5;
             i += ((p[i] & 0xC0) >> 6) + 2;
 
@@ -215,21 +188,21 @@ void acpi_init(acpi_rsd_ptr_t* _rsdp) {
     }
 }
 
-int irq_sci(int irq) {
+void irq_sci(int irq) {
 
     uint16_t pm1_evt = 0;
 
     if (fadt->PM1a_EVT_BLK) {
         uint16_t ax;
         uint32_t edx = fadt->PM1a_EVT_BLK;
-        acpi_outw(edx, ax = acpi_inw(edx));
+        io_out16(edx, ax = io_in16(edx));
         pm1_evt |= ax;
     }
 
     if (fadt->PM1b_EVT_BLK) {
         uint16_t ax;
         uint32_t edx = fadt->PM1b_EVT_BLK;
-        acpi_outw(edx, ax = acpi_inw(edx));
+        io_out16(edx, ax = io_in16(edx));
         pm1_evt |= ax;
     }
 
@@ -246,13 +219,12 @@ int irq_sci(int irq) {
         for (int i = 0; i < gpe_len; i++) {
             uint8_t al;
             uint32_t edx = gpe_blk + i;
-            acpi_outb(edx, al = acpi_inb(edx));
+            io_out8(edx, al = io_in8(edx));
             printf(" %02x", al);
         }
     }
 
     printf("\n");
-    return 0;
 }
 
 
@@ -275,13 +247,13 @@ void acpi_init_sci() {
     if (fadt->PM1a_EVT_BLK) {
         uint32_t edx = fadt->PM1a_EVT_BLK;
         uint32_t len = fadt->PM1_EVT_LEN / 2;
-        acpi_outw(edx + len, 0x0300);
+        io_out16(edx + len, 0x0300);
     }
 
     if (fadt->PM1b_EVT_BLK) {
         uint32_t edx = fadt->PM1b_EVT_BLK;
         uint32_t len = fadt->PM1_EVT_LEN / 2;
-        acpi_outw(edx + len, 0x0300);
+        io_out16(edx + len, 0x0300);
     }
 
     //  disable all GPE
@@ -289,7 +261,7 @@ void acpi_init_sci() {
         uintptr_t gpe_blk = fadt->GPE0_BLK;
         uintptr_t gpe_len = fadt->GPE0_BLK_LEN / 2;
         for (int i = 0; i < gpe_len; i++) {
-            acpi_outb(gpe_blk + gpe_len + i, 0);
+            io_out8(gpe_blk + gpe_len + i, 0);
         }
     }
 

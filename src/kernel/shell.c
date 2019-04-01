@@ -1,5 +1,5 @@
 // Minimal Shell
-// Copyright (c) 2002,2018 MEG-OS project, All rights reserved.
+// Copyright (c) 2002,2018,2019 MEG-OS project, All rights reserved.
 // License: BSD
 // #include <stdatomic.h>
 #include "moe.h"
@@ -7,19 +7,11 @@
 #include "hid.h"
 
 
-#define VER_SYSTEM_NAME     "codename MOE"
-#define VER_SYSTEM_MAJOR    0
-#define VER_SYSTEM_MINOR    5
-#define VER_SYSTEM_REVISION 4
-
 
 extern int putchar(char);
 int strncmp(const char *s1, const char *s2, size_t n);
 
 
-
-extern uintptr_t total_memory;
-extern int n_active_cpu;
 extern uint64_t fw_get_time();
 
 
@@ -35,13 +27,6 @@ int pseudo_app_launch(pseudo_main main, int argc, char** argv) {
     return moe_create_thread(&pseudo_app_start, 0, (void*)main, argv[0]);
 }
 
-typedef struct {
-    char *name;
-    pseudo_main proc;
-    int separate_thread;
-    char *tips; 
-} command_list_t;
-
 int cmd_ver(int argc, char **argv);
 int cmd_help(int argc, char **argv);
 int cmd_cls(int argc, char **argv);
@@ -53,6 +38,16 @@ extern int cmd_ps(int argc, char **argv);
 extern int cmd_cpuid(int, char**);
 extern int cmd_noiz2bg(int, char**);
 extern int cmd_top(int argc, char **argv);
+extern int cmd_dbg(int argc, char **argv);
+int cmd_stall(int argc, char **argv);
+
+
+typedef struct {
+    char *name;
+    pseudo_main proc;
+    int separate_thread;
+    char *tips; 
+} command_list_t;
 
 command_list_t commands[] = {
     { "help", cmd_help, 0, "Show help" },
@@ -66,9 +61,23 @@ command_list_t commands[] = {
     { "cpuid", cmd_cpuid, 0, "Display cpuid info" },
     { "noiz2bg", cmd_noiz2bg, 1, "DEMO" },
     { "top", cmd_top, 1, "Graphical Task list" },
+    { "stall", cmd_stall, 0, "Stall for few seconds" },
+    { "dbg", cmd_dbg, 0, "Test command" },
     { NULL, NULL },
 };
 
+
+/*********************************************************************/
+
+int cmd_stall(int argc, char **argv) {
+    int stall = 1;
+    // __asm__ volatile ("int $3");
+    if (argc >= 2) {
+        stall = (*argv[1]) - '0';
+    }
+    moe_usleep(stall * 1000000LL);
+    return 0;
+}
 
 /*********************************************************************/
 
@@ -104,6 +113,7 @@ int read_cmdline(moe_window_t *window, char* buffer, size_t max_len) {
                 break;
 
             case '\x0D': // cr
+            case '\x0A': // lf
                 cont_flag = 0;
                 break;
             
@@ -146,7 +156,7 @@ int cmd_help(int argc, char **argv) {
 }
 
 int cmd_ver(int argc, char **argv) {
-    printf("%s v%d.%d.%d\n", VER_SYSTEM_NAME, VER_SYSTEM_MAJOR, VER_SYSTEM_MINOR, VER_SYSTEM_REVISION);
+    printf("%s\n", moe_kname());
     return 0;
 }
 
@@ -172,7 +182,7 @@ _Noreturn void pseudo_shell(void* args) {
     moe_window_t *window;
 
     // Init root console
-    {
+    if (1) {
         uint32_t console_attributes = 0xF8;
         moe_rect_t frame = {{16, 32}, {608, 436}};
         window = moe_create_window(&frame, MOE_WS_CAPTION | MOE_WS_BORDER, 0, "Terminal");
@@ -188,9 +198,11 @@ _Noreturn void pseudo_shell(void* args) {
     char arg_buff[MAX_ARGBUFF];
 
     cmd_ver(0, 0);
-    // printf("Hello, world!\n");
-    // moe_alert("Hello", "Hello, world!", 0);
-    // cmd_ps(0, 0);
+
+    // const char *autoexec = "cpuid\nstall 3\nps\n";
+    // for (int i = 0; autoexec[i]; i++) {
+    //     moe_send_event(window, autoexec[i]);
+    // }
 
     for (;;) {
         printf("# ");
@@ -412,7 +424,7 @@ _Noreturn void start_init(void* args) {
     moe_create_thread(&statusbar_thread, 0, 0, "statusbar");
     moe_create_thread(&pseudo_shell, 0, 0, "shell");
     moe_create_thread(&key_test_thread, 0, 0, "key test");
-    moe_create_thread(&button_test_thread, 0, 0, "button test");
+    // moe_create_thread(&button_test_thread, 0, 0, "button test");
 
     for (;;) { moe_usleep(1000000); }
 }

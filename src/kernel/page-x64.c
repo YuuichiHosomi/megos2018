@@ -18,37 +18,47 @@
 //     WRITE_PHYSICAL_UINT64(master_cr3, pdpt0 | PTE_GLOBAL | PTE_WRITE | PTE_PRESENT);
 // }
 
-void* PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(MOE_PHYSICAL_ADDRESS pa) {
+void* MOE_PA2VA(MOE_PHYSICAL_ADDRESS pa) {
     // TODO:
     return (void*)(pa);
 }
 
 uint8_t READ_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p) {
-    _Atomic uint8_t* p = PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(_p);
+    _Atomic uint8_t* p = MOE_PA2VA(_p);
     return atomic_load(p);
 }
 
 void WRITE_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p, uint8_t v) {
-    _Atomic uint8_t* p = PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(_p);
+    _Atomic uint8_t* p = MOE_PA2VA(_p);
+    atomic_store(p, v);
+}
+
+uint16_t READ_PHYSICAL_UINT16(MOE_PHYSICAL_ADDRESS _p) {
+    _Atomic uint16_t *p = MOE_PA2VA(_p);
+    return atomic_load(p);
+}
+
+void WRITE_PHYSICAL_UINT16(MOE_PHYSICAL_ADDRESS _p, uint16_t v) {
+    _Atomic uint16_t *p = MOE_PA2VA(_p);
     atomic_store(p, v);
 }
 
 uint32_t READ_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p) {
-    _Atomic uint32_t* p = PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(_p);
+    _Atomic uint32_t* p = MOE_PA2VA(_p);
     return atomic_load(p);
 }
 
 void WRITE_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p, uint32_t v) {
-    _Atomic uint32_t* p = PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(_p);
+    _Atomic uint32_t* p = MOE_PA2VA(_p);
     atomic_store(p, v);
 }
 
 uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p) {
-    _Atomic uint64_t* p = PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(_p);
+    _Atomic uint64_t* p = MOE_PA2VA(_p);
     return atomic_load(p);
 }
 
 void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v) {
-    _Atomic uint64_t* p = PHYSICAL_ADDRESS_TO_VIRTUAL_ADDRESS(_p);
+    _Atomic uint64_t* p = MOE_PA2VA(_p);
     atomic_store(p, v);
 }

@@ -20,6 +20,10 @@ uintptr_t total_memory = 0;
 static _Atomic uintptr_t free_memory;
 static _Atomic uintptr_t static_start;
 
+uintptr_t moe_alloc_physical_page(size_t n) {
+    return (uintptr_t)mm_alloc_static_page(n);
+}
+
 void *mm_alloc_static_page(size_t n) {
     uintptr_t size = ROUNDUP_PAGE(n);
     uintptr_t free = atomic_load(&free_memory);

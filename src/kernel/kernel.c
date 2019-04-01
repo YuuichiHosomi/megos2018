@@ -27,13 +27,16 @@
 #include "efi.h"
 
 
+#define VER_SYSTEM_NAME     "MOE"
+#define VER_STRING          "v0.5.5"
+
 extern void arch_init();
 extern void acpi_init(acpi_rsd_ptr_t* rsd);
 extern void gs_init(moe_dib_t* screen);
 extern void mm_init(moe_bootinfo_mmap_t* mmap);
-extern void lpc_init();
 extern void window_init();
 _Noreturn void arch_do_reset();
+// extern void xhci_init();
 
 extern char *strchr(const char *s, int c);
 extern int vprintf(const char *format, va_list args);
@@ -50,6 +53,10 @@ void memset32(uint32_t* p, uint32_t v, size_t n) {
     }
 }
 
+
+const char *moe_kname() {
+    return VER_SYSTEM_NAME " " VER_STRING;
+}
 
 _Noreturn void moe_reboot() {
     acpi_reset();
@@ -95,6 +102,8 @@ void moe_assert(const char* file, uintptr_t line, ...) {
 }
 
 
+extern uintptr_t total_memory;
+extern int n_active_cpu;
 extern _Noreturn void start_init(void* args);
 _Noreturn void start_kernel(moe_bootinfo_t* bootinfo) {
 
@@ -103,8 +112,12 @@ _Noreturn void start_kernel(moe_bootinfo_t* bootinfo) {
     mm_init(&bootinfo->mmap);
     acpi_init(bootinfo->acpi);
     arch_init();
+
+    printf("%s [%d Cores, Memory %d MB]\n", moe_kname(), n_active_cpu, (int)(total_memory >> 8));
+
+    // xhci_init();
+
     window_init();
-    lpc_init();
 
     moe_create_thread(&start_init, 0, 0, "init");
 

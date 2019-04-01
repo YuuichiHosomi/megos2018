@@ -61,11 +61,12 @@ atomic_bit_test_and_clear:
 
 
 ; void io_set_lazy_fpu_restore();
-    global io_set_lazy_fpu_restore
 io_set_lazy_fpu_restore:
+    push rax
     mov rax, cr0
-    bts eax, 3 ; TS
+    bts rax, 3 ; TS
     mov cr0, rax
+    pop rax
     ret
 
 
@@ -118,6 +119,7 @@ setjmp_new_thread:
 
     extern on_thread_start
 _new_thread:
+    call io_set_lazy_fpu_restore
     call on_thread_start
     sti
     pop rax
@@ -155,6 +157,7 @@ _setjmp:
 ; void _longjmp(jmp_buf env, int retval);
     global _longjmp
 _longjmp:
+    call io_set_lazy_fpu_restore
     mov eax, edx
     mov rsp, [rcx+0x08]
     mov rbp, [rcx+0x10]
@@ -234,7 +237,7 @@ idt_load:
     ret
 
 
-    global _int00, _int03, _int06, _int0D, _int0E
+    global _int00, _int03, _int06, _int08, _int0D, _int0E
 _int00: ; #DE
     push BYTE 0
     push BYTE 0x00
@@ -248,6 +251,10 @@ _int03: ; #DB
 _int06: ; #UD
     push BYTE 0
     push BYTE 0x06
+    jmp short _intXX
+
+_int08: ; #DF
+    push BYTE 0x08
     jmp short _intXX
 
 _int0D: ; #GP

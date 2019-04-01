@@ -6,13 +6,20 @@
 #include "hid.h"
 
 
-static uint8_t io_in8(uint16_t const port) {
+typedef enum {
+    hid_ps2_nodata,
+    hid_ps2_key_report_enabled,
+    hid_ps2_mouse_report_enabled,
+    hid_ps2_continued,
+} moe_hid_ps2_state_t;
+
+static uint8_t ps2_in8(uint16_t const port) {
     uint8_t al;
     __asm__ volatile("inb %1, %%al": "=a"(al): "i"(port));
     return al;
 }
 
-static void io_out8(uint16_t const port, uint8_t val) {
+static void ps2_out8(uint16_t const port, uint8_t val) {
     __asm__ volatile("outb %%al, %0": : "i"(port), "a"(val));
 }
 
@@ -75,7 +82,7 @@ uint8_t ps2_to_hid_usage_table[] = {
 int ps2_wait_for_write(uint64_t timeout) {
     moe_timer_t timer = moe_create_interval_timer(timeout);
     while (moe_check_timer(&timer)) {
-        if ((io_in8(PS2_STATUS_PORT) & 0x02) == 0x00) {
+        if ((ps2_in8(PS2_STATUS_PORT) & 0x02) == 0x00) {
             return 1;
         }
         io_pause();
@@ -84,15 +91,13 @@ int ps2_wait_for_write(uint64_t timeout) {
 }
 
 
-int ps2k_irq_handler(int irq) {
-    moe_fifo_write(ps2_fifo, PS2_FIFO_KEY_MIN + io_in8(PS2_DATA_PORT));
-    return 0;
+void ps2k_irq_handler(int irq) {
+    moe_fifo_write(ps2_fifo, PS2_FIFO_KEY_MIN + ps2_in8(PS2_DATA_PORT));
 }
 
 
-int ps2m_irq_handler(int irq) {
-    moe_fifo_write(ps2_fifo, PS2_FIFO_MOUSE_MIN + io_in8(PS2_DATA_PORT));
-    return 0;
+void ps2m_irq_handler(int irq) {
+    moe_fifo_write(ps2_fifo, PS2_FIFO_MOUSE_MIN + ps2_in8(PS2_DATA_PORT));
 }
 
 
@@ -231,12 +236,12 @@ int ps2_init() {
 
     if (!ps2_wait_for_write(100000)) return 0;
 
-    io_out8(PS2_COMMAND_PORT, 0xAD);
+    ps2_out8(PS2_COMMAND_PORT, 0xAD);
     ps2_wait_for_write(PS2_TIMEOUT);
-    io_out8(PS2_COMMAND_PORT, 0xA7);
+    ps2_out8(PS2_COMMAND_PORT, 0xA7);
 
     for (int i = 0; i< 16; i++) {
-        io_in8(PS2_DATA_PORT);
+        ps2_in8(PS2_DATA_PORT);
     }
 
     uintptr_t size_of_buffer = 128;
@@ -246,14 +251,14 @@ int ps2_init() {
     moe_enable_irq(12, ps2m_irq_handler);
 
     ps2_wait_for_write(PS2_TIMEOUT);
-    io_out8(PS2_COMMAND_PORT, 0x60);
+    ps2_out8(PS2_COMMAND_PORT, 0x60);
     ps2_wait_for_write(PS2_TIMEOUT);
-    io_out8(PS2_DATA_PORT, 0x47);
+    ps2_out8(PS2_DATA_PORT, 0x47);
 
     ps2_wait_for_write(PS2_TIMEOUT);
-    io_out8(PS2_COMMAND_PORT, 0xD4);
+    ps2_out8(PS2_COMMAND_PORT, 0xD4);
     ps2_wait_for_write(PS2_TIMEOUT);
-    io_out8(PS2_DATA_PORT, 0xF4);
+    ps2_out8(PS2_DATA_PORT, 0xF4);
 
     moe_create_thread(ps2_hid_thread, priority_realtime, 0, "hid-ps2");
 
