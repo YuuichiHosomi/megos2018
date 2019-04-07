@@ -22,7 +22,7 @@
                 "window",
                 "arch",
                 "page",
-                "hid",
+                "hidmgr",
                 "lpc",
                 "acpi",
                 "shell",
