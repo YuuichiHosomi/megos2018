@@ -36,8 +36,10 @@ typedef struct {
     int16_t x, y;
 } moe_hid_mouse_report_t;
 
-typedef struct moe_hid_keyboard_report_t {
+typedef struct moe_hid_kbd_report_t {
     uint8_t modifier;
     uint8_t RESERVED_1;
     uint8_t keydata[6];
-} moe_hid_keyboard_report_t;
+} moe_hid_kbd_report_t;
+
+int hid_report_key(moe_hid_kbd_report_t *keyreport);

@@ -67,8 +67,6 @@ enum {
 extern void io_finit();
 extern void io_fsave(void*);
 extern void io_fload(void*);
-extern uint32_t io_lock_irq();
-extern void io_unlock_irq(uint32_t);
 extern void setjmp_new_thread(jmp_buf env, uintptr_t* new_sp);
 extern uintptr_t moe_get_current_cpuid();
 
@@ -105,6 +103,10 @@ moe_thread_t* get_current_thread() {
 
 int moe_get_current_thread() {
     return get_current_thread()->thid;
+}
+
+const char *moe_get_current_thread_name() {
+    return get_current_thread()->name;
 }
 
 uint64_t moe_get_thread_load(moe_thread_t* thread) {
@@ -221,7 +223,7 @@ void moe_fpu_restore(uintptr_t delta) {
     } else {
         io_finit();
         current->fpu_allocated = 1;
-        current->fpu_context = mm_alloc_static(delta);
+        current->fpu_context = moe_alloc_object(delta, 1);
     }
     current->fpu_used = 1;
 }
@@ -310,7 +312,7 @@ _Noreturn void moe_exit_thread(uint32_t exit_code) {
 
 moe_thread_t* create_thread(moe_thread_start start, moe_priority_level_t priority, void* args, const char* name) {
 
-    moe_thread_t* new_thread = mm_alloc_static(sizeof(moe_thread_t));
+    moe_thread_t* new_thread = moe_alloc_object(sizeof(moe_thread_t), 1);
     memset(new_thread, 0, sizeof(moe_thread_t));
     new_thread->thid = atomic_fetch_add(&next_thid, 1);
     new_thread->priority = priority;
@@ -325,10 +327,9 @@ moe_thread_t* create_thread(moe_thread_start start, moe_priority_level_t priorit
         strncpy(&new_thread->name[0], name, THREAD_NAME_SIZE - 1);
     }
     if (start) {
-        const uintptr_t stack_count = 0x1000;
+        const uintptr_t stack_count = 0x2000;
         const uintptr_t stack_size = stack_count * sizeof(uintptr_t);
-        uintptr_t* stack = mm_alloc_static(stack_size);
-        memset(stack, 0, stack_size);
+        uintptr_t* stack = moe_alloc_object(stack_size, 1);
         uintptr_t* sp = stack + stack_count;
         *--sp = 0;
         *--sp = 0x00007fffdeadbeef;
@@ -403,9 +404,7 @@ void thread_init(int _n_active_cpu) {
 
     char name[THREAD_NAME_SIZE];
     n_active_cpu = _n_active_cpu;
-    size_t size = n_active_cpu * sizeof(core_specific_data_t);
-    core_specific_data_t* _core_data = mm_alloc_static(size);
-    memset(_core_data, 0, size);
+    core_specific_data_t* _core_data = moe_alloc_object(sizeof(core_specific_data_t), n_active_cpu);
 
     for (int i = 0; i < DEFAULT_SCHEDULE_QUEUES; i++) {
         thread_queue.ready[i] = moe_fifo_init(DEFAULT_SCHEDULE_SIZE);
@@ -437,9 +436,25 @@ typedef struct moe_semaphore_t {
     _Atomic intptr_t value;
 } moe_semaphore_t;
 
-void moe_sem_init(moe_semaphore_t* self, intptr_t value) {
+moe_semaphore_t *moe_sem_create(intptr_t value) {
+    moe_semaphore_t *result = moe_alloc_object(sizeof(moe_semaphore_t), 1);
+    moe_sem_init(result, value);
+    return result;
+}
+
+void moe_sem_init(moe_semaphore_t *self, intptr_t value) {
     self->value = value;
     self->waiting = NULL;
+}
+
+intptr_t moe_sem_getvalue(moe_semaphore_t *self) {
+    intptr_t result = self->value;
+    if (result > 0) {
+        return result;
+    } else {
+        if (self->waiting) result--;
+        return result;
+    }
 }
 
 int moe_sem_trywait(moe_semaphore_t *self) {
@@ -454,7 +469,7 @@ int moe_sem_trywait(moe_semaphore_t *self) {
     return 0;
 }
 
-int moe_sem_wait(moe_semaphore_t* self, uint64_t us) {
+int moe_sem_wait(moe_semaphore_t *self, uint64_t us) {
     if (moe_sem_trywait(self)) {
         return 1;
     }
@@ -471,8 +486,7 @@ int moe_sem_wait(moe_semaphore_t* self, uint64_t us) {
             atomic_compare_exchange_weak(&self->waiting, &desired, NULL);
             return moe_sem_trywait(self);
         } else {
-            MOE_ASSERT(false, "DOUBLE WAIT %08x %08x\n", expected, desired);
-            for (;;) moe_wait_for_object(NULL, UINT64_MAX);
+            // MOE_ASSERT(false, "DOUBLE WAIT %08x %08x\n", expected, desired);
             if (us > time_div) {
                 moe_usleep(time_div);
                 us -= time_div;
@@ -485,7 +499,7 @@ int moe_sem_wait(moe_semaphore_t* self, uint64_t us) {
     return 0;
 }
 
-void moe_sem_signal(moe_semaphore_t* self) {
+void moe_sem_signal(moe_semaphore_t *self) {
     atomic_fetch_add(&self->value, 1);
 
     moe_thread_t* waiting = self->waiting;
@@ -508,9 +522,9 @@ typedef struct moe_fifo_t {
 
 
 moe_fifo_t* moe_fifo_init(size_t capacity) {
-    moe_fifo_t* self = mm_alloc_static(sizeof(moe_fifo_t));
+    moe_fifo_t* self = moe_alloc_object(sizeof(moe_fifo_t), 1);
     moe_sem_init(&self->read_sem, 0);
-    self->data = mm_alloc_static(capacity * sizeof(uintptr_t));
+    self->data = moe_alloc_object(sizeof(uintptr_t), capacity);
     self->read = 0;
     self->write = 0;
     self->free = capacity - 1;
@@ -558,7 +572,8 @@ int moe_fifo_write(moe_fifo_t* self, intptr_t data) {
 }
 
 size_t moe_fifo_get_estimated_count(moe_fifo_t* self) {
-    return atomic_load(&self->read_sem.value);
+    intptr_t result = moe_sem_getvalue(&self->read_sem);
+    return (result > 0) ? result : 0;
 }
 
 size_t moe_fifo_get_estimated_free(moe_fifo_t* self) {

@@ -101,7 +101,7 @@ void ps2m_irq_handler(int irq) {
 }
 
 
-static int ps2_parse_data(intptr_t data, moe_hid_keyboard_report_t* keyreport, moe_hid_mouse_report_t* mouse_report) {
+static int ps2_parse_data(intptr_t data, moe_hid_kbd_report_t* keyreport, moe_hid_mouse_report_t* mouse_report) {
 
     if (data >= PS2_FIFO_MOUSE_MIN) {
         int m = (data - PS2_FIFO_MOUSE_MIN);
@@ -181,25 +181,19 @@ _Noreturn void ps2_hid_thread(void *args) {
         int mouse_changed = 0;
         int cont;
         moe_hid_mouse_report_t mouse_report;
-        moe_hid_keyboard_report_t keyreport;
+        moe_hid_kbd_report_t keyreport[2];
         do {
             memset(&mouse_report, 0, sizeof(mouse_report));
-            memset(&keyreport, 0, sizeof(keyreport));
+            memset(keyreport, 0, sizeof(keyreport) * 2);
 
             cont = 0;
             intptr_t ps2_data;
-            if (moe_fifo_wait(ps2_fifo, &ps2_data, 1000000)) {
-                int state = ps2_parse_data(ps2_data, &keyreport, &mouse_report);
+            if (moe_fifo_wait(ps2_fifo, &ps2_data, -1)) {
+                int state = ps2_parse_data(ps2_data, keyreport, &mouse_report);
 
                 switch(state) {
                     case hid_ps2_key_report_enabled:
-                        if (keyreport.keydata[0]) {
-                            if ((keyreport.keydata[0] & 0x7F) == HID_USAGE_DELETE &&
-                                (keyreport.modifier & (0x11)) != 0 && (keyreport.modifier & (0x44)) != 0) {
-                                moe_reboot();
-                            }
-                            moe_send_key_event(&keyreport);
-                        }
+                        hid_report_key(keyreport);
                         break;
 
                     case hid_ps2_mouse_report_enabled:

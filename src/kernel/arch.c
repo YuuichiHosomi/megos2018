@@ -22,6 +22,7 @@ extern void *_int08;
 extern void *_int0D;
 extern void *_int0E;
 extern void *_ipi_sche;
+extern void *_ipi_invtlb;
 
 extern void *_irq0;
 extern void *_irq1;
@@ -117,25 +118,28 @@ void idt_set_kernel_handler(uint8_t num, uintptr_t offset, uint8_t ist) {
     idt_set_handler(num, offset, cs_sel, ist);
 }
 
+#define BSOD_BUFF_SIZE 1024
+static char bsod_buff[BSOD_BUFF_SIZE];
 void default_int_handler(x64_context_t* regs) {
-    char buff[1024];
 
-    snprintf(buff, 1024,
+    snprintf(bsod_buff, BSOD_BUFF_SIZE,
         "Something went wrong.\n\n"
         "TECH INFO: EXC-%02llx-%04llx-%016llx\n"
-        "Thread %d IP %04llx:%016llx SP %04llx:%016llx FL %08llx\n"
-        "ABCD %016llx %016llx %016llx %016llx\n"
-        "BPSD %016llx %016llx %016llx\n"
-        "R8-  %016llx %016llx %016llx %016llx\n"
-        "R12- %016llx %016llx %016llx %016llx\n"
+        "Thread %d: %s\n"
+        "IP %04llx:%016llx SP %04llx:%016llx FL %08llx\n"
+        "R0- %016llx %016llx %016llx %016llx\n"
+        "B4- %016llx %016llx %016llx\n"
+        "R8- %016llx %016llx %016llx %016llx\n"
+        "R12 %016llx %016llx %016llx %016llx\n"
         , regs->intnum, regs->err, regs->cr2
-        , moe_get_current_thread(), regs->cs, regs->rip, regs->ss, regs->rsp, regs->rflags
+        , moe_get_current_thread(), moe_get_current_thread_name()
+        , regs->cs, regs->rip, regs->ss, regs->rsp, regs->rflags
         , regs->rax, regs->rbx, regs->rcx, regs->rdx, regs->rbp, regs->rsi, regs->rdi
         , regs->r8, regs->r9, regs->r10, regs->r11, regs->r12, regs->r13, regs->r14, regs->r15
         );
 
-    mgs_bsod(buff);
-    moe_exit_thread(-1);
+    mgs_bsod(bsod_buff);
+    for (;;) { io_hlt(); }
 }
 
 void idt_init() {
@@ -163,6 +167,7 @@ void idt_init() {
 #define MAX_IOAPIC_IRQ              24
 #define MAX_MSI                     24
 #define MAX_IRQ                     (MAX_IOAPIC_IRQ + MAX_MSI)
+#define IRQ_INVALIDATE_TLB          0xEE
 #define IRQ_SCHDULE                 0xFC
 
 #define MAX_CPU                     32
@@ -291,6 +296,13 @@ void _irq_main(uint8_t irq, void* p) {
             WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0xC0000 + IRQ_SCHDULE);
         }
     }
+}
+
+int apic_send_invalidate_tlb() {
+    if (smp_mode) {
+        WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0xC0000 + IRQ_INVALIDATE_TLB);
+    }
+    return 0;
 }
 
 void ipi_sche_main() {
@@ -443,7 +455,9 @@ void apic_init() {
         idt_set_kernel_handler(IRQ_BASE+45, (uintptr_t)&_irq45, 0);
         idt_set_kernel_handler(IRQ_BASE+46, (uintptr_t)&_irq46, 0);
         idt_set_kernel_handler(IRQ_BASE+47, (uintptr_t)&_irq47, 0);
+
         idt_set_kernel_handler(IRQ_SCHDULE, (uintptr_t)&_ipi_sche, 0);
+        idt_set_kernel_handler(IRQ_INVALIDATE_TLB, (uintptr_t)&_ipi_invtlb, 0);
 
         // Then enable IRQ
         __asm__ volatile("sti");
@@ -455,9 +469,9 @@ void apic_init() {
 //  because to initialize AP needs Timer
 void apic_init_mp() {
     if (n_cpu > 1) {
-        uint8_t vector_sipi = 0x10; // TODO: dynamic
+        uint8_t vector_sipi = moe_alloc_gates_memory() >> 10;
         const uintptr_t stack_chunk_size = 0x4000;
-        uintptr_t* stacks = mm_alloc_static_page(stack_chunk_size * n_cpu);
+        uintptr_t* stacks = moe_alloc_object(stack_chunk_size, n_cpu);
         _Atomic uint32_t* wait_p = smp_setup_init(vector_sipi, MAX_CPU, stack_chunk_size, stacks);
         WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4500);
         moe_usleep(10000);

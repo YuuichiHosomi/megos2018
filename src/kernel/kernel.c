@@ -30,14 +30,15 @@
 #define VER_SYSTEM_NAME     "MOE"
 #define VER_STRING          "v0.5.5"
 
-extern void arch_init();
 extern void acpi_init(acpi_rsd_ptr_t* rsd);
+extern void arch_init();
 extern void gs_init(moe_dib_t* screen);
-extern void mm_init(moe_bootinfo_mmap_t* mmap);
+extern void hid_init();
+extern void mm_init(uintptr_t mmbase, uint32_t mmsize, uint32_t mmdescsz, uint32_t mmver);
 extern void window_init();
-_Noreturn void arch_do_reset();
-// extern void xhci_init();
+extern void xhci_init();
 
+_Noreturn void arch_do_reset();
 extern char *strchr(const char *s, int c);
 extern int vprintf(const char *format, va_list args);
 
@@ -72,14 +73,9 @@ _Noreturn void moe_shutdown_system() {
 }
 
 
+static uint64_t base_time;
 uint64_t fw_get_time() {
-    if (gRT) {
-        EFI_TIME etime;
-        gRT->GetTime(&etime, NULL);
-        return 1000000LL * (etime.Second + etime.Minute * 60 + etime.Hour * 3600) + (etime.Nanosecond / 1000);
-    } else {
-        return 0;
-    }
+    return base_time + moe_get_measure();
 }
 
 
@@ -105,18 +101,27 @@ void moe_assert(const char* file, uintptr_t line, ...) {
 extern uintptr_t total_memory;
 extern int n_active_cpu;
 extern _Noreturn void start_init(void* args);
-_Noreturn void start_kernel(moe_bootinfo_t* bootinfo) {
+_Noreturn void start_kernel(moe_bootinfo_t *info) {
 
-    gRT = bootinfo->efiRT;
-    gs_init(&bootinfo->screen);
-    mm_init(&bootinfo->mmap);
-    acpi_init(bootinfo->acpi);
+    EFI_TIME etime = *(EFI_TIME *)(&info->boottime);
+    base_time = 1000000LL * (etime.Second + etime.Minute * 60 + etime.Hour * 3600) + (etime.Nanosecond / 1000);
+
+    gRT = 0; //bootinfo->efiRT;
+
+    moe_dib_t main_screen = {0};
+    main_screen.width = info->screen.width;
+    main_screen.height = info->screen.height;
+    main_screen.delta = info->screen.delta;
+    main_screen.dib = (void *)info->vram_base;
+    gs_init(&main_screen);
+    mm_init(info->mmbase, info->mmsize, info->mmdescsz, info->mmver);
+    acpi_init((void *)info->acpi);
     arch_init();
+    hid_init();
 
     printf("%s [%d Cores, Memory %d MB]\n", moe_kname(), n_active_cpu, (int)(total_memory >> 8));
 
     // xhci_init();
-
     window_init();
 
     moe_create_thread(&start_init, 0, 0, "init");

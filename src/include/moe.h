@@ -59,7 +59,7 @@ typedef struct moe_window_t moe_window_t;
 typedef struct moe_view_t moe_view_t;
 typedef struct moe_console_context_t moe_console_context_t;
 typedef struct moe_font_t moe_font_t;
-typedef struct moe_hid_keyboard_report_t moe_hid_keyboard_report_t;
+typedef struct moe_hid_kbd_report_t moe_hid_kbd_report_t;
 
 #define MOE_DIB_ALPHA       0x0001
 #define MOE_DIB_COLOR_KEY   0x0100
@@ -124,16 +124,15 @@ void moe_set_active_window(moe_window_t *window);
 void moe_set_window_title(moe_window_t *window, const char *title);
 int moe_alert(const char *title, const char *message, uint32_t flags);
 
-int moe_send_key_event(moe_hid_keyboard_report_t* report);
+int moe_send_key_event(moe_hid_kbd_report_t* report);
 int moe_send_event(moe_window_t *window, uintptr_t event);
 uintptr_t moe_get_event(moe_window_t *window, int wait);
 uint32_t moe_translate_key_event(moe_window_t *window, uintptr_t event);
 
 
 //  Minimal Memory Subsystem
-void *mm_alloc_static_page(size_t n);
-void *mm_alloc_static(size_t n);
-uintptr_t moe_alloc_physical_page(size_t n);
+void *mm_alloc_static_page(size_t n); // deprecated
+void *moe_alloc_object(size_t size, size_t count);
 
 
 //  Threading Service
@@ -153,6 +152,7 @@ int moe_create_thread(moe_thread_start start, moe_priority_level_t priority, voi
 void moe_yield();
 int moe_usleep(uint64_t us);
 int moe_get_current_thread();
+const char *moe_get_current_thread_name();
 int moe_get_usage();
 _Noreturn void moe_exit_thread(uint32_t exit_code);
 
@@ -174,7 +174,9 @@ int moe_fifo_write(moe_fifo_t *self, intptr_t data);
 size_t moe_fifo_get_estimated_count(moe_fifo_t *self);
 size_t moe_fifo_get_estimated_free(moe_fifo_t *self);
 
-void moe_sem_init(moe_semaphore_t* self, intptr_t value);
+moe_semaphore_t *moe_sem_create(intptr_t value);
+void moe_sem_init(moe_semaphore_t *self, intptr_t value);
 int moe_sem_trywait(moe_semaphore_t *self);
-int moe_sem_wait(moe_semaphore_t* self, uint64_t us);
-void moe_sem_signal(moe_semaphore_t* self);
+int moe_sem_wait(moe_semaphore_t *self, uint64_t us);
+void moe_sem_signal(moe_semaphore_t *self);
+intptr_t moe_sem_getvalue(moe_semaphore_t *self);

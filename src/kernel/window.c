@@ -698,7 +698,7 @@ moe_window_t *moe_window_hit_test(moe_point_t *point) {
 }
 
 
-int moe_send_key_event(moe_hid_keyboard_report_t *report) {
+int moe_send_key_event(moe_hid_kbd_report_t *report) {
     if (wm_state.active_window) {
         uintptr_t keyevent = MOE_EVENT_KEY_MIN + (report->keydata[0] | (report->modifier << 8));
         return moe_send_event(wm_state.active_window, keyevent);
@@ -860,8 +860,7 @@ _Noreturn void window_thread(void* args) {
 
 
 void window_init() {
-    wm_state.window_pool = mm_alloc_static(MAX_WINDOWS * sizeof(moe_window_t));
-    memset(wm_state.window_pool, 0, MAX_WINDOWS * sizeof(moe_window_t));
+    wm_state.window_pool = moe_alloc_object(sizeof(moe_window_t), MAX_WINDOWS);
 
     moe_rect_t screen_bounds = {{0, 0}, {main_screen_dib.width, main_screen_dib.height}};
     wm_state.screen_bounds = screen_bounds;

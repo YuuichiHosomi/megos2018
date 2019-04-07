@@ -38,59 +38,71 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
     EFI_BOOT_SERVICES* bs;
     EFI_STATUS status;
 
-    // Init UEFI Environments
-    bs = st->BootServices;
+    // Boot from EFI
+    if (st) {
 
-    // Find ACPI table pointer
-    {
-        bootinfo.acpi = efi_find_config_table(st, &efi_acpi_20_table_guid);
-        if (!bootinfo.acpi) {
-            EFI_PRINT("ERROR: ACPI NOT FOUND");
-            goto errexit;
-        }
-    }
+        // Init UEFI Environments
+        bs = st->BootServices;
 
-    // Get GOP
-    {
-        EFI_GRAPHICS_OUTPUT_PROTOCOL* gop = NULL;
-
-        status = bs->LocateProtocol(&EfiGraphicsOutputProtocolGuid, NULL, (void**)&gop);
-        if (!gop) {
-            EFI_PRINT("ERROR: GOP NOT FOUND");
-            goto errexit;
-        }
-
-        bootinfo.screen.dib = (uint32_t *)gop->Mode->FrameBufferBase;
-        bootinfo.screen.width = gop->Mode->Info->HorizontalResolution;
-        bootinfo.screen.height = gop->Mode->Info->VerticalResolution;
-        bootinfo.screen.delta = gop->Mode->Info->PixelsPerScanLine;
-        bootinfo.screen.flags = MOE_DIB_UNMANAGED;
-    }
-
-    // Exit BootServices
-    {
-        EFI_MEMORY_DESCRIPTOR* mmap = NULL;
-        UINTN mmapsize = 0;
-        UINTN mapkey, descriptorsize;
-        UINT32 descriptorversion;
-
-        do {
-            status = bs->GetMemoryMap(&mmapsize, mmap, &mapkey, &descriptorsize, &descriptorversion);
-            while (status == EFI_BUFFER_TOO_SMALL) {
-                if (mmap) {
-                    bs->FreePool(mmap);
-                }
-                status = bs->AllocatePool(EfiLoaderData, mmapsize, (void**)&mmap);
-                status = bs->GetMemoryMap(&mmapsize, mmap, &mapkey, &descriptorsize, &descriptorversion);
+        // Find ACPI table pointer
+        {
+            bootinfo.acpi = (uintptr_t)efi_find_config_table(st, &efi_acpi_20_table_guid);
+            if (!bootinfo.acpi) {
+                EFI_PRINT("ERROR: ACPI NOT FOUND");
+                goto errexit;
             }
-            status = bs->ExitBootServices(image, mapkey);
-        } while (EFI_ERROR(status));
+        }
 
-        bootinfo.mmap.mmap = mmap;
-        bootinfo.mmap.size = mmapsize;
-        bootinfo.mmap.desc_size = descriptorsize;
-        bootinfo.mmap.desc_version = descriptorversion;
-        bootinfo.efiRT = st->RuntimeServices;
+        // Get GOP
+        {
+            EFI_GRAPHICS_OUTPUT_PROTOCOL* gop = NULL;
+
+            status = bs->LocateProtocol(&EfiGraphicsOutputProtocolGuid, NULL, (void**)&gop);
+            if (!gop) {
+                EFI_PRINT("ERROR: GOP NOT FOUND");
+                goto errexit;
+            }
+
+            bootinfo.vram_base = gop->Mode->FrameBufferBase;
+            bootinfo.screen.width = gop->Mode->Info->HorizontalResolution;
+            bootinfo.screen.height = gop->Mode->Info->VerticalResolution;
+            bootinfo.screen.delta = gop->Mode->Info->PixelsPerScanLine;
+        }
+
+        // EFI TIME
+        {
+            EFI_TIME *time = (EFI_TIME *)(&bootinfo.boottime);
+            st->RuntimeServices->GetTime(time, NULL);
+        }
+
+        // Exit BootServices
+        {
+            EFI_MEMORY_DESCRIPTOR* mmap = NULL;
+            UINTN mmapsize = 0;
+            UINTN mapkey, descriptorsize;
+            UINT32 descriptorversion;
+
+            do {
+                status = bs->GetMemoryMap(&mmapsize, mmap, &mapkey, &descriptorsize, &descriptorversion);
+                while (status == EFI_BUFFER_TOO_SMALL) {
+                    if (mmap) {
+                        bs->FreePool(mmap);
+                    }
+                    status = bs->AllocatePool(EfiLoaderData, mmapsize, (void**)&mmap);
+                    status = bs->GetMemoryMap(&mmapsize, mmap, &mapkey, &descriptorsize, &descriptorversion);
+                }
+                status = bs->ExitBootServices(image, mapkey);
+            } while (EFI_ERROR(status));
+
+            bootinfo.mmbase = (uintptr_t)mmap;
+            bootinfo.mmsize = mmapsize;
+            bootinfo.mmdescsz = descriptorsize;
+            bootinfo.mmver = descriptorversion;
+            // bootinfo.efiRT = st->RuntimeServices;
+        }
+    } else {
+        moe_bootinfo_t *non_efi_bootinfo = (moe_bootinfo_t *)image;
+        bootinfo = *non_efi_bootinfo;
     }
 
     // Start Kernel

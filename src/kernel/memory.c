@@ -9,6 +9,8 @@
 #define PAGE_SIZE   0x1000
 #define ROUNDUP_PAGE(n) ((n + 0xFFF) & ~0xFFF)
 
+extern void page_init();
+
 typedef struct {
     uintptr_t base;
     uintptr_t size;
@@ -20,27 +22,75 @@ uintptr_t total_memory = 0;
 static _Atomic uintptr_t free_memory;
 static _Atomic uintptr_t static_start;
 
-uintptr_t moe_alloc_physical_page(size_t n) {
-    return (uintptr_t)mm_alloc_static_page(n);
+
+// "640 k ought to be enough for anybody." - Bill Gates, 1981
+#define MAX_GATES_MEMORY    0xA0000
+#define MAX_GATES_INDEX     8
+_Atomic uint32_t gates_memory_bitmap[MAX_GATES_INDEX];
+
+static int popcnt32(uint32_t bits) {
+    bits = (bits & 0x55555555) + (bits >> 1 & 0x55555555);
+    bits = (bits & 0x33333333) + (bits >> 2 & 0x33333333);
+    bits = (bits & 0x0f0f0f0f) + (bits >> 4 & 0x0f0f0f0f);
+    bits = (bits & 0x00ff00ff) + (bits >> 8 & 0x00ff00ff);
+    return (bits & 0x0000ffff) + (bits >>16 & 0x0000ffff);
 }
 
-void *mm_alloc_static_page(size_t n) {
+static void gates_mark_as_free(int base, int n_pages) {
+    for (int i = (base >> 10); i < n_pages; i++) {
+        int offset = i / 32;
+        int position = i % 32;
+        atomic_bit_test_and_set(gates_memory_bitmap + offset, position);
+    }
+}
+
+uintptr_t moe_alloc_gates_memory() {
+    for (int i = 16; i < 255; i++) {
+        uintptr_t offset = i / 32;
+        uintptr_t position = i % 32;
+        if (atomic_bit_test_and_clear(gates_memory_bitmap + offset, position)) {
+            return i << 10;
+        }
+    }
+    return 0;
+}
+
+
+int get_free_gates_memory() {
+    int result = 0;
+    for (int i = 0; i < MAX_GATES_INDEX; i++) {
+        uint32_t n = gates_memory_bitmap[i];
+        result += popcnt32(n);
+    }
+    return result;
+}
+
+
+uintptr_t moe_alloc_physical_page(size_t n) {
     uintptr_t size = ROUNDUP_PAGE(n);
     uintptr_t free = atomic_load(&free_memory);
     while (free > size) {
         if (atomic_compare_exchange_strong(&free_memory, &free, free - size)) {
             uintptr_t result = atomic_fetch_add(&static_start, size);
-            return (void*)result;
+            return result;
         } else {
             io_pause();
         }
     }
-    return NULL;
+    return 0;
 }
 
-void* mm_alloc_static(size_t n) {
-    //  TODO:
-    return mm_alloc_static_page(n);
+void *mm_alloc_static_page(size_t n) {
+    return (void *)moe_alloc_physical_page(n);
+}
+
+void *moe_alloc_object(size_t size, size_t count) {
+    size_t sz = size * count;
+    void *p = mm_alloc_static_page(sz);
+    if (p) {
+        memset(p, 0, sz);
+    }
+    return p;
 }
 
 
@@ -71,39 +121,43 @@ static int mm_type_for_count(uint32_t type) {
     }
 }
 
-// static int mm_type_for_free(uint32_t type) {
-//     switch (type) {
-//         case EfiReservedMemoryType:
-//         case EfiUnusableMemory:
-//         case EfiMemoryMappedIO:
-//         case EfiMemoryMappedIOPortSpace:
-//         default:
-//             return 0;
+static int mm_type_for_free(uint32_t type) {
+    switch (type) {
+        case EfiReservedMemoryType:
+        case EfiUnusableMemory:
+        case EfiMemoryMappedIO:
+        case EfiMemoryMappedIOPortSpace:
+        default:
+            return EfiReservedMemoryType;
 
-//         case EfiConventionalMemory:
-//         case EfiBootServicesCode:
-//         case EfiBootServicesData:
-//             return EfiConventionalMemory;
+        case EfiConventionalMemory:
+        case EfiBootServicesCode:
+        case EfiBootServicesData:
+            return EfiConventionalMemory;
 
-//         case EfiLoaderCode:
-//         case EfiLoaderData:
-//         case EfiACPIMemoryNVS:
-//         case EfiACPIReclaimMemory:
-//         case EfiRuntimeServicesCode:
-//         case EfiRuntimeServicesData:
-//             return type;
-//     }
-// }
+        case EfiLoaderCode:
+        case EfiLoaderData:
+        case EfiACPIMemoryNVS:
+        case EfiACPIReclaimMemory:
+        case EfiRuntimeServicesCode:
+        case EfiRuntimeServicesData:
+            return type;
+    }
+}
 
 extern EFI_RUNTIME_SERVICES* gRT;
 static uintptr_t kma_base, kma_size = 0x1000;
 
-void mm_init(moe_bootinfo_mmap_t* mmap) {
+void mm_init(uintptr_t mmbase, uint32_t mmsize, uint32_t mmdescsz, uint32_t mmver) {
 
-    uintptr_t mmap_ptr = (uintptr_t)mmap->mmap;
-    int n_mmap = mmap->size / mmap->desc_size;
-    for (int i = 0; i < n_mmap; i++) {
-        EFI_MEMORY_DESCRIPTOR* efi_mem = (EFI_MEMORY_DESCRIPTOR*)(mmap_ptr + i * mmap->desc_size);
+    uintptr_t mmap_ptr = mmbase;
+    uintptr_t n_mmap = mmsize / mmdescsz;
+    for (uintptr_t i = 0; i < n_mmap; i++) {
+        EFI_MEMORY_DESCRIPTOR* efi_mem = (EFI_MEMORY_DESCRIPTOR*)(mmap_ptr + i * mmdescsz);
+        uint32_t type_f = mm_type_for_free(efi_mem->Type);
+        if (efi_mem->PhysicalStart < MAX_GATES_MEMORY && type_f == EfiConventionalMemory) {
+            gates_mark_as_free(efi_mem->PhysicalStart, efi_mem->NumberOfPages);
+        }
         efi_mem->VirtualStart = efi_mem->PhysicalStart;
         uint32_t type = mm_type_for_count(efi_mem->Type);
         if (type == EfiConventionalMemory && kma_size < efi_mem->NumberOfPages && ROUNDUP_PAGE(efi_mem->PhysicalStart) == efi_mem->PhysicalStart && efi_mem->PhysicalStart < UINT32_MAX ) {
@@ -114,18 +168,19 @@ void mm_init(moe_bootinfo_mmap_t* mmap) {
             total_memory += efi_mem->NumberOfPages;
         }
         // moe_mmap_t mem = { efi_mem->PhysicalStart, efi_mem->NumberOfPages*0x1000, mm_type_for_count(efi_mem->Type) };
-        // printf("%016llx %08zx %08zx\n", mem.base, mem.size, mem.type);
+        // printf("%012llx %012llx %08zx %08zx\n", mem.base, mem.base + mem.size, mem.size, mem.type);
     }
-    if (gRT) gRT->SetVirtualAddressMap(mmap->size, mmap->desc_size, mmap->desc_version, mmap->mmap);
+    // if (gRT) gRT->SetVirtualAddressMap(mmap->size, mmap->desc_size, mmap->desc_version, mmap->mmap);
 
     static_start = kma_base;
     free_memory = kma_size * PAGE_SIZE;
     memset32((void*)static_start, 0xdeadbeef, free_memory / 4);
 
+    page_init();
 }
 
 int cmd_mem(int argc, char **argv) {
-    printf("Memory: %d MB\n", (int)(total_memory >> 8));
+    printf("Memory: %d MB, Real: %d KB\n", (int)(total_memory >> 8), get_free_gates_memory() * 4);
     printf("Kernel: %08zx-%08zx %zuKB/%zuKB (%zuMB)\n",
     kma_base, (kma_base + kma_size * PAGE_SIZE - 1), free_memory /1024, kma_size * PAGE_SIZE / 1024,
     (kma_size * PAGE_SIZE) >> 20);

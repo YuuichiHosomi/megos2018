@@ -200,6 +200,19 @@ io_unlock_irq:
 .nosti:
     ret
 
+; void io_set_ptbr(uintptr_t cr3);
+; uintptr_t io_get_ptbr();
+    global io_set_ptbr, io_get_ptbr
+io_set_ptbr:
+    mov cr3, rcx
+    jmp short .next
+.next:
+    ret
+
+io_get_ptbr:
+    mov rax, cr3
+    ret
+
 
 ; int gdt_init(void);
     global gdt_init
@@ -577,6 +590,14 @@ _ipi_sche:
     pop rax
     iretq
 
+    global _ipi_invtlb
+_ipi_invtlb:
+    push rax
+    mov rax, cr3
+    mov cr3, rax
+    pop rax
+    iretq
+
 
 ; _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stacks);
     global smp_setup_init
@@ -590,11 +611,11 @@ smp_setup_init:
     mov ecx, _end_mp_rm_payload - _mp_rm_payload
     rep movsb
 
-    mov r8d, BOOT_INFO
-    mov [r8 + BOOTINFO_MAX_CPU], edx
-    mov [r8 + BOOTINFO_STACK_SIZE], r8d
-    mov [r8 + BOOTINFO_STACKS], r9
-    lea edx, [r8 + BOOTINFO_GDTR]
+    mov r10d, BOOT_INFO
+    mov [r10 + BOOTINFO_MAX_CPU], edx
+    mov [r10 + BOOTINFO_STACK_SIZE], r8d
+    mov [r10 + BOOTINFO_STACKS], r9
+    lea edx, [r10 + BOOTINFO_GDTR]
     lea rsi, [rel __GDT]
     mov edi, edx
     mov ecx, (__end_GDT - __GDT)/4
@@ -603,30 +624,30 @@ smp_setup_init:
     mov word [edx], (__end_GDT - __GDT)-1
 
     mov edx, 1
-    mov [r8], edx
+    mov [r10], edx
     mov rdx, cr4
-    mov [r8 + BOOTINFO_CR4], edx
+    mov [r10 + BOOTINFO_CR4], edx
     mov rdx, cr3
-    mov [r8 + BOOTINFO_CR3], rdx
-    sidt [r8 + BOOTINFO_IDT]
+    mov [r10 + BOOTINFO_CR3], rdx
+    sidt [r10 + BOOTINFO_IDT]
     mov ecx, IA32_EFER_MSR
     rdmsr
-    mov [r8 + BOOTINFO_EFER], eax
+    mov [r10 + BOOTINFO_EFER], eax
     mov ecx, IA32_MISC_MSR
     rdmsr
-    mov [r8 + IA32_MISC_MSR], eax
-    mov [r8 + IA32_MISC_MSR + 4], edx
+    mov [r10 + IA32_MISC_MSR], eax
+    mov [r10 + IA32_MISC_MSR + 4], edx
 
     lea ecx, [rel _startup32]
     mov edx, LOADER_CS32
-    mov [r8 + BOOTINFO_START32], ecx
-    mov [r8 + BOOTINFO_START32 + 4], edx
+    mov [r10 + BOOTINFO_START32], ecx
+    mov [r10 + BOOTINFO_START32 + 4], edx
     lea ecx, [rel _startup_ap]
     mov edx, LOADER_CS64
-    mov [r8 + BOOTINFO_START64], ecx
-    mov [r8 + BOOTINFO_START64 + 4], edx
+    mov [r10 + BOOTINFO_START64], ecx
+    mov [r10 + BOOTINFO_START64 + 4], edx
 
-    mov eax, r8d
+    mov eax, r10d
     pop rdi
     pop rsi
     ret

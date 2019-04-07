@@ -32,8 +32,6 @@ int cmd_help(int argc, char **argv);
 int cmd_cls(int argc, char **argv);
 int cmd_reboot(int argc, char **argv);
 int cmd_exit(int argc, char **argv);
-extern int cmd_mem(int argc, char **argv);
-extern int cmd_win(int argc, char **argv);
 extern int cmd_ps(int argc, char **argv);
 extern int cmd_cpuid(int, char**);
 extern int cmd_noiz2bg(int, char**);
@@ -49,20 +47,19 @@ typedef struct {
     char *tips; 
 } command_list_t;
 
-command_list_t commands[] = {
-    { "help", cmd_help, 0, "Show help" },
+static command_list_t commands[] = {
     { "cls", cmd_cls, 0, "Clear screen" },
-    { "ver", cmd_ver, 0, "Display version info" },
-    { "reboot", cmd_reboot, 0, "Restart computer" },
+    { "dbg", cmd_dbg, 0, "Test command" },
     { "exit", cmd_exit, 0, "Exit shell" },
-    { "memory", cmd_mem, 0, "Display memory info" },
-    { "windows", cmd_win, 0, "Display window list" },
+    { "help", cmd_help, 0, "Show help" },
     { "ps", cmd_ps, 0, "Display thread list" },
+    { "reboot", cmd_reboot, 0, "Restart computer" },
+    { "stall", cmd_stall, 0, "Stall for few seconds" },
+    { "ver", cmd_ver, 0, "Display version info" },
+
     { "cpuid", cmd_cpuid, 0, "Display cpuid info" },
     { "noiz2bg", cmd_noiz2bg, 1, "DEMO" },
     { "top", cmd_top, 1, "Graphical Task list" },
-    { "stall", cmd_stall, 0, "Stall for few seconds" },
-    { "dbg", cmd_dbg, 0, "Test command" },
     { NULL, NULL },
 };
 
@@ -205,7 +202,7 @@ _Noreturn void pseudo_shell(void* args) {
     // }
 
     for (;;) {
-        printf("# ");
+        printf("#");
         read_cmdline(window, con_buff, MAX_CMDLINE);
         strncpy(arg_buff, con_buff, MAX_ARGBUFF);
 
@@ -422,6 +419,7 @@ _Noreturn void button_test_thread(void *args) {
 _Noreturn void start_init(void* args) {
 
     moe_create_thread(&statusbar_thread, 0, 0, "statusbar");
+    moe_usleep(1000000);
     moe_create_thread(&pseudo_shell, 0, 0, "shell");
     moe_create_thread(&key_test_thread, 0, 0, "key test");
     // moe_create_thread(&button_test_thread, 0, 0, "button test");

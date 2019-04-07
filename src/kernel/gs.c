@@ -137,11 +137,11 @@ static int row_to_y(moe_console_context_t *self, int y) {
 
 moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color) {
 
-    moe_dib_t *self = mm_alloc_static(sizeof(moe_dib_t));
+    moe_dib_t *self = moe_alloc_object(sizeof(moe_dib_t), 1);
 
     if ((flags & MOE_DIB_UNMANAGED) == 0) {
         size_t dibsz = size->width * size->height * sizeof(uint32_t);
-        uint32_t *bitmap = mm_alloc_static(dibsz);
+        uint32_t *bitmap = mm_alloc_static_page(dibsz);
         self->dib = bitmap;
         memset32(bitmap, color, size->width * size->height);
     } else {
@@ -875,11 +875,25 @@ void mgs_cls() {
 void mgs_bsod(const char *s) {
 
     console_init(current_console, NULL, &main_screen_dib, &main_console_insets);
-    moe_set_console_attributes(current_console, 0x1F);
 
-    for(; *s; s++) {
-        putchar(*s);
-    }
+    init_simple_font(&system_font, bootfont_w, bootfont_h, 0, (void*)bootfont_data, 0);
+    main_console.font = &system_font;
+
+    moe_set_console_attributes(current_console, 0x1F);
+    // moe_fill_rect(&main_screen_dib, NULL, 0x0000AA);
+
+    moe_rect_t rect0 = {{0, 0}, {600, 300}};
+    moe_blend_rect(&main_screen_dib, &rect0, 0x800000AA);
+    moe_draw_pixel(&main_screen_dib, 100, 100, 0xFF9900);
+    moe_rect_t rect1 = {{ 4, 4}, {592, 288}};
+    moe_draw_string(&main_screen_dib, &system_font, NULL, &rect1, s, 0xFFFFFF);
+    // putchar32(current_console, '?');
+    // moe_draw_pixel(&main_screen_dib, 200, 200, 0xFF9900);
+    // for(; *s; s++) {
+    //     putchar(*s);
+    // }
+    // moe_rect_t rect = {{100, 100}, {100, 100}};
+    // moe_blend_rect(&main_screen_dib, &rect, 0x80FF9900);
 }
 
 

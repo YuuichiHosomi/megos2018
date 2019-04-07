@@ -1,8 +1,15 @@
-//  Human Interface Device Service
-// Copyright (c) 2018 MEG-OS project, All rights reserved.
+// Human Interface Device Manager
+// Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: BSD
 #include "moe.h"
+#include "kernel.h"
+#include <stdatomic.h>
 #include "hid.h"
+
+#define MAX_KBD 16
+
+
+extern void move_mouse(moe_hid_mouse_report_t* mouse_report);
 
 
 int usage_to_uni_table_1E[] = { // Non Alphabet
@@ -49,4 +56,51 @@ uint32_t hid_usage_to_unicode(uint8_t usage, uint8_t modifier) {
     }
 
     return uni;
+}
+
+
+int hid_report_key(moe_hid_kbd_report_t *keyreport) {
+    uint64_t *q = (uint64_t *)keyreport;
+    if (q[0] == q[1]) return 0;
+
+    moe_hid_kbd_report_t current = {0};
+    uint8_t pressed[6];
+    int next = 0;
+    for (int i = 0; i < 6; i++) {
+        int found = 0;
+        uint8_t u = keyreport[0].keydata[i];
+        if (!u) break;
+        for (int j = 0; j < 6; j++) {
+            uint8_t v = keyreport[1].keydata[j];
+            if (!v) break;
+            if (v == u) {
+                found = 1;
+            }
+        }
+        if (!found) {
+            pressed[next++] = u;
+        }
+    }
+    memcpy(keyreport + 1, keyreport, sizeof(moe_hid_kbd_report_t));
+    if (next == 0) return 0;
+    current.modifier = keyreport[0].modifier;
+
+    for (int i = 0; i < next; i++) {
+        current.keydata[0] = pressed[i];
+        if ((current.keydata[0] == HID_USAGE_DELETE) &&
+            (current.modifier & (0x11)) != 0 && (current.modifier & (0x44)) != 0) {
+            moe_reboot();
+        }
+        moe_send_key_event(&current);
+    }
+
+    return 1;
+}
+
+void hid_report_mouse(moe_hid_mouse_report_t mouse_report) {
+}
+
+
+void hid_init() {
+
 }

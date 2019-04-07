@@ -11,17 +11,16 @@
 
 
 typedef struct {
-    void* mmap; // EFI_MEMORY_DESCRIPTOR
-    uintptr_t size, desc_size;
-    uint32_t desc_version;
-} moe_bootinfo_mmap_t;
-
-typedef struct {
-    moe_dib_t screen;
-    acpi_rsd_ptr_t* acpi;
-
-    void* efiRT; // EFI_RUNTIME_SERVICES
-    moe_bootinfo_mmap_t mmap;
+    uint64_t acpi;
+    uint64_t vram_base;
+    union {
+        uint64_t _PADDING;
+        struct {
+            int16_t width, height, delta;
+        };
+    } screen;
+    uint64_t mmbase, mmsize, mmdescsz, mmver;
+    uint32_t boottime[4];
 } moe_bootinfo_t;
 
 
@@ -75,6 +74,22 @@ uint32_t READ_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p);
 void WRITE_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p, uint32_t v);
 uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p);
 void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v);
+
+
+void io_set_ptbr(uintptr_t cr3);
+uintptr_t io_get_ptbr();
+uint32_t io_lock_irq();
+void io_unlock_irq(uint32_t);
+
+
+// Low Level Memory Manager
+uintptr_t moe_alloc_physical_page(size_t n);
+uintptr_t moe_alloc_gates_memory();
+
+uint64_t pg_get_pte(uintptr_t ptr, int level);
+void pg_set_pte(uintptr_t ptr, uint64_t pte, int level);
+int apic_send_invalidate_tlb();
+void pg_alloc_mmio(uintptr_t base, size_t size);
 
 
 //  ACPI
