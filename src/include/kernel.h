@@ -11,6 +11,7 @@
 
 
 typedef struct {
+    uint64_t master_cr3;
     uint64_t acpi;
     uint64_t vram_base;
     union {
@@ -20,6 +21,10 @@ typedef struct {
         };
     } screen;
     uint64_t mmbase, mmsize, mmdescsz, mmver;
+    uint64_t kernel_base;
+    uint64_t total_memory;
+    _Atomic uint32_t free_memory;
+    _Atomic uint32_t static_start;
     uint32_t boottime[4];
 } moe_bootinfo_t;
 
@@ -76,8 +81,6 @@ uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p);
 void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v);
 
 
-void io_set_ptbr(uintptr_t cr3);
-uintptr_t io_get_ptbr();
 uint32_t io_lock_irq();
 void io_unlock_irq(uint32_t);
 
@@ -88,8 +91,10 @@ uintptr_t moe_alloc_gates_memory();
 
 uint64_t pg_get_pte(uintptr_t ptr, int level);
 void pg_set_pte(uintptr_t ptr, uint64_t pte, int level);
-int apic_send_invalidate_tlb();
-void pg_alloc_mmio(uintptr_t base, size_t size);
+int smp_send_invalidate_tlb();
+void *pg_map_mmio(uintptr_t base, size_t size);
+void *pg_valloc(uintptr_t pa, size_t size);
+void *pg_map_vram(uintptr_t base, size_t size);
 
 
 //  ACPI

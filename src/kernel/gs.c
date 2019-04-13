@@ -141,7 +141,7 @@ moe_dib_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color) {
 
     if ((flags & MOE_DIB_UNMANAGED) == 0) {
         size_t dibsz = size->width * size->height * sizeof(uint32_t);
-        uint32_t *bitmap = mm_alloc_static_page(dibsz);
+        uint32_t *bitmap = moe_alloc_object(1, dibsz);
         self->dib = bitmap;
         memset32(bitmap, color, size->width * size->height);
     } else {
@@ -876,8 +876,10 @@ void mgs_bsod(const char *s) {
 
     console_init(current_console, NULL, &main_screen_dib, &main_console_insets);
 
-    init_simple_font(&system_font, bootfont_w, bootfont_h, 0, (void*)bootfont_data, 0);
-    main_console.font = &system_font;
+    // init_simple_font(&system_font, bootfont_w, bootfont_h, 0, (void*)bootfont_data, 0);
+    // main_console.font = &system_font;
+    init_simple_font(&smallfont, smallfont_w, smallfont_h, 0, (void*)smallfont_data, 0);
+    main_console.font = &smallfont;
 
     moe_set_console_attributes(current_console, 0x1F);
     // moe_fill_rect(&main_screen_dib, NULL, 0x0000AA);

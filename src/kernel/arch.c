@@ -73,13 +73,15 @@ extern void *_irq45;
 extern void *_irq46;
 extern void *_irq47;
 
-extern uint16_t gdt_init(void);
+extern uint16_t gdt_init(x64_tss_desc_t *tss);
 extern void idt_load(volatile void*, size_t);
+extern x64_tss_t *io_get_tss();
 extern _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stacks);
 extern void thread_init(int n_active_cpu);
 extern void reschedule();
 extern void acpi_init_sci();
 extern void lpc_init();
+extern void pg_strict_mode();
 
 
 static tuple_eax_edx_t io_rdmsr(uint32_t const addr) {
@@ -100,7 +102,7 @@ static void io_wrmsr(uint32_t const addr, tuple_eax_edx_t val) {
 uint16_t cs_sel;
 x64_idt64_t* idt;
 
-#define SET_SYSTEM_INT_HANDLER(num)  idt_set_kernel_handler(0x ## num, (uintptr_t)&_int ## num, 0)
+#define SET_SYSTEM_INT_HANDLER(num, ist)  idt_set_kernel_handler(0x ## num, (uintptr_t)&_int ## num, ist)
 
 void idt_set_handler(uint8_t num, uintptr_t offset, uint16_t sel, uint8_t ist) {
     x64_idt64_t desc;
@@ -126,15 +128,16 @@ void default_int_handler(x64_context_t* regs) {
         "Something went wrong.\n\n"
         "TECH INFO: EXC-%02llx-%04llx-%016llx\n"
         "Thread %d: %s\n"
-        "IP %04llx:%016llx SP %04llx:%016llx FL %08llx\n"
-        "R0- %016llx %016llx %016llx %016llx\n"
-        "B4- %016llx %016llx %016llx\n"
-        "R8- %016llx %016llx %016llx %016llx\n"
-        "R12 %016llx %016llx %016llx %016llx\n"
+        "IP %02llx:%012llx SP %02llx:%012llx FL %08llx\n"
+        "AX %016llx CX %016llx DX %016llx\n"
+        "BX %016llx BP %016llx SI %016llx\n"
+        "DI %016llx R8 %016llx R9 %016llx\n"
+        "R10- %016llx %016llx %016llx\n"
+        "R13- %016llx %016llx %016llx\n"
         , regs->intnum, regs->err, regs->cr2
         , moe_get_current_thread(), moe_get_current_thread_name()
         , regs->cs, regs->rip, regs->ss, regs->rsp, regs->rflags
-        , regs->rax, regs->rbx, regs->rcx, regs->rdx, regs->rbp, regs->rsi, regs->rdi
+        , regs->rax, regs->rcx, regs->rdx, regs->rbx, regs->rbp, regs->rsi, regs->rdi
         , regs->r8, regs->r9, regs->r10, regs->r11, regs->r12, regs->r13, regs->r14, regs->r15
         );
 
@@ -145,18 +148,24 @@ void default_int_handler(x64_context_t* regs) {
 void idt_init() {
 
     const size_t idt_size = MAX_IDT_NUM * sizeof(x64_idt64_t);
-    idt = mm_alloc_static_page(idt_size);
-    memset((void*)idt, 0, idt_size);
+    idt = moe_alloc_object(idt_size, 1);
 
-    SET_SYSTEM_INT_HANDLER(00); // #DE Divide by zero Error
-    SET_SYSTEM_INT_HANDLER(03); // #BP Breakpoint
-    SET_SYSTEM_INT_HANDLER(06); // #UD Undefined Opcode
-    SET_SYSTEM_INT_HANDLER(07); // #NM Device not Available
-    SET_SYSTEM_INT_HANDLER(08); // #DF Double Fault
-    SET_SYSTEM_INT_HANDLER(0D); // #GP General Protection Fault
-    SET_SYSTEM_INT_HANDLER(0E); // #PF Page Fault
+    x64_tss_t *tss = io_get_tss();
+    const size_t ist_size = 0x4000;
+    for (int i = 0; i < 7; i++) {
+        uintptr_t ist = (uintptr_t)moe_alloc_object(ist_size, 1) + ist_size;
+        tss->IST[i] = ist;
+    }
 
-    idt_load(idt, idt_size-1);
+    SET_SYSTEM_INT_HANDLER(00, 0); // #DE Divide by zero Error
+    SET_SYSTEM_INT_HANDLER(03, 0); // #BP Breakpoint
+    SET_SYSTEM_INT_HANDLER(06, 0); // #UD Undefined Opcode
+    SET_SYSTEM_INT_HANDLER(07, 0); // #NM Device not Available
+    SET_SYSTEM_INT_HANDLER(08, 0); // #DF Double Fault
+    SET_SYSTEM_INT_HANDLER(0D, 0); // #GP General Protection Fault
+    SET_SYSTEM_INT_HANDLER(0E, 0); // #PF Page Fault
+
+    idt_load(idt, idt_size - 1);
 }
 
 
@@ -212,17 +221,22 @@ apic_id_t apic_ids[MAX_CPU];
 uint8_t apicid_to_cpuids[256];
 int n_cpu = 0;
 MOE_PHYSICAL_ADDRESS lapic_base = 0;
-MOE_PHYSICAL_ADDRESS ioapic_base   = 0;
+void *ioapic_base = NULL;
 int smp_mode = 0;
 _Atomic uint8_t next_msi = 0;
 
 
+static void apic_write_ioapic(int index, uint32_t value) {
+    _Atomic uint8_t *ireg = (void *)((uintptr_t)ioapic_base);
+    _Atomic uint32_t *dreg = (void *)((uintptr_t)ioapic_base + 0x10);
+    *ireg = index;
+    *dreg = value;
+}
+
 void apic_set_io_redirect(uint8_t irq, uint8_t vector, uint8_t trigger, int mask, apic_id_t desination) {
     uint32_t redir_lo = vector | ((trigger & 0xA)<<12) | (mask ? 0x10000 : 0);
-    WRITE_PHYSICAL_UINT8(ioapic_base, 0x10 + irq * 2);
-    WRITE_PHYSICAL_UINT32(ioapic_base + 0x10, redir_lo);
-    WRITE_PHYSICAL_UINT8(ioapic_base, 0x11 + irq * 2);
-    WRITE_PHYSICAL_UINT32(ioapic_base + 0x10, desination << 24);
+    apic_write_ioapic(0x10 + irq * 2, redir_lo);
+    apic_write_ioapic(0x11 + irq * 2, desination << 24);
 }
 
 void apic_end_of_irq(uint8_t irq) {
@@ -298,7 +312,7 @@ void _irq_main(uint8_t irq, void* p) {
     }
 }
 
-int apic_send_invalidate_tlb() {
+int smp_send_invalidate_tlb() {
     if (smp_mode) {
         WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0xC0000 + IRQ_INVALIDATE_TLB);
     }
@@ -353,6 +367,7 @@ void apic_init() {
         msr_lapic.u64 |= IA32_APIC_BASE_MSR_ENABLE;
         io_wrmsr(IA32_APIC_BASE_MSR, msr_lapic);
         lapic_base = msr_lapic.u64 & ~0xFFF;
+        pg_map_mmio(lapic_base, 1);
 
         apic_ids[n_cpu++] = READ_PHYSICAL_UINT32(lapic_base + 0x20) >> 24;
 
@@ -381,7 +396,7 @@ void apic_init() {
             {
                 apic_madt_ioapic_t* ioapic = madt_structure;
                 if (ioapic->gsi_base == 0) {
-                    ioapic_base = ioapic->ioapic_base;
+                    ioapic_base = pg_map_mmio(ioapic->ioapic_base, 1);
                 }
             }
                 break;
@@ -468,8 +483,8 @@ void apic_init() {
 
 //  because to initialize AP needs Timer
 void apic_init_mp() {
-    if (n_cpu > 1) {
-        uint8_t vector_sipi = moe_alloc_gates_memory() >> 10;
+    if (0 && n_cpu > 1) {
+        uint8_t vector_sipi = moe_alloc_gates_memory() >> 12;
         const uintptr_t stack_chunk_size = 0x4000;
         uintptr_t* stacks = moe_alloc_object(stack_chunk_size, n_cpu);
         _Atomic uint32_t* wait_p = smp_setup_init(vector_sipi, MAX_CPU, stack_chunk_size, stacks);
@@ -489,11 +504,19 @@ void apic_init_mp() {
 //  High Precision Event Timer
 
 #define HPET_DIV    5
-MOE_PHYSICAL_ADDRESS hpet_base = 0;
+_Atomic uint64_t *hpet_base;
 uint32_t hpet_main_cnt_period = 0;
 _Atomic uint64_t hpet_count = 0;
 static const uint64_t timer_div = 1000 * HPET_DIV;
 uint64_t measure_div;
+
+static void hpet_write_reg(uintptr_t index, uint64_t val) {
+    hpet_base[index / 8] = val;
+}
+
+static uint64_t hpet_read_reg(uintptr_t index) {
+    return hpet_base[index / 8];
+}
 
 void hpet_irq_handler(int irq) {
     hpet_count++;
@@ -508,24 +531,24 @@ int moe_check_timer(moe_timer_t* timer) {
 }
 
 uint64_t moe_get_measure() {
-    uint64_t main_cnt = READ_PHYSICAL_UINT64(hpet_base + 0xF0);
+    uint64_t main_cnt = hpet_read_reg(0xF0);
     return main_cnt / measure_div;
 }
 
 void hpet_init() {
     acpi_hpet_t* hpet = acpi_find_table(ACPI_HPET_SIGNATURE);
     if (hpet) {
-        hpet_base = hpet->address.address;
+        hpet_base = pg_map_mmio(hpet->address.address, 1);
 
-        hpet_main_cnt_period = READ_PHYSICAL_UINT32(hpet_base + 4);
-        WRITE_PHYSICAL_UINT64(hpet_base + 0x10, 0);
-        WRITE_PHYSICAL_UINT64(hpet_base + 0x20, 0); // Clear all interrupts
-        WRITE_PHYSICAL_UINT64(hpet_base + 0xF0, 0); // Reset MAIN_COUNTER_VALUE
-        WRITE_PHYSICAL_UINT64(hpet_base + 0x10, 0x03); // LEG_RT_CNF | ENABLE_CNF
+        hpet_main_cnt_period = hpet_read_reg(0) >> 32;
+        hpet_write_reg(0x10, 0);
+        hpet_write_reg(0x20, 0); // Clear all interrupts
+        hpet_write_reg(0xF0, 0); // Reset MAIN_COUNTER_VALUE
+        hpet_write_reg(0x10, 0x03); // LEG_RT_CNF | ENABLE_CNF
 
         measure_div = 1000000000 / hpet_main_cnt_period;
-        WRITE_PHYSICAL_UINT64(hpet_base + 0x100, 0x4C);
-        WRITE_PHYSICAL_UINT64(hpet_base + 0x108, HPET_DIV * 1000000000000 / hpet_main_cnt_period);
+        hpet_write_reg(0x100, 0x4C);
+        hpet_write_reg(0x108, HPET_DIV * 1000000000000 / hpet_main_cnt_period);
         moe_enable_irq(0, &hpet_irq_handler);
 
     } else {
@@ -684,7 +707,6 @@ void pci_init() {
 
 
 _Noreturn void arch_do_reset() {
-    // WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x00084500);
     io_out8(0x0CF9, 0x06);
     moe_usleep(10000);
     io_out8(0x0092, 0x01);
@@ -693,9 +715,7 @@ _Noreturn void arch_do_reset() {
 }
 
 
-void arch_init() {
-    cs_sel = gdt_init();
-    idt_init();
+void arch_cpu_init() {
 
     // clear XD Disable bit
     tuple_eax_edx_t misc = io_rdmsr(IA32_MISC_ENABLE_MSR);
@@ -707,10 +727,27 @@ void arch_init() {
         io_wrmsr(IA32_EFER_MSR, efer);
     }
 
+}
+
+void arch_init() {
+
+    size_t tss_size = 4096;
+    uintptr_t tss_base = (uintptr_t)moe_alloc_object(tss_size, 1);
+    x64_tss_desc_t tss = {{tss_size - 1}};
+    tss.base_1 = tss_base;
+    tss.base_2 = tss_base >> 24;
+    tss.base_3 = tss_base >> 32;
+    tss.type = DESC_TYPE_TSS64;
+    tss.present = 1;
+
+    cs_sel = gdt_init(&tss);
+    idt_init();
+
     pci_init();
     apic_init();
     hpet_init();
     acpi_init_sci();
     apic_init_mp();
+    pg_strict_mode();
     lpc_init();
 }

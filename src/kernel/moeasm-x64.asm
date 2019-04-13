@@ -5,6 +5,7 @@
 %define LOADER_CS32 0x08
 %define LOADER_CS64 0x10
 %define LOADER_SS   0x18
+%define SEL_TSS     0x30
 
 %define BOOT_INFO           0x0800
 %define BOOTINFO_MAX_CPU    0x04
@@ -31,6 +32,73 @@
     extern moe_fpu_restore
     extern _irq_main
     extern ipi_sche_main
+
+
+; int gdt_init(x64_tss_desc_t *tss);
+    global gdt_init
+gdt_init:
+
+    lea r11, [rel (__GDT + SEL_TSS)]
+    mov r10, [rcx]
+    mov [r11], r10
+    mov r10, [rcx + 8]
+    mov [r11 + 8], r10
+
+    ; load GDTR
+    lea rax, [rel __GDT]
+    push rax
+    mov ecx, (__end_GDT - __GDT)-1
+    shl rcx, 48
+    push rcx
+    lgdt [rsp+6]
+    add rsp, 16
+
+    ; refresh CS and SS
+    mov eax, LOADER_CS64
+    mov rcx, rsp
+    push byte LOADER_SS
+    push rcx
+    pushfq
+    push rax
+    call _iretq
+
+    mov ecx, SEL_TSS
+    ltr cx
+
+    ret
+
+
+; void idt_load(void* idt, size_t limit);
+    global idt_load
+idt_load:
+    shl rdx, 48
+    push rcx
+    push rdx
+    lidt [rsp+6]
+    add rsp, byte 16
+    ret
+
+
+; void *io_get_tss();
+    global io_get_tss
+io_get_tss:
+    sub rsp, byte 0x10
+
+    sgdt [rsp + 6]
+    mov r11, [rsp + 8]
+    lea r11, [r11 + SEL_TSS]
+    mov rcx, [r11]
+    mov rax, rcx
+    shr rax, 16
+    and eax, 0x00FFFFFF
+    shr rcx, 24 + 32
+    add rax, rcx
+    mov rdx, [r11 + 8]
+    shl rdx, 32
+    add rax, rdx
+
+    add rsp, byte 0x10
+    ret
 
 
 ; int atomic_bit_test(void *p, uintptr_t bit);
@@ -198,55 +266,6 @@ io_unlock_irq:
     jz .nosti
     sti
 .nosti:
-    ret
-
-; void io_set_ptbr(uintptr_t cr3);
-; uintptr_t io_get_ptbr();
-    global io_set_ptbr, io_get_ptbr
-io_set_ptbr:
-    mov cr3, rcx
-    jmp short .next
-.next:
-    ret
-
-io_get_ptbr:
-    mov rax, cr3
-    ret
-
-
-; int gdt_init(void);
-    global gdt_init
-gdt_init:
-
-    ; load GDTR
-    lea rax, [rel __GDT]
-    push rax
-    mov ecx, (__end_GDT - __GDT)-1
-    shl rcx, 48
-    push rcx
-    lgdt [rsp+6]
-    add rsp, 16
-
-    ; refresh CS and SS
-    mov eax, LOADER_CS64
-    mov rcx, rsp
-    push byte LOADER_SS
-    push rcx
-    pushfq
-    push rax
-    call _iretq
-
-    ret
-
-
-; void idt_load(void* idt, size_t limit);
-    global idt_load
-idt_load:
-    shl rdx, 48
-    push rcx
-    push rdx
-    lidt [rsp+6]
-    add rsp, byte 16
     ret
 
 
@@ -618,10 +637,10 @@ smp_setup_init:
     lea edx, [r10 + BOOTINFO_GDTR]
     lea rsi, [rel __GDT]
     mov edi, edx
-    mov ecx, (__end_GDT - __GDT)/4
+    mov ecx, (__end_common_GDT - __GDT)/4
     rep movsd
     mov [edx+2], edx
-    mov word [edx], (__end_GDT - __GDT)-1
+    mov word [edx], (__end_common_GDT - __GDT)-1
 
     mov edx, 1
     mov [r10], edx
@@ -756,4 +775,7 @@ __GDT:
     dw 0xFFFF, 0x0000, 0x9200, 0x00CF   ; 18 32bit KERNEL DATA FLAT
     dw 0xFFFF, 0x0000, 0xFA00, 0x00AF   ; 23 64bit USER TEXT FLAT
     dw 0xFFFF, 0x0000, 0xF200, 0x00CF   ; 2B 32bit USER DATA FLAT
+__end_common_GDT:
+    dw 0xFFFF, 0x0000, 0x8900, 0x0000   ; 30 64bit TSS (Low)
+    dw 0, 0, 0, 0                       ; 38 64bit TSS (High)
 __end_GDT:

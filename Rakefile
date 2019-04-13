@@ -34,7 +34,8 @@ case ARCH.to_sym
 when :x64
   PATH_OVMF     = "var/bios64.bin"
   QEMU_ARCH     = "x86_64"
-  QEMU_OPTS     = "-smp 4 -rtc base=localtime"
+  QEMU_OPTS     = "-smp 4 -rtc base=localtime -device nec-usb-xhci,id=xhci"
+  # -device usb-kbd -device usb-mouse -device usb-tablet"
 when :i386
   PATH_OVMF     = "var/bios32.bin"
   QEMU_ARCH     = "x86_64"
@@ -74,6 +75,7 @@ CLEAN.include(FileList["#{PATH_OBJ}**/*"])
 CLEAN.include(FileList["#{PATH_SRC_FONTS}/*.h"])
 CLEAN.include(CP932_BIN)
 
+directory PATH_MNT
 directory PATH_OBJ
 directory PATH_BIN
 directory PATH_EFI_BOOT
@@ -91,8 +93,9 @@ task :default => [PATH_OBJ, PATH_BIN, TASKS].flatten
 desc "Install to #{PATH_MNT}"
 task :install => [:default, PATH_MNT, PATH_EFI_BOOT, PATH_EFI_VENDOR, PATH_OVMF, CP932_BIN] do
   (target, efi_suffix) = convert_arch(ARCH)
-  FileUtils.cp("#{PATH_BIN}boot#{efi_suffix}.efi", "#{PATH_EFI_BOOT}boot#{efi_suffix}.efi")
-  FileUtils.cp("#{PATH_BIN}krnl#{efi_suffix}.efi", "#{PATH_EFI_VENDOR}krnl#{efi_suffix}.efi")
+  FileUtils.cp("#{PATH_BIN}menu#{efi_suffix}.efi", "#{PATH_EFI_BOOT}boot#{efi_suffix}.efi")
+  FileUtils.cp("#{PATH_BIN}boot#{efi_suffix}.efi", "#{PATH_EFI_VENDOR}boot#{efi_suffix}.efi")
+  FileUtils.cp("#{PATH_BIN}kernel.efi", "#{PATH_EFI_VENDOR}kernel.efi")
 end
 
 desc "Make ISO image"
@@ -252,8 +255,8 @@ def make_efi(cputype, target, src_tokens, options = {})
 
   objs = srcs.map do |token, src|
     mod_name = File.basename(token, '.*')
-    hash = Digest::SHA256.hexdigest(File.dirname(src)).slice(0, 8)
-    obj = "#{path_obj}#{hash}-#{mod_name}.o"
+    hash = Digest::SHA256.hexdigest(File.dirname(src)).slice(0, 16)
+    obj = "#{path_obj}#{mod_name}-#{hash}.o"
 
     case File.extname(src)
     when '.c'

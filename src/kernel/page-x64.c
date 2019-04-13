@@ -9,19 +9,36 @@
 enum {
     MAX_PAGE_LEVEL = 4,
     SHIFT_PER_LEVEL = 9,
-    NATIVE_PAGE_SIZE = 0x1000,
+    NATIVE_PAGE_SIZE = 0x00001000,
+    VIRTUAL_PAGE_SIZE = 0x00010000,
+    LARGE_PAGE_SIZE = 0x00200000,
+    VRAM_PAGE = 0x100,
     DIRECT_MAP_PAGE = 0x140,
-    KERNEL_PAGE = 0x1FC,
     RECURSIVE_PAGE = 0x1FE,
+    KERNEL_HEAP_PAGE = 0x1FF,
 };
+static const uint64_t BASE_SYS_RES = 0xC0000000;
 static const uint64_t max_physical_address = 0x000000FFFFFFFFFFLL;
 static const uint64_t max_virtual_address =  0x0000FFFFFFFFFFFFLL;
 static MOE_PHYSICAL_ADDRESS global_cr3;
-static uintptr_t base_direct_map = 0;
+static _Atomic uintptr_t base_kernel_heap = 0;
 typedef uint64_t pte_t;
 
-#define ROUNDUP_PAGE(n) ((n + NATIVE_PAGE_SIZE - 1) & ~(NATIVE_PAGE_SIZE - 1))
+extern void arch_cpu_init();
 
+static void io_set_ptbr(uintptr_t cr3) {
+    __asm__ volatile("movq %0, %%cr3"::"r"(cr3));
+}
+
+static void io_invalidate_tlb() {
+    uintptr_t rax;
+    __asm__ volatile("movq %%cr3, %0; movq %0, %%cr3;": "=r"(rax));
+}
+
+
+static uintptr_t ROUNDUP_PAGE(uintptr_t n, size_t page_size) {
+    return ((n + page_size - 1) & ~(page_size - 1));
+}
 
 static uint64_t get_rec_base(int level) {
     uintptr_t base = ~max_virtual_address;
@@ -33,20 +50,17 @@ static uint64_t get_rec_base(int level) {
     return base | rec;
 }
 
+static uintptr_t va_to_offset(uintptr_t ptr, int level) {
+    return ((ptr & max_virtual_address) >> (SHIFT_PER_LEVEL * level)) & ~7;
+}
+
 pte_t pg_get_pte(uintptr_t ptr, int level) {
-    uintptr_t base = get_rec_base(level);
-    uintptr_t ptr_ = ((ptr & max_virtual_address) >> (SHIFT_PER_LEVEL * level)) & ~7;
-    _Atomic pte_t *pta = (void *)(base + ptr_);
-    // printf("(%d) %012llx %012llx [%012llx] ", level, base, ptr_, (uintptr_t)pta);
-    pte_t result = *pta;
-    // printf("%012llx => %012llx\n", ptr, result);
-    return result;
+    _Atomic pte_t *pta = (void *)(get_rec_base(level) + va_to_offset(ptr, level));
+    return *pta;
 }
 
 void pg_set_pte(uintptr_t ptr, pte_t pte, int level) {
-    uintptr_t base = get_rec_base(level);
-    ptr = ((ptr & max_virtual_address) >> (SHIFT_PER_LEVEL * level)) & ~7;
-    _Atomic pte_t *pta = (void *)(base + ptr);
+    _Atomic pte_t *pta = (void *)(get_rec_base(level) + va_to_offset(ptr, level));
     *pta = pte;
 }
 
@@ -59,78 +73,125 @@ static uintptr_t root_page_to_va(uintptr_t page) {
 }
 
 
-void pg_alloc_mmio(uintptr_t _base, size_t _size) {
-    uint32_t eflags = io_lock_irq();
-
-    size_t size = ROUNDUP_PAGE(_size) / NATIVE_PAGE_SIZE;
-    uintptr_t base = (_base & max_physical_address) & ~(NATIVE_PAGE_SIZE - 1);
-    uintptr_t target = root_page_to_va(DIRECT_MAP_PAGE) + base;
-
-    for (int i = 4; i > 1; i--) {
-        pte_t parent_tbl = pg_get_pte(target, i);
-        if (!parent_tbl || (parent_tbl & PTE_LARGE)) {
-            pte_t p_tbl = moe_alloc_physical_page(NATIVE_PAGE_SIZE);
-            pte_t *table = MOE_PA2VA(p_tbl);
-            memset(table, 0, NATIVE_PAGE_SIZE);
-            uintptr_t offset = base >> (3 + SHIFT_PER_LEVEL * i);
-            pte_t *rec_tbl = (void *)get_rec_base(i);
-            // printf("(%d) %012llx %08x <= %012llx\n", i, rec_tbl, offset, p_tbl);
-            rec_tbl[offset] = p_tbl | PTE_PRESENT | PTE_WRITE;
-            io_set_ptbr(io_get_ptbr());
-        }
-    }
-    for (int i = 0; i < size; i++) {
-        pte_t pte = (base + i * NATIVE_PAGE_SIZE) | PTE_PRESENT | PTE_WRITE | PTE_PCD;
-        // printf("MMIO %012llx -> %012llx\n", target + i * NATIVE_PAGE_SIZE, pte);
-        pg_set_pte(target + i * NATIVE_PAGE_SIZE, pte, 1);
-    }
-    io_set_ptbr(io_get_ptbr());
-    apic_send_invalidate_tlb();
-    io_unlock_irq(eflags);
-
+void invalidate_tlb() {
+    io_invalidate_tlb();
+    smp_send_invalidate_tlb();
 }
 
 
-void page_init() {
-
+void *pg_map(uintptr_t base_pa, void *base_va, size_t size, uint64_t attributes) {
+    size_t count = ROUNDUP_PAGE(size, NATIVE_PAGE_SIZE) / NATIVE_PAGE_SIZE;
     pte_t common_attributes = PTE_PRESENT | PTE_WRITE;
+    uint32_t eflags = io_lock_irq();
+    for (size_t i = 0; i < count; i++) {
+        uintptr_t target_va = (uintptr_t)(base_va) + i * NATIVE_PAGE_SIZE;
+        uintptr_t target_pa = base_pa + i * NATIVE_PAGE_SIZE;
+        for (size_t j = MAX_PAGE_LEVEL; j > 1; j--) {
+            pte_t parent_tbl = pg_get_pte(target_va, j);
+            if (!parent_tbl) {
+                pte_t p_tbl = moe_alloc_physical_page(NATIVE_PAGE_SIZE);
+                pte_t *table = MOE_PA2VA(p_tbl);
+                memset(table, 0, NATIVE_PAGE_SIZE);
+                pg_set_pte(target_va, (p_tbl | common_attributes), j);
+                io_invalidate_tlb();
+            }
+        }
+        pg_set_pte(target_va, target_pa | attributes, 1);
+    }
+    invalidate_tlb();
+    io_unlock_irq(eflags);
+
+    return base_va;
+}
+
+
+void *pg_map_mmio(uintptr_t base, size_t _size) {
+    uintptr_t pa = base & max_physical_address & ~(NATIVE_PAGE_SIZE - 1);
+    return pg_map(pa, MOE_PA2VA(pa), _size, PTE_PRESENT | PTE_WRITE);
+}
+
+void *pg_map_vram(uintptr_t base, size_t size) {
+    return pg_map(base, (void *)root_page_to_va(VRAM_PAGE), size, PTE_USER | PTE_WRITE | PTE_PRESENT);
+}
+
+
+_Atomic uintptr_t valloc_lock = 0;
+void *pg_valloc(uintptr_t pa, size_t size) {
+    // return (void*)pa;
+    size_t vsize = ROUNDUP_PAGE(size, VIRTUAL_PAGE_SIZE) + VIRTUAL_PAGE_SIZE;
+    void *va = (void *)atomic_fetch_add(&base_kernel_heap, vsize);
+    pg_map(pa, va, size, PTE_PRESENT | PTE_WRITE);
+    return va;
+}
+
+
+void pg_strict_mode() {
+    // return;
+    const pte_t common_attributes = PTE_PRESENT | PTE_WRITE;
+    const uintptr_t guard = 0x001000 >> 12;
+
+    pte_t pml10_pa = moe_alloc_physical_page(NATIVE_PAGE_SIZE);
+    pte_t *pml10_va = MOE_PA2VA(pml10_pa);
+    uintptr_t i;
+    for (i = 0; i < guard; i++) {
+        pml10_va[i] = 0;
+    }
+    for (; i < 512; i++) {
+        pml10_va[i] = (i << 12) | common_attributes;
+    }
+    pg_set_pte(0, pml10_pa | common_attributes, 2);
+    invalidate_tlb();
+}
+
+
+void page_init(moe_bootinfo_t *bootinfo) {
+
+    arch_cpu_init();
+
+    const pte_t common_attributes = PTE_PRESENT | PTE_WRITE;
 
     // master PML4
     // global_cr3 = moe_alloc_gates_memory();
-    global_cr3 = moe_alloc_physical_page(NATIVE_PAGE_SIZE);
-    pte_t *pml4 = (pte_t *)global_cr3;
-    memset(pml4, 0, NATIVE_PAGE_SIZE);
-    pml4[RECURSIVE_PAGE] = global_cr3 | common_attributes; // recursive
+    global_cr3 = bootinfo->master_cr3;
+    pte_t *pml4_va = (pte_t *)global_cr3;
+    pml4_va[RECURSIVE_PAGE] = global_cr3 | common_attributes;
 
     // PML3
-    pte_t PML30 = moe_alloc_physical_page(NATIVE_PAGE_SIZE);
-    pte_t *pml30 = (pte_t *)PML30;
-    memset(pml30, 0, NATIVE_PAGE_SIZE);
-    pml4[0x000] = PML30 | common_attributes;
-    pml4[DIRECT_MAP_PAGE] = PML30 | common_attributes;
+    pte_t pml30_pa = moe_alloc_physical_page(NATIVE_PAGE_SIZE);
+    pte_t *pml30_va = (pte_t *)pml30_pa;
+    memset(pml30_va, 0, NATIVE_PAGE_SIZE);
+    pml4_va[DIRECT_MAP_PAGE] = pml30_pa | common_attributes;
 
     // PML2
-    const int n_first_directmap = 8;
-    pte_t PML20 = moe_alloc_physical_page(NATIVE_PAGE_SIZE * n_first_directmap);
-    pte_t *pml20 = (pte_t *)PML20;
+    const int n_first_directmap = 4;
+    pte_t pml20_pa = moe_alloc_physical_page(NATIVE_PAGE_SIZE * n_first_directmap);
+    pte_t *pml20_va = (pte_t *)pml20_pa;
     for (uintptr_t i = 0; i < n_first_directmap; i++) {
-        pml30[i] = (PML20 + (i << 12)) | common_attributes;
+        pml30_va[i] = (pml20_pa + (i << 12)) | common_attributes;
     }
     for (uintptr_t i = 0; i < 512 * n_first_directmap; i++) {
         pte_t la = (i << 21);
-        pte_t attrs = common_attributes | PTE_LARGE;
-        pml20[i] = la | attrs;
+        if (la < BASE_SYS_RES)
+            pml20_va[i] = la | common_attributes | PTE_LARGE;
+        else
+            pml20_va[i] = 0;
     }
 
-    // Kernel PML3
-    // MOE_PHYSICAL_ADDRESS KERNEL_PML3 = moe_alloc_physical_page(NATIVE_PAGE_SIZE);
-    // uint64_t *kpml3 = (uint64_t *)KERNEL_PML3;
-    // memset(kpml3, 0, NATIVE_PAGE_SIZE);
-    // pml4[KERNEL_PAGE] = KERNEL_PML3 | common_attributes;
+    base_kernel_heap = root_page_to_va(KERNEL_HEAP_PAGE);
+
+    // VRAM
+    MOE_PHYSICAL_ADDRESS pml3v_pa = moe_alloc_physical_page(NATIVE_PAGE_SIZE);
+    uint64_t *pml3v_va = (uint64_t *)pml3v_pa;
+    memset(pml3v_va, 0, NATIVE_PAGE_SIZE);
+    pml4_va[VRAM_PAGE] = pml3v_pa | common_attributes | PTE_USER;
+
+    pte_t pml2v_pa = moe_alloc_physical_page(NATIVE_PAGE_SIZE * n_first_directmap);
+    pte_t *pml2v_va = (pte_t *)pml2v_pa;
+    memset(pml2v_va, 0, NATIVE_PAGE_SIZE);
+    pml3v_va[0] = pml2v_pa | common_attributes | PTE_USER;
+
 
     io_set_ptbr(global_cr3);
-
-    base_direct_map = root_page_to_va(DIRECT_MAP_PAGE);
 
 }
 
@@ -139,7 +200,6 @@ void page_init() {
 
 
 void *MOE_PA2VA(MOE_PHYSICAL_ADDRESS pa) {
-    // TODO:
     return (void*)(pa + root_page_to_va(DIRECT_MAP_PAGE));
 }
 
@@ -151,7 +211,6 @@ uint8_t READ_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p) {
 void WRITE_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p, uint8_t v) {
     _Atomic uint8_t *p = MOE_PA2VA(_p);
     atomic_store(p, v);
-    // __asm__ volatile("movb %%dl, (%%rcx)":: "c"(p), "d"(v));
 }
 
 uint16_t READ_PHYSICAL_UINT16(MOE_PHYSICAL_ADDRESS _p) {
@@ -162,7 +221,6 @@ uint16_t READ_PHYSICAL_UINT16(MOE_PHYSICAL_ADDRESS _p) {
 void WRITE_PHYSICAL_UINT16(MOE_PHYSICAL_ADDRESS _p, uint16_t v) {
     _Atomic uint16_t *p = MOE_PA2VA(_p);
     atomic_store(p, v);
-    // __asm__ volatile("movw %%dx, (%%rcx)":: "c"(p), "d"(v));
 }
 
 uint32_t READ_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p) {
@@ -173,7 +231,6 @@ uint32_t READ_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p) {
 void WRITE_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p, uint32_t v) {
     _Atomic uint32_t *p = MOE_PA2VA(_p);
     atomic_store(p, v);
-    // __asm__ volatile("movl %%edx, (%%rcx)":: "c"(p), "d"(v));
 }
 
 uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p) {
@@ -184,5 +241,4 @@ uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p) {
 void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v) {
     _Atomic uint64_t *p = MOE_PA2VA(_p);
     atomic_store(p, v);
-    // __asm__ volatile("movq %%rdx, (%%rcx)":: "c"(p), "d"(v));
 }

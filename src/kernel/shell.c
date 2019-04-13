@@ -196,7 +196,7 @@ _Noreturn void pseudo_shell(void* args) {
 
     cmd_ver(0, 0);
 
-    // const char *autoexec = "cpuid\nstall 3\nps\n";
+    // const char *autoexec = "cpuid\nps\n";
     // for (int i = 0; autoexec[i]; i++) {
     //     moe_send_event(window, autoexec[i]);
     // }
@@ -302,8 +302,6 @@ _Noreturn void statusbar_thread(void *args) {
     int width_usage = 6 * 8;
     moe_rect_t rect_u = {{rect_c.origin.x - padding_x - width_usage, padding_y}, {width_usage, height}};
 
-    uint64_t time_base = fw_get_time() - moe_get_measure();
-
     {
         moe_point_t origin = {4, padding_y};
         moe_draw_string(statusbar_dib, NULL, &origin, NULL, "@ | File  Edit  View  Window  Help", fgcolor);
@@ -316,10 +314,10 @@ _Noreturn void statusbar_thread(void *args) {
     moe_rect_t rect_redraw = {{rect_u.origin.x, 0}, {rect_statusbar.size.width - rect_u.origin.x, rect_statusbar.size.height - 2}};
 
     uintptr_t event;
-    while ((event = moe_get_event(statusbar, 250000))) {
+    while ((event = moe_get_event(statusbar, 500000))) {
         moe_fill_rect(statusbar_dib, &rect_redraw, statusbar_bgcolor);
 
-        uint32_t now = ((time_base + moe_get_measure()) / 1000000LL);
+        uint32_t now = (fw_get_time() / 1000000LL);
         unsigned time0 = now % 60;
         unsigned time1 = (now / 60) % 60;
         unsigned time2 = (now / 3600) % 24;

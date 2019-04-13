@@ -80,17 +80,15 @@ uintptr_t moe_alloc_physical_page(size_t n) {
     return 0;
 }
 
-void *mm_alloc_static_page(size_t n) {
-    return (void *)moe_alloc_physical_page(n);
-}
-
 void *moe_alloc_object(size_t size, size_t count) {
     size_t sz = size * count;
-    void *p = mm_alloc_static_page(sz);
-    if (p) {
-        memset(p, 0, sz);
+    void *va = NULL;
+    uintptr_t pa = moe_alloc_physical_page(sz);
+    if (pa) {
+        va = pg_valloc(pa, sz);
+        memset(va, 0, sz);
     }
-    return p;
+    return va;
 }
 
 
@@ -148,35 +146,13 @@ static int mm_type_for_free(uint32_t type) {
 extern EFI_RUNTIME_SERVICES* gRT;
 static uintptr_t kma_base, kma_size = 0x1000;
 
-void mm_init(uintptr_t mmbase, uint32_t mmsize, uint32_t mmdescsz, uint32_t mmver) {
-
-    uintptr_t mmap_ptr = mmbase;
-    uintptr_t n_mmap = mmsize / mmdescsz;
-    for (uintptr_t i = 0; i < n_mmap; i++) {
-        EFI_MEMORY_DESCRIPTOR* efi_mem = (EFI_MEMORY_DESCRIPTOR*)(mmap_ptr + i * mmdescsz);
-        uint32_t type_f = mm_type_for_free(efi_mem->Type);
-        if (efi_mem->PhysicalStart < MAX_GATES_MEMORY && type_f == EfiConventionalMemory) {
-            gates_mark_as_free(efi_mem->PhysicalStart, efi_mem->NumberOfPages);
-        }
-        efi_mem->VirtualStart = efi_mem->PhysicalStart;
-        uint32_t type = mm_type_for_count(efi_mem->Type);
-        if (type == EfiConventionalMemory && kma_size < efi_mem->NumberOfPages && ROUNDUP_PAGE(efi_mem->PhysicalStart) == efi_mem->PhysicalStart && efi_mem->PhysicalStart < UINT32_MAX ) {
-            kma_base = efi_mem->PhysicalStart;
-            kma_size = efi_mem->NumberOfPages;
-        }
-        if (type > 0) {
-            total_memory += efi_mem->NumberOfPages;
-        }
-        // moe_mmap_t mem = { efi_mem->PhysicalStart, efi_mem->NumberOfPages*0x1000, mm_type_for_count(efi_mem->Type) };
-        // printf("%012llx %012llx %08zx %08zx\n", mem.base, mem.base + mem.size, mem.size, mem.type);
-    }
-    // if (gRT) gRT->SetVirtualAddressMap(mmap->size, mmap->desc_size, mmap->desc_version, mmap->mmap);
-
-    static_start = kma_base;
-    free_memory = kma_size * PAGE_SIZE;
+void mm_init(moe_bootinfo_t *bootinfo) {
+    static_start = bootinfo->static_start;
+    free_memory = bootinfo->free_memory;
+    total_memory = bootinfo->total_memory;
     memset32((void*)static_start, 0xdeadbeef, free_memory / 4);
 
-    page_init();
+    page_init(bootinfo);
 }
 
 int cmd_mem(int argc, char **argv) {

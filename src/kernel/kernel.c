@@ -34,7 +34,7 @@ extern void acpi_init(acpi_rsd_ptr_t* rsd);
 extern void arch_init();
 extern void gs_init(moe_dib_t* screen);
 extern void hid_init();
-extern void mm_init(uintptr_t mmbase, uint32_t mmsize, uint32_t mmdescsz, uint32_t mmver);
+extern void mm_init(moe_bootinfo_t *bootinfo);
 extern void window_init();
 extern void xhci_init();
 
@@ -107,14 +107,15 @@ _Noreturn void start_kernel(moe_bootinfo_t *info) {
     base_time = 1000000LL * (etime.Second + etime.Minute * 60 + etime.Hour * 3600) + (etime.Nanosecond / 1000);
 
     gRT = 0; //bootinfo->efiRT;
+    mm_init(info);
 
     moe_dib_t main_screen = {0};
     main_screen.width = info->screen.width;
     main_screen.height = info->screen.height;
     main_screen.delta = info->screen.delta;
-    main_screen.dib = (void *)info->vram_base;
+    main_screen.dib = pg_map_vram(info->vram_base, main_screen.delta * info->screen.height * 4);
     gs_init(&main_screen);
-    mm_init(info->mmbase, info->mmsize, info->mmdescsz, info->mmver);
+
     acpi_init((void *)info->acpi);
     arch_init();
     hid_init();

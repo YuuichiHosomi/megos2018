@@ -65,6 +65,43 @@ typedef union {
 } x64_idt64_t;
 
 
+typedef union {
+    struct {
+        uint64_t limit:16;
+        uint64_t base_1:24;
+        uint64_t type:4, :1, dpl:2, present:1, limit_hi:4, AVL:1, :2, G:1;
+        uint64_t base_2:8;
+        uint64_t base_3:32;
+    };
+    uint8_t     u8[16];
+    uint16_t    u16[8];
+    uint32_t    u32[4];
+    uint64_t    u64[2];
+} x64_tss_desc_t;
+
+
+typedef struct {
+    uint32_t :32;
+    union {
+        struct {
+            uint64_t RSP0, RSP1, RSP2;
+        };
+        uint64_t RSP[3];
+    };
+    uint32_t :32, :32;
+    union {
+        struct {
+            uint64_t IST1, IST2, IST3, IST4, IST5, IST6, IST7;
+        };
+        uint64_t IST[7];
+    };
+    uint32_t :32, :32;
+    uint32_t :16;
+    uint32_t IOMAP_BASE:16;
+} __attribute__((packed)) x64_tss_t;
+
+#define DESC_TYPE_TSS64             0x09
+
 #define EFLAGS_CF                   0x00000001
 #define EFLAGS_PF                   0x00000004
 #define EFLAGS_AF                   0x00000010

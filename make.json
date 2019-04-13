@@ -1,8 +1,8 @@
 {
     "targets": {
-        "boot": {
+        "menu": {
             "valid_arch": "all",
-            "base_dir": "boot",
+            "base_dir": "bootmenu",
             "sources": [
                 "osldr",
                 "atop",
@@ -10,27 +10,39 @@
                 "stdlib"
             ]
         },
-        "krnl": {
+        "boot": {
+            "valid_arch": "all",
+            "base_dir": "boot",
+            "sources": [
+                "boot",
+                "bootpg",
+                "stdlib",
+                "peldr",
+                "bootasm.asm"
+            ]
+        },
+        "kernel": {
             "valid_arch": ["x64"],
             "base_dir": "kernel",
+            "no_suffix": true,
             "sources": [
                 "efistub",
-                "kernel",
-                "moe",
-                "gs",
-                "memory",
-                "window",
-                "arch",
-                "page",
-                "hidmgr",
-                "lpc",
+                "moeasm.asm",
                 "acpi",
+                "arch",
+                "gs",
+                "hidmgr",
+                "kernel",
+                "lpc",
+                "memory",
+                "moe",
+                "page",
                 "shell",
                 "stdlib",
-                "dbghlp",
-                "noiz2bg",
+                "window",
                 "cpuid",
-                "moeasm.asm"
+                "noiz2bg",
+                "dbghlp"
             ]
         }
     }

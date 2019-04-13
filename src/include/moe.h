@@ -131,7 +131,6 @@ uint32_t moe_translate_key_event(moe_window_t *window, uintptr_t event);
 
 
 //  Minimal Memory Subsystem
-void *mm_alloc_static_page(size_t n); // deprecated
 void *moe_alloc_object(size_t size, size_t count);
 
 
@@ -156,8 +155,8 @@ const char *moe_get_current_thread_name();
 int moe_get_usage();
 _Noreturn void moe_exit_thread(uint32_t exit_code);
 
-int moe_wait_for_object(void *obj, uint64_t us);
-int moe_signal_object(moe_thread_t *thread, void *obj);
+int moe_wait_for_object(moe_thread_t **obj, uint64_t us);
+int moe_signal_object(moe_thread_t **obj);
 
 typedef uint64_t moe_timer_t;
 typedef double moe_time_interval_t;

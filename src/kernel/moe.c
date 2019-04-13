@@ -15,8 +15,6 @@
 #define DEFAULT_SCHEDULE_SIZE   1024
 #define DEFAULT_SCHEDULE_QUEUES 2
 #define PREEMPT_PENALTY     10000
-#define MAX_KARMAN          10
-#define MIN_KARMAN          -10
 
 
 typedef uint32_t moe_affinity_t;
@@ -29,19 +27,17 @@ typedef struct moe_thread_t {
         struct {
             moe_priority_level_t priority;
             uint8_t last_cpuid;
-            int8_t  karman;
         };
     };
     union {
         _Atomic uint32_t sysflag;
         struct {
-            uint32_t reserved1: 24;
-            uint8_t reserved2: 2;
-            uint8_t fpu_allocated: 1;
-            uint8_t fpu_used: 1;
-            uint8_t reserved3: 2;
-            uint8_t zombie: 1;
-            uint8_t running: 1;
+            uint32_t :26;
+            uint32_t fpu_allocated:1;
+            uint32_t fpu_used:1;
+            uint32_t :2;
+            uint32_t zombie:1;
+            uint32_t running:1;
         };
     };
     thid_t thid;
@@ -52,7 +48,7 @@ typedef struct moe_thread_t {
     _Atomic uint8_t quantum_left;
     uint8_t quantum, quantum_min, quantum_max;
 
-    _Atomic (void *) signal_object;
+    _Atomic (moe_thread_t **) signal_object;
     moe_timer_t block;
 
     void *fpu_context;
@@ -243,18 +239,10 @@ void reschedule() {
         uint32_t load = atomic_fetch_add(&current->load00, cload);
         if (load + cload > CONSUME_QUANTUM_THRESHOLD) {
             atomic_fetch_sub(&current->load00, CONSUME_QUANTUM_THRESHOLD);
-            int8_t karman = current->karman;
-            karman--;
-            current->karman = MAX(karman, MIN_KARMAN);
             if (atomic_fetch_add(&current->quantum_left, -1) <= 0) {
-                if (karman > 0) {
-                    current->karman = 0;
-                }
-                if (karman < 0) {
-                    uint8_t quantum = current->quantum;
-                    quantum--;
-                    current->quantum = MAX(quantum, current->quantum_min);
-                }
+                uint8_t quantum = current->quantum;
+                quantum--;
+                current->quantum = MAX(quantum, current->quantum_min);
                 atomic_fetch_add(&current->quantum_left, current->quantum);
                 next_thread(cpuid, current, NULL, moe_create_interval_timer(PREEMPT_PENALTY));
             }
@@ -270,10 +258,13 @@ void moe_yield() {
     }
 }
 
-int moe_wait_for_object(void *obj, uint64_t us) {
+int moe_wait_for_object(moe_thread_t **obj, uint64_t us) {
     uint32_t eflags = io_lock_irq();
     uint32_t cpuid = moe_get_current_cpuid();
     moe_thread_t* current = core_data[cpuid].current;
+    if (obj) {
+        *obj = current;
+    }
     moe_timer_t timer = moe_create_interval_timer(us);
     next_thread(cpuid, current, obj, timer);
     io_unlock_irq(eflags);
@@ -292,8 +283,9 @@ int moe_usleep(uint64_t us) {
     }
 }
 
-int moe_signal_object(moe_thread_t *thread, void *obj) {
-    void *expected = obj;
+int moe_signal_object(moe_thread_t **obj) {
+    moe_thread_t *thread = *obj;
+    moe_thread_t **expected = obj;
     if (atomic_compare_exchange_strong(&thread->signal_object, &expected, NULL)) {
         thread->block = 0;
         return 0;
@@ -374,14 +366,9 @@ _Noreturn void scheduler_thread() {
                 atomic_store(&thread->load, load);
                 atomic_fetch_add(&thread->load0, -load);
                 if (thread->priority) {
-                    int8_t karman = thread->karman;
-                    karman++;
-                    thread->karman = MIN(karman, MAX_KARMAN);
-                    if (karman > 0) {
-                        uint8_t quantum = thread->quantum;
-                        quantum++;
-                        thread->quantum = MIN(quantum, thread->quantum_max);
-                    }
+                    uint8_t quantum = thread->quantum;
+                    quantum++;
+                    thread->quantum = MIN(quantum, thread->quantum_max);
                 }
             }
 
@@ -473,7 +460,8 @@ int moe_sem_wait(moe_semaphore_t *self, uint64_t us) {
     if (moe_sem_trywait(self)) {
         return 1;
     }
-    const uint64_t time_div = 100000;
+    const uint64_t div_max = 100000;
+    uint64_t time_div = 1000;
     moe_thread_t* desired = get_current_thread();
     while (us > 0) {
         moe_thread_t* expected = NULL;
@@ -482,7 +470,7 @@ int moe_sem_wait(moe_semaphore_t *self, uint64_t us) {
                 atomic_compare_exchange_weak(&self->waiting, &desired, NULL);
                 return 1;
             }
-            moe_wait_for_object(self, us);
+            moe_wait_for_object(&self->waiting, us);
             atomic_compare_exchange_weak(&self->waiting, &desired, NULL);
             return moe_sem_trywait(self);
         } else {
@@ -494,6 +482,10 @@ int moe_sem_wait(moe_semaphore_t *self, uint64_t us) {
                 moe_usleep(us);
                 us = 0;
             }
+            time_div *= 2;
+            if (time_div > div_max) {
+                time_div = div_max;
+            }
         }
     }
     return 0;
@@ -502,9 +494,8 @@ int moe_sem_wait(moe_semaphore_t *self, uint64_t us) {
 void moe_sem_signal(moe_semaphore_t *self) {
     atomic_fetch_add(&self->value, 1);
 
-    moe_thread_t* waiting = self->waiting;
-    if (waiting && atomic_compare_exchange_weak(&self->waiting, &waiting, NULL)) {
-        moe_signal_object(waiting, self);
+    if (self->waiting) {
+        moe_signal_object(&self->waiting);
     }
 
 }
@@ -521,8 +512,8 @@ typedef struct moe_fifo_t {
 } moe_fifo_t;
 
 
-moe_fifo_t* moe_fifo_init(size_t capacity) {
-    moe_fifo_t* self = moe_alloc_object(sizeof(moe_fifo_t), 1);
+moe_fifo_t *moe_fifo_init(size_t capacity) {
+    moe_fifo_t *self = moe_alloc_object(sizeof(moe_fifo_t), 1);
     moe_sem_init(&self->read_sem, 0);
     self->data = moe_alloc_object(sizeof(uintptr_t), capacity);
     self->read = 0;
@@ -637,7 +628,7 @@ int cmd_top(int argc, char **argv) {
             if (usage > 999) usage = 999;
             int usage0 = usage % 10, usage1 = usage / 10;
             snprintf(buff, buff_size, "%2d %08zx %08x %2d/%2d %2d.%d%% %4u:%02u:%02u %s\n",
-                (int)p->thid, (uintptr_t)p, p->flags,
+                (int)p->thid, (uintptr_t)p, p->flags | p->sysflag,
                 // (uintptr_t)p->signal_object,
                 p->quantum_left, p->quantum,
                 usage1, usage0, time2, time1, time0,
