@@ -81,7 +81,7 @@ extern void thread_init(int n_active_cpu);
 extern void reschedule();
 extern void acpi_init_sci();
 extern void lpc_init();
-extern void pg_strict_mode();
+extern void pg_enter_strict_mode();
 
 
 static tuple_eax_edx_t io_rdmsr(uint32_t const addr) {
@@ -484,7 +484,7 @@ void apic_init() {
 //  because to initialize AP needs Timer
 void apic_init_mp() {
     if (0 && n_cpu > 1) {
-        uint8_t vector_sipi = moe_alloc_gates_memory() >> 12;
+        uint8_t vector_sipi = 16; //moe_alloc_gates_memory() >> 12;
         const uintptr_t stack_chunk_size = 0x4000;
         uintptr_t* stacks = moe_alloc_object(stack_chunk_size, n_cpu);
         _Atomic uint32_t* wait_p = smp_setup_init(vector_sipi, MAX_CPU, stack_chunk_size, stacks);
@@ -748,6 +748,6 @@ void arch_init() {
     hpet_init();
     acpi_init_sci();
     apic_init_mp();
-    pg_strict_mode();
+    pg_enter_strict_mode();
     lpc_init();
 }

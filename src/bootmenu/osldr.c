@@ -14,7 +14,7 @@
 #ifdef EFI_VENDOR_NAME
 #define EFI_VENDOR_PATH "\\EFI\\" EFI_VENDOR_NAME "\\"
 #else
-#define EFI_VENDOR_PATH "\\EFI\\BOOT\\"
+#define EFI_VENDOR_PATH "\\EFI\\MEGOS\\"
 #endif
 CONST CHAR16* KERNEL_PATH = L"" EFI_VENDOR_PATH "BOOT" EFI_SUFFIX ".EFI";
 CONST CHAR16* cp932_bin_path = L"" EFI_VENDOR_PATH "CP932.BIN";
@@ -546,8 +546,8 @@ EFI_STATUS exec(CONST CHAR16* path) {
         status = gBS->StartImage(child, NULL, NULL);
     }
     if(EFI_ERROR(status)) {
-        cout->ClearScreen(cout);
-        draw_title_bar(get_string(rsrc_load_error_title));
+        // cout->ClearScreen(cout);
+        // draw_title_bar(get_string(rsrc_load_error_title));
         printf("\n\n  %s\n\n  %s: %zx\n\n  %s\n", get_string(rsrc_load_error), get_string(rsrc_error_code),status, get_string(rsrc_press_any_key));
         efi_wait_any_key(TRUE, -1);
     }

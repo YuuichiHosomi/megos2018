@@ -23,6 +23,7 @@ extern int pe_preparse(void *obj, size_t size);
 extern uint64_t pe_locate(uint64_t base);
 extern void page_init(moe_bootinfo_t *bootinfo, void *mmap, size_t mmsize, size_t mmdescsize);
 extern void *virtual_alloc(uint64_t base, size_t size, int attr);
+extern int check_arch(void);
 extern _Noreturn void start_kernel(moe_bootinfo_t* bootinfo, uint64_t* param);
 
 
@@ -209,7 +210,14 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
     gBS = st->BootServices;
     gRT = st->RuntimeServices;
 
-    printf("Starting...\n");
+    // check processor
+    {
+        status = check_arch();
+        if (status != 0) {
+            EFI_PRINT("This operating system requires 64bit processor\r\n");
+            return EFI_UNSUPPORTED;
+        }
+    }
 
     // Load kernel
     {
@@ -217,20 +225,20 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
         EFI_LOADED_IMAGE_PROTOCOL* li;
         EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs;
         status = gBS->HandleProtocol(image, &EfiLoadedImageProtocolGuid, (void**)&li);
-        if(EFI_ERROR(status)) return EFI_LOAD_ERROR;
+        if (EFI_ERROR(status)) return EFI_LOAD_ERROR;
         status = gBS->HandleProtocol(li->DeviceHandle, &EfiSimpleFileSystemProtocolGuid, (void**)&fs);
-        if(EFI_ERROR(status)) return EFI_LOAD_ERROR;
+        if (EFI_ERROR(status)) return EFI_LOAD_ERROR;
         status = fs->OpenVolume(fs, &file);
-        if(EFI_ERROR(status)) return EFI_LOAD_ERROR;
+        if (EFI_ERROR(status)) return EFI_LOAD_ERROR;
 
         status = efi_get_file_content(file, KERNEL_PATH, &kernel_ptr);
         if (EFI_ERROR(status)) {
-            EFI_PRINT("ERROR: KERNEL NOT FOUND");
+            EFI_PRINT("ERROR: KERNEL NOT FOUND\r\n");
             return EFI_NOT_FOUND;
         }
         status = pe_preparse(kernel_ptr.base, kernel_ptr.size);
         if (status < 0) {
-            EFI_PRINT("ERROR: BAD KERNEL SIGNATURE FOUND");
+            EFI_PRINT("ERROR: BAD KERNEL SIGNATURE FOUND\r\n");
             goto errexit;
         }
     }
@@ -239,7 +247,7 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
     {
         bootinfo.acpi = (uintptr_t)efi_find_config_table(&efi_acpi_20_table_guid);
         if (!bootinfo.acpi) {
-            EFI_PRINT("ERROR: ACPI NOT FOUND");
+            EFI_PRINT("ERROR: ACPI NOT FOUND\r\n");
             goto errexit;
         }
     }
@@ -250,7 +258,7 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
 
         status = gBS->LocateProtocol(&EfiGraphicsOutputProtocolGuid, NULL, (void**)&gop);
         if (!gop) {
-            EFI_PRINT("ERROR: GOP NOT FOUND");
+            EFI_PRINT("ERROR: GOP NOT FOUND\r\n");
             goto errexit;
         }
 
@@ -292,11 +300,10 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
     uint64_t entry_point = pe_locate(bootinfo.kernel_base);
 
     // Start Kernel
-    uint64_t params[2] = { entry_point };
     size_t stack_size = 0x4000;
     uint64_t sp = bootinfo.kernel_base + 0x3FFFF000;
     virtual_alloc(sp - stack_size, stack_size, 0);
-    params[1] = sp;
+    uint64_t params[2] = { entry_point, sp };
     start_kernel(&bootinfo, params);
 
 errexit:

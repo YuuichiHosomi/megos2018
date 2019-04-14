@@ -17,7 +17,6 @@ enum {
     RECURSIVE_PAGE = 0x1FE,
     KERNEL_HEAP_PAGE = 0x1FF,
 };
-static const uint64_t BASE_SYS_RES = 0xC0000000;
 static const uint64_t max_physical_address = 0x000000FFFFFFFFFFLL;
 static const uint64_t max_virtual_address =  0x0000FFFFFFFFFFFFLL;
 static MOE_PHYSICAL_ADDRESS global_cr3;
@@ -117,7 +116,7 @@ void *pg_map_vram(uintptr_t base, size_t size) {
 
 _Atomic uintptr_t valloc_lock = 0;
 void *pg_valloc(uintptr_t pa, size_t size) {
-    // return (void*)pa;
+    return (void*)pa;
     size_t vsize = ROUNDUP_PAGE(size, VIRTUAL_PAGE_SIZE) + VIRTUAL_PAGE_SIZE;
     void *va = (void *)atomic_fetch_add(&base_kernel_heap, vsize);
     pg_map(pa, va, size, PTE_PRESENT | PTE_WRITE);
@@ -125,21 +124,9 @@ void *pg_valloc(uintptr_t pa, size_t size) {
 }
 
 
-void pg_strict_mode() {
-    // return;
-    const pte_t common_attributes = PTE_PRESENT | PTE_WRITE;
-    const uintptr_t guard = 0x001000 >> 12;
-
-    pte_t pml10_pa = moe_alloc_physical_page(NATIVE_PAGE_SIZE);
-    pte_t *pml10_va = MOE_PA2VA(pml10_pa);
-    uintptr_t i;
-    for (i = 0; i < guard; i++) {
-        pml10_va[i] = 0;
-    }
-    for (; i < 512; i++) {
-        pml10_va[i] = (i << 12) | common_attributes;
-    }
-    pg_set_pte(0, pml10_pa | common_attributes, 2);
+void pg_enter_strict_mode() {
+    return;
+    pg_set_pte(0, 0, 4);
     invalidate_tlb();
 }
 
@@ -151,31 +138,31 @@ void page_init(moe_bootinfo_t *bootinfo) {
     const pte_t common_attributes = PTE_PRESENT | PTE_WRITE;
 
     // master PML4
-    // global_cr3 = moe_alloc_gates_memory();
     global_cr3 = bootinfo->master_cr3;
     pte_t *pml4_va = (pte_t *)global_cr3;
     pml4_va[RECURSIVE_PAGE] = global_cr3 | common_attributes;
+    pml4_va[DIRECT_MAP_PAGE] = pml4_va[0];
 
-    // PML3
-    pte_t pml30_pa = moe_alloc_physical_page(NATIVE_PAGE_SIZE);
-    pte_t *pml30_va = (pte_t *)pml30_pa;
-    memset(pml30_va, 0, NATIVE_PAGE_SIZE);
-    pml4_va[DIRECT_MAP_PAGE] = pml30_pa | common_attributes;
+    // // PML3
+    // pte_t pml30_pa = moe_alloc_physical_page(NATIVE_PAGE_SIZE);
+    // pte_t *pml30_va = (pte_t *)pml30_pa;
+    // memset(pml30_va, 0, NATIVE_PAGE_SIZE);
+    // pml4_va[DIRECT_MAP_PAGE] = pml30_pa | common_attributes;
 
-    // PML2
-    const int n_first_directmap = 4;
-    pte_t pml20_pa = moe_alloc_physical_page(NATIVE_PAGE_SIZE * n_first_directmap);
-    pte_t *pml20_va = (pte_t *)pml20_pa;
-    for (uintptr_t i = 0; i < n_first_directmap; i++) {
-        pml30_va[i] = (pml20_pa + (i << 12)) | common_attributes;
-    }
-    for (uintptr_t i = 0; i < 512 * n_first_directmap; i++) {
-        pte_t la = (i << 21);
-        if (la < BASE_SYS_RES)
-            pml20_va[i] = la | common_attributes | PTE_LARGE;
-        else
-            pml20_va[i] = 0;
-    }
+    // // PML2
+    // const int n_first_directmap = 4;
+    // pte_t pml20_pa = moe_alloc_physical_page(NATIVE_PAGE_SIZE * n_first_directmap);
+    // pte_t *pml20_va = (pte_t *)pml20_pa;
+    // for (uintptr_t i = 0; i < n_first_directmap; i++) {
+    //     pml30_va[i] = (pml20_pa + (i << 12)) | common_attributes;
+    // }
+    // for (uintptr_t i = 0; i < 512 * n_first_directmap; i++) {
+    //     pte_t la = (i << 21);
+    //     if (la < BASE_SYS_RES)
+    //         pml20_va[i] = la | common_attributes | PTE_LARGE;
+    //     else
+    //         pml20_va[i] = 0;
+    // }
 
     base_kernel_heap = root_page_to_va(KERNEL_HEAP_PAGE);
 
@@ -185,7 +172,7 @@ void page_init(moe_bootinfo_t *bootinfo) {
     memset(pml3v_va, 0, NATIVE_PAGE_SIZE);
     pml4_va[VRAM_PAGE] = pml3v_pa | common_attributes | PTE_USER;
 
-    pte_t pml2v_pa = moe_alloc_physical_page(NATIVE_PAGE_SIZE * n_first_directmap);
+    pte_t pml2v_pa = moe_alloc_physical_page(NATIVE_PAGE_SIZE);
     pte_t *pml2v_va = (pte_t *)pml2v_pa;
     memset(pml2v_va, 0, NATIVE_PAGE_SIZE);
     pml3v_va[0] = pml2v_pa | common_attributes | PTE_USER;

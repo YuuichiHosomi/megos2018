@@ -133,6 +133,11 @@ uint32_t moe_translate_key_event(moe_window_t *window, uintptr_t event);
 //  Minimal Memory Subsystem
 void *moe_alloc_object(size_t size, size_t count);
 
+#define PROT_READ   0x1
+#define PROT_WRITE  0x2
+#define PROT_EXEC   0x4
+#define PROT_NONE   0x0
+
 
 //  Threading Service
 typedef struct moe_thread_t moe_thread_t;

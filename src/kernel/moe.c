@@ -576,7 +576,7 @@ size_t moe_fifo_get_estimated_free(moe_fifo_t* self) {
 
 int cmd_ps(int argc, char **argv) {
     moe_thread_t* p = root_thread;
-    printf("ID context  attr     usage cpu time   name\n");
+    printf("ID context      attr     usage cpu time   name\n");
     for (; p; p = p->next) {
         uint64_t time = p->cputime / 1000000;
         uint32_t time0 = time % 60;
@@ -586,7 +586,7 @@ int cmd_ps(int argc, char **argv) {
         if (usage > 999) usage = 999;
         int usage0 = usage % 10, usage1 = usage / 10;
         printf("%2d %08zx %08x %2d.%d%% %4u:%02u:%02u %s\n",
-            (int)p->thid, (uintptr_t)p, p->flags,
+            (int)p->thid, (uintptr_t)p & 0xFFFFFFFFFFFF, p->flags,
             // p->affinity, p->quantum_left, p->quantum,
             usage1, usage0, time2, time1, time0,
             p->name);
@@ -616,7 +616,7 @@ int cmd_top(int argc, char **argv) {
         moe_point_t cursor = *moe_point_zero;
         moe_set_window_bgcolor(window, bgcolor);
         cursor = moe_draw_string(moe_get_window_bitmap(window), font, &cursor, &rect,
-        "ID context  attr     quan  usage cpu time   name\n", fgcolor);
+        "ID context      attr     quan  usage cpu time   name\n", fgcolor);
 
         moe_thread_t* p = root_thread;
         for (; p; p = p->next) {
@@ -628,7 +628,7 @@ int cmd_top(int argc, char **argv) {
             if (usage > 999) usage = 999;
             int usage0 = usage % 10, usage1 = usage / 10;
             snprintf(buff, buff_size, "%2d %08zx %08x %2d/%2d %2d.%d%% %4u:%02u:%02u %s\n",
-                (int)p->thid, (uintptr_t)p, p->flags | p->sysflag,
+                (int)p->thid, (uintptr_t)p & 0xFFFFFFFFFFFF, p->flags | p->sysflag,
                 // (uintptr_t)p->signal_object,
                 p->quantum_left, p->quantum,
                 usage1, usage0, time2, time1, time0,

@@ -2,10 +2,10 @@
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: BSD
 #include "moe.h"
-#include "kernel.h"
 #include "pe.h"
 
-void *virtual_alloc(uint64_t base, size_t size, int attr);
+void *virtual_alloc(uint64_t base, size_t size);
+void vprotect(uint64_t base, size_t size, int attr);
 
 uintptr_t pe_offset_0;
 pe64_header_t* pe_hdr;
@@ -33,7 +33,7 @@ int pe_preparse(void *obj, size_t size) {
 uint64_t pe_locate(uint64_t base) {
 
     uint64_t image_base = pe_hdr->optional_header.image_base;
-    uint8_t *vmem = virtual_alloc(base, pe_hdr->optional_header.size_of_image, 0);
+    uint8_t *vmem = virtual_alloc(base, pe_hdr->optional_header.size_of_image);
     memset(vmem, 0, pe_hdr->optional_header.size_of_image);
 
     for (int i = 0; i < pe_hdr->coff_header.n_sections; i++) {
@@ -63,6 +63,14 @@ uint64_t pe_locate(uint64_t base) {
             }
         }
         i += reloc->size;
+    }
+
+    for (int i = 0; i < pe_hdr->coff_header.n_sections; i++) {
+        pe_section_table_t *sec = sec_tbl + i;
+        int attr = ((sec->flags & IMAGE_SCN_MEM_WRITE) ? PROT_WRITE : 0)
+            | ((sec->flags & IMAGE_SCN_MEM_READ) ? PROT_READ : 0)
+            | ((sec->flags & IMAGE_SCN_MEM_EXECUTE) ? PROT_EXEC : 0);
+        vprotect(base + sec->rva, sec->vsize, attr);
     }
 
     return base + pe_hdr->optional_header.entry_point;

@@ -884,10 +884,10 @@ void mgs_bsod(const char *s) {
     moe_set_console_attributes(current_console, 0x1F);
     // moe_fill_rect(&main_screen_dib, NULL, 0x0000AA);
 
-    moe_rect_t rect0 = {{0, 0}, {600, 300}};
+    moe_rect_t rect0 = {{0, 0}, {512, 256}};
     moe_blend_rect(&main_screen_dib, &rect0, 0x800000AA);
     moe_draw_pixel(&main_screen_dib, 100, 100, 0xFF9900);
-    moe_rect_t rect1 = {{ 4, 4}, {592, 288}};
+    moe_rect_t rect1 = {{ 4, 4}, {504, 248}};
     moe_draw_string(&main_screen_dib, &system_font, NULL, &rect1, s, 0xFFFFFF);
     // putchar32(current_console, '?');
     // moe_draw_pixel(&main_screen_dib, 200, 200, 0xFF9900);

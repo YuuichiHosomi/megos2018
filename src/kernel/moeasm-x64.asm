@@ -7,20 +7,20 @@
 %define LOADER_SS   0x18
 %define SEL_TSS     0x30
 
-%define BOOT_INFO           0x0800
-%define BOOTINFO_MAX_CPU    0x04
-%define BOOTINFO_EFER       0x08
-%define BOOTINFO_STACK_SIZE 0x0C
-%define BOOTINFO_STACKS     0x10
-%define BOOTINFO_CR3        0x18
-%define BOOTINFO_IDT        0x22
-%define BOOTINFO_CR4        0x2C
-%define BOOTINFO_START32    0x30
-%define BOOTINFO_START64    0x38
-%define BOOTINFO_MSR_MISC   0x40
-%define BOOTINFO_GDTR       0x50
+%define SMPINFO             0x0800
+%define SMPINFO_MAX_CPU     0x04
+%define SMPINFO_EFER        0x08
+%define SMPINFO_STACK_SIZE  0x0C
+%define SMPINFO_STACKS      0x10
+%define SMPINFO_CR3         0x18
+%define SMPINFO_IDT         0x22
+%define SMPINFO_CR4         0x2C
+%define SMPINFO_START32     0x30
+%define SMPINFO_START64     0x38
+%define SMPINFO_MSR_MISC    0x40
+%define SMPINFO_GDTR        0x50
 
-%define	EFLAGS_IF   0x00000200
+%define	EFLAGS_IF       0x00000200
 %define IA32_APIC_BASE_MSR          0x0000001B
 %define IA32_APIC_BASE_MSR_ENABLE   0x00000800
 %define IA32_MISC_MSR   0x000001A0
@@ -630,11 +630,11 @@ smp_setup_init:
     mov ecx, _end_mp_rm_payload - _mp_rm_payload
     rep movsb
 
-    mov r10d, BOOT_INFO
-    mov [r10 + BOOTINFO_MAX_CPU], edx
-    mov [r10 + BOOTINFO_STACK_SIZE], r8d
-    mov [r10 + BOOTINFO_STACKS], r9
-    lea edx, [r10 + BOOTINFO_GDTR]
+    mov r10d, SMPINFO
+    mov [r10 + SMPINFO_MAX_CPU], edx
+    mov [r10 + SMPINFO_STACK_SIZE], r8d
+    mov [r10 + SMPINFO_STACKS], r9
+    lea edx, [r10 + SMPINFO_GDTR]
     lea rsi, [rel __GDT]
     mov edi, edx
     mov ecx, (__end_common_GDT - __GDT)/4
@@ -645,13 +645,13 @@ smp_setup_init:
     mov edx, 1
     mov [r10], edx
     mov rdx, cr4
-    mov [r10 + BOOTINFO_CR4], edx
+    mov [r10 + SMPINFO_CR4], edx
     mov rdx, cr3
-    mov [r10 + BOOTINFO_CR3], rdx
-    sidt [r10 + BOOTINFO_IDT]
+    mov [r10 + SMPINFO_CR3], rdx
+    sidt [r10 + SMPINFO_IDT]
     mov ecx, IA32_EFER_MSR
     rdmsr
-    mov [r10 + BOOTINFO_EFER], eax
+    mov [r10 + SMPINFO_EFER], eax
     mov ecx, IA32_MISC_MSR
     rdmsr
     mov [r10 + IA32_MISC_MSR], eax
@@ -659,12 +659,12 @@ smp_setup_init:
 
     lea ecx, [rel _startup32]
     mov edx, LOADER_CS32
-    mov [r10 + BOOTINFO_START32], ecx
-    mov [r10 + BOOTINFO_START32 + 4], edx
+    mov [r10 + SMPINFO_START32], ecx
+    mov [r10 + SMPINFO_START32 + 4], edx
     lea ecx, [rel _startup_ap]
     mov edx, LOADER_CS64
-    mov [r10 + BOOTINFO_START64], ecx
-    mov [r10 + BOOTINFO_START64 + 4], edx
+    mov [r10 + SMPINFO_START64], ecx
+    mov [r10 + SMPINFO_START64 + 4], edx
 
     mov eax, r10d
     pop rdi
@@ -675,12 +675,12 @@ smp_setup_init:
     extern apic_init_ap
     extern moe_startup_ap
 _startup_ap:
-    lidt [rbx + BOOTINFO_IDT]
+    lidt [rbx + SMPINFO_IDT]
 
     ; init stack pointer
     mov eax, ebp
-    imul eax, [rbx + BOOTINFO_STACK_SIZE]
-    mov rcx, [rbx + BOOTINFO_STACKS]
+    imul eax, [rbx + SMPINFO_STACK_SIZE]
+    mov rcx, [rbx + SMPINFO_STACKS]
     lea rsp, [rcx + rax]
     and rsp, byte 0xF0
 
@@ -702,11 +702,11 @@ _mp_rm_payload:
     cli
     xor ax, ax
     mov ds, ax
-    mov ebx, BOOT_INFO
+    mov ebx, SMPINFO
 
     ; acquire core-id
     mov al, [bx]
-    mov cl, [bx + BOOTINFO_MAX_CPU]
+    mov cl, [bx + SMPINFO_MAX_CPU]
 .loop:
     cmp al, cl
     jae .fail
@@ -724,14 +724,14 @@ _mp_rm_payload:
 .core_ok:
     movzx ebp, al
 
-    lgdt [bx + BOOTINFO_GDTR]
+    lgdt [bx + SMPINFO_GDTR]
 
     ; enter to PM
     mov eax, cr0
     or al, 0x01
     mov cr0, eax
 
-    jmp dword far [bx + BOOTINFO_START32]
+    jmp dword far [bx + SMPINFO_START32]
 _end_mp_rm_payload:
 
 
@@ -743,19 +743,19 @@ _startup32:
     mov ds, eax
     mov es, eax
 
-    mov eax, [ebx + BOOTINFO_CR4]
+    mov eax, [ebx + SMPINFO_CR4]
     mov cr4, eax
-    mov eax, [ebx + BOOTINFO_CR3]
+    mov eax, [ebx + SMPINFO_CR3]
     mov cr3 ,eax
 
-    mov eax, [ebx + BOOTINFO_MSR_MISC]
-    mov edx, [ebx + BOOTINFO_MSR_MISC + 4]
+    mov eax, [ebx + SMPINFO_MSR_MISC]
+    mov edx, [ebx + SMPINFO_MSR_MISC + 4]
     mov ecx, IA32_MISC_MSR
     wrmsr
 
     mov ecx, IA32_EFER_MSR
     xor edx, edx
-    mov eax, [ebx+ BOOTINFO_EFER]
+    mov eax, [ebx+ SMPINFO_EFER]
     wrmsr
 
     ; enter to LM
@@ -763,7 +763,7 @@ _startup32:
     bts eax, 31
     mov cr0, eax
 
-    jmp far [ebx + BOOTINFO_START64]
+    jmp far [ebx + SMPINFO_START64]
 
 
 [section .data]

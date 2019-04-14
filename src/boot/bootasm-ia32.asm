@@ -11,6 +11,33 @@
 [BITS 32]
 [section .text]
 
+
+; int check_arch(void);
+    global _check_arch
+_check_arch:
+    push ebx
+
+    mov eax, 0x80000000
+    cpuid
+    cmp eax, 0x80000001
+    jb .bad
+
+    mov eax, 0x80000001
+    cpuid
+    bt edx, 29
+    jnc .bad
+
+    xor eax, eax
+    jmp .end
+
+.bad:
+    or eax, byte -1
+.end:
+    pop ebx
+    ret
+
+
+; _Noreturn void start_kernel(moe_bootinfo_t* bootinfo, uint64_t* param);
     global _start_kernel
 _start_kernel:
     push ebp

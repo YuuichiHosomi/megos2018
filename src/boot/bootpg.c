@@ -68,14 +68,13 @@ static pte_t *va_set_l2(uint64_t base) {
     pte_t pml1 = pml2kv[page];
     if (!pml1) {
         pte_t pml1 = alloc_page(1);
-        pte_t *pml1v = (pte_t*)pml1;
         pml2kv[page] = pml1 | common_attributes;
     }
     pte_t *pml1v = (pte_t*)(pml1 & ~0xFFF);
     return pml1v + offset;
 }
 
-void *virtual_alloc(uint64_t base, size_t size, int attr) {
+void *virtual_alloc(uint64_t base, size_t size) {
 
     const pte_t common_attributes = PTE_PRESENT | PTE_WRITE;
     size_t sz = roundup(size, NATIVE_PAGE_SIZE) / NATIVE_PAGE_SIZE;
@@ -87,6 +86,21 @@ void *virtual_alloc(uint64_t base, size_t size, int attr) {
     }
 
     return (void*)blob;
+}
+
+void vprotect(uint64_t base, size_t size, int attr) {
+
+    pte_t attrmask = ~(PTE_NOT_EXECUTE | PTE_WRITE | PTE_PRESENT);
+    pte_t attrval = ((attr & PROT_READ) ? PTE_PRESENT : 0)
+        | ((attr & PROT_WRITE) ? PTE_WRITE : 0)
+        // | ((attr & PROT_EXEC) ? 0 : PTE_NOT_EXECUTE)
+        ;
+    size_t sz = roundup(size, NATIVE_PAGE_SIZE) / NATIVE_PAGE_SIZE;
+
+    for (int i = 0; i < sz; i++) {
+        pte_t *p = va_set_l2(base + i * NATIVE_PAGE_SIZE);
+        *p = (*p & attrmask) | attrval;
+    }
 }
 
 
@@ -118,7 +132,6 @@ void page_init(moe_bootinfo_t *_bootinfo, void *mmap, size_t mmsize, size_t mmde
     bootinfo->total_memory = total_memory;
     bootinfo->static_start = kma_base;
     bootinfo->free_memory = kma_size * NATIVE_PAGE_SIZE;
-    // memset32((void*)static_start, 0xdeadbeef, free_memory / 4);
 
     // Initialize minimal paging
     const pte_t common_attributes = PTE_PRESENT | PTE_WRITE;

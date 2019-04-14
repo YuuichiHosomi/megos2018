@@ -45,7 +45,7 @@ static void gates_mark_as_free(int base, int n_pages) {
 }
 
 uintptr_t moe_alloc_gates_memory() {
-    for (int i = 16; i < 255; i++) {
+    for (int i = 1; i < 255; i++) {
         uintptr_t offset = i / 32;
         uintptr_t position = i % 32;
         if (atomic_bit_test_and_clear(gates_memory_bitmap + offset, position)) {

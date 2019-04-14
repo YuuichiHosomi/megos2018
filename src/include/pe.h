@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 
-#define IMAGE_DOS_SIGNATURE             0x4D5A
+#define IMAGE_DOS_SIGNATURE             0x5A4D
 #define IMAGE_NT_SIGNATURE              0x00004550
 
 
@@ -96,9 +96,9 @@ typedef struct {
 
 typedef struct {
     char name[8];
-    uint32_t vsize,rva;
+    uint32_t vsize, rva;
     uint32_t size, file_offset;
-    uint32_t ptr_reloc, ptr_lineno;
+    uint32_t reloc_ptr, lineno_ptr;
     uint16_t n_reloc, n_lineno;
     uint32_t flags;
 } pe_section_table_t;
