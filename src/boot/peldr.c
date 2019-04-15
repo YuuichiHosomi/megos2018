@@ -33,9 +33,12 @@ int pe_preparse(void *obj, size_t size) {
 uint64_t pe_locate(uint64_t base) {
 
     uint64_t image_base = pe_hdr->optional_header.image_base;
+
+    // step1 allocate memory
     uint8_t *vmem = virtual_alloc(base, pe_hdr->optional_header.size_of_image);
     memset(vmem, 0, pe_hdr->optional_header.size_of_image);
 
+    // step2 locate sections
     for (int i = 0; i < pe_hdr->coff_header.n_sections; i++) {
         pe_section_table_t *sec = sec_tbl + i;
         void *p = vmem + sec->rva;
@@ -44,6 +47,7 @@ uint64_t pe_locate(uint64_t base) {
         }
     }
 
+    // step3 relocate
     size_t reloc_size = pe_hdr->dir[IMAGE_DIRECTORY_ENTRY_BASERELOC].size;
     uint8_t *reloc_base = vmem + pe_hdr->dir[IMAGE_DIRECTORY_ENTRY_BASERELOC].rva;
     for (uintptr_t i = 0; i < reloc_size; ) {
@@ -65,6 +69,7 @@ uint64_t pe_locate(uint64_t base) {
         i += reloc->size;
     }
 
+    // step4 set attributes
     for (int i = 0; i < pe_hdr->coff_header.n_sections; i++) {
         pe_section_table_t *sec = sec_tbl + i;
         int attr = ((sec->flags & IMAGE_SCN_MEM_WRITE) ? PROT_WRITE : 0)

@@ -122,8 +122,6 @@ _Noreturn void start_kernel(moe_bootinfo_t *info) {
 
     printf("%s [%d Cores, Memory %d MB]\n", moe_kname(), n_active_cpu, (int)(total_memory >> 8));
 
-    // __asm__ volatile("xor %eax, %eax; mov %eax, (%eax)");
-
     // xhci_init();
     window_init();
 

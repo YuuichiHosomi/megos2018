@@ -483,11 +483,12 @@ void apic_init() {
 
 //  because to initialize AP needs Timer
 void apic_init_mp() {
-    if (0 && n_cpu > 1) {
+    if (n_cpu > 1) {
         uint8_t vector_sipi = 16; //moe_alloc_gates_memory() >> 12;
+        int max_cpu = MIN(n_cpu, MAX_CPU);
         const uintptr_t stack_chunk_size = 0x4000;
-        uintptr_t* stacks = moe_alloc_object(stack_chunk_size, n_cpu);
-        _Atomic uint32_t* wait_p = smp_setup_init(vector_sipi, MAX_CPU, stack_chunk_size, stacks);
+        uintptr_t* stacks = moe_alloc_object(stack_chunk_size, max_cpu);
+        _Atomic uint32_t* wait_p = smp_setup_init(vector_sipi, max_cpu, stack_chunk_size, stacks);
         WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4500);
         moe_usleep(10000);
         WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4600 + vector_sipi);

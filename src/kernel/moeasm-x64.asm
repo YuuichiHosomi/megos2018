@@ -17,7 +17,8 @@
 %define SMPINFO_CR4         0x2C
 %define SMPINFO_START32     0x30
 %define SMPINFO_START64     0x38
-%define SMPINFO_MSR_MISC    0x40
+%define SMPINFO_START_AP      0x40
+%define SMPINFO_MSR_MISC    0x48
 %define SMPINFO_GDTR        0x50
 
 %define	EFLAGS_IF       0x00000200
@@ -624,8 +625,9 @@ smp_setup_init:
     push rsi
     push rdi
 
-    movzx edi, cl
-    shl edi, 12
+    movzx r11d, cl
+    shl r11d, 12
+    mov edi, r11d
     lea rsi, [rel _mp_rm_payload]
     mov ecx, _end_mp_rm_payload - _mp_rm_payload
     rep movsb
@@ -657,14 +659,16 @@ smp_setup_init:
     mov [r10 + IA32_MISC_MSR], eax
     mov [r10 + IA32_MISC_MSR + 4], edx
 
-    lea ecx, [rel _startup32]
+    lea ecx, [r11 + _startup32 - _mp_rm_payload]
     mov edx, LOADER_CS32
     mov [r10 + SMPINFO_START32], ecx
     mov [r10 + SMPINFO_START32 + 4], edx
-    lea ecx, [rel _startup_ap]
+    lea ecx, [r11 + _startup64 - _mp_rm_payload]
     mov edx, LOADER_CS64
     mov [r10 + SMPINFO_START64], ecx
     mov [r10 + SMPINFO_START64 + 4], edx
+    lea rax, [rel _startup_ap]
+    mov [r10 + SMPINFO_START_AP], rax
 
     mov eax, r10d
     pop rdi
@@ -732,7 +736,6 @@ _mp_rm_payload:
     mov cr0, eax
 
     jmp dword far [bx + SMPINFO_START32]
-_end_mp_rm_payload:
 
 
 [BITS 32]
@@ -764,6 +767,14 @@ _startup32:
     mov cr0, eax
 
     jmp far [ebx + SMPINFO_START64]
+
+[BITS 64]
+
+_startup64:
+
+    jmp [rbx + SMPINFO_START_AP]
+
+_end_mp_rm_payload:
 
 
 [section .data]
