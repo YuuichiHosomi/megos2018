@@ -18,6 +18,7 @@ CONST EFI_GUID EfiLoadedImageProtocolGuid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
 CONST EFI_GUID EfiSimpleFileSystemProtocolGuid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
 CONST EFI_GUID EfiGraphicsOutputProtocolGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 CONST EFI_GUID efi_acpi_20_table_guid = EFI_ACPI_20_TABLE_GUID;
+CONST EFI_GUID smbios3_table_guid = SMBIOS3_TABLE_GUID;
 
 extern int pe_preparse(void *obj, size_t size);
 extern uint64_t pe_locate(uint64_t base);
@@ -250,6 +251,11 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
             EFI_PRINT("ERROR: ACPI NOT FOUND\r\n");
             goto errexit;
         }
+    }
+
+    // SMBIOS
+    {
+        bootinfo.smbios = (uintptr_t)efi_find_config_table(&smbios3_table_guid);
     }
 
     // Get GOP

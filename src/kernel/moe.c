@@ -585,7 +585,7 @@ int cmd_ps(int argc, char **argv) {
         int usage = p->load / 1000;
         if (usage > 999) usage = 999;
         int usage0 = usage % 10, usage1 = usage / 10;
-        printf("%2d %08zx %08x %2d.%d%% %4u:%02u:%02u %s\n",
+        printf("%2d %012zx %08x %2d.%d%% %4u:%02u:%02u %s\n",
             (int)p->thid, (uintptr_t)p & 0xFFFFFFFFFFFF, p->flags,
             // p->affinity, p->quantum_left, p->quantum,
             usage1, usage0, time2, time1, time0,
@@ -627,7 +627,7 @@ int cmd_top(int argc, char **argv) {
             int usage = p->load / 1000;
             if (usage > 999) usage = 999;
             int usage0 = usage % 10, usage1 = usage / 10;
-            snprintf(buff, buff_size, "%2d %08zx %08x %2d/%2d %2d.%d%% %4u:%02u:%02u %s\n",
+            snprintf(buff, buff_size, "%2d %012zx %08x %2d/%2d %2d.%d%% %4u:%02u:%02u %s\n",
                 (int)p->thid, (uintptr_t)p & 0xFFFFFFFFFFFF, p->flags | p->sysflag,
                 // (uintptr_t)p->signal_object,
                 p->quantum_left, p->quantum,

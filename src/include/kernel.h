@@ -13,6 +13,7 @@
 typedef struct {
     uint64_t master_cr3;
     uint64_t acpi;
+    uint64_t smbios;
     uint64_t vram_base;
     union {
         uint64_t _PADDING;

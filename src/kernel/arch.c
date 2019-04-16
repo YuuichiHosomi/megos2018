@@ -222,7 +222,7 @@ uint8_t apicid_to_cpuids[256];
 int n_cpu = 0;
 MOE_PHYSICAL_ADDRESS lapic_base = 0;
 void *ioapic_base = NULL;
-int smp_mode = 0;
+_Atomic int smp_mode = 0;
 _Atomic uint8_t next_msi = 0;
 
 
@@ -315,6 +315,7 @@ void _irq_main(uint8_t irq, void* p) {
 int smp_send_invalidate_tlb() {
     if (smp_mode) {
         WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0xC0000 + IRQ_INVALIDATE_TLB);
+        moe_usleep(10000);
     }
     return 0;
 }
