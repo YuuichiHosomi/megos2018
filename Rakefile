@@ -21,7 +21,7 @@ end
 VENDOR_NAME     = "MOE"
 PATH_BIN        = "bin/"
 PATH_SRC        = "src/"
-PATH_SRC_FONTS  = "#{PATH_SRC}fonts/"
+PATH_SRC_FONTS  = "#{PATH_SRC}fonts/include/"
 PATH_OBJ        = "obj/"
 PATH_MNT        = "mnt/"
 PATH_EFI_BOOT   = "#{PATH_MNT}EFI/BOOT/"
@@ -34,7 +34,7 @@ case ARCH.to_sym
 when :x64
   PATH_OVMF     = "var/bios64.bin"
   QEMU_ARCH     = "x86_64"
-  QEMU_OPTS     = "-smp 4 -rtc base=localtime -device nec-usb-xhci,id=xhci"
+  QEMU_OPTS     = "-smp 4 -rtc base=localtime -device nec-usb-xhci,id=xhci "
   # -device usb-kbd -device usb-mouse -device usb-tablet"
 when :i386
   PATH_OVMF     = "var/bios32.bin"
@@ -51,9 +51,6 @@ when :aa64
 else
   raise "UNKNOWN ARCH #{ARCH}"
 end
-
-BOOTFONT_INC    = "#{PATH_SRC_FONTS}bootfont.h"
-SMALLFONT_INC   = "#{PATH_SRC_FONTS}smallfont.h"
 
 if RUBY_PLATFORM =~ /darwin/ then
   LLVM_PREFIX     = `brew --prefix llvm`.gsub(/\n/, '')
@@ -72,7 +69,6 @@ INCS  = [FileList["#{PATH_SRC}*.h"], FileList["#{PATH_INC}*.h"]]
 
 CLEAN.include(FileList["#{PATH_BIN}**/*"])
 CLEAN.include(FileList["#{PATH_OBJ}**/*"])
-CLEAN.include(FileList["#{PATH_SRC_FONTS}/*.h"])
 CLEAN.include(CP932_BIN)
 
 directory PATH_MNT
@@ -111,29 +107,6 @@ end
 desc "Format"
 task :format do
   sh "clang-format -i #{ FileList["#{PATH_SRC}**/*.c"] } #{ FileList["#{PATH_SRC}**/*.h"] }"
-end
-
-
-def font_def(dest, src)
-  name = File.basename(dest, '.h')
-  INCS << dest
-  file dest => src do |t|
-    bin = File.binread(t.prerequisites[0]).unpack('C*')
-    font_w = bin[14]
-    font_h = bin[15]
-    font_w8 = (font_w+7)/8;
-    bin.shift(17 + 32*font_w8*font_h)
-    data = 96.times.map do
-      (font_w8*font_h).times.map do
-        '0x%02x' % bin.shift()
-      end.join(',')
-    end
-    File.open(t.name, 'w') do |file|
-      file.puts "// AUTO GENERATED #{name}.h"
-      file.puts "static const int #{name}_w=#{font_w}, #{name}_h=#{font_h};"
-      file.puts "static const uint8_t #{name}_data[] = {\n#{ data.join(",\n") }\n};"
-    end
-  end
 end
 
 
@@ -283,9 +256,6 @@ end
 namespace :main do
 
   targets = []
-
-  font_def BOOTFONT_INC, "#{PATH_SRC_FONTS}bootfont.fnt"
-  font_def SMALLFONT_INC, "#{PATH_SRC_FONTS}megh0608.fnt"
 
   json = File.open("make.json") do |file|
     JSON.load(file)

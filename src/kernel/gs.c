@@ -50,8 +50,8 @@ uint32_t palette[] = {
     0x555555, 0x5555FF, 0x55FF55, 0x55FFFF, 0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF
 };
 
-#include "bootfont.h"
-#include "smallfont.h"
+#include "MEGH0816.h"
+#include "MEGH0610.h"
 
 moe_font_t system_font, smallfont;
 
@@ -727,6 +727,7 @@ moe_point_t moe_draw_string(moe_dib_t *dib, moe_font_t *font, moe_point_t *_curs
         if (uc == '\n') {
             cursor.origin.x = rect.origin.x;
             cursor.origin.y += cursor.size.height;
+            continue;
         }
 
         moe_rect_t font_rect;
@@ -876,9 +877,6 @@ void mgs_bsod(const char *s) {
 
     console_init(current_console, NULL, &main_screen_dib, &main_console_insets);
 
-    // init_simple_font(&system_font, bootfont_w, bootfont_h, 0, (void*)bootfont_data, 0);
-    // main_console.font = &system_font;
-    init_simple_font(&smallfont, smallfont_w, smallfont_h, 0, (void*)smallfont_data, 0);
     main_console.font = &smallfont;
 
     moe_set_console_attributes(current_console, 0x1F);
@@ -909,8 +907,8 @@ void gs_init(moe_dib_t* screen) {
         main_screen_dib.flags |= MOE_DIB_ROTATE;
     }
 
-    init_simple_font(&system_font, bootfont_w, bootfont_h, 0, (void*)bootfont_data, 0);
-    init_simple_font(&smallfont, smallfont_w, smallfont_h, 0, (void*)smallfont_data, 0);
+    init_simple_font(&system_font, MEGH0816_w, MEGH0816_h, 0, (void*)MEGH0816_data, 0);
+    init_simple_font(&smallfont, MEGH0610_w, MEGH0610_h, 0, (void*)MEGH0610_data, 0);
     main_console.font = &system_font;
 
     current_console = &main_console;

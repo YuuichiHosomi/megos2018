@@ -40,6 +40,8 @@
                 "shell",
                 "stdlib",
                 "window",
+                "xhci",
+                "usb",
                 "cpuid",
                 "noiz2bg",
                 "dbghlp"

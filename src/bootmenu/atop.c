@@ -6,7 +6,8 @@
 
 #define	DEFAULT_COLOR	0x07
 
-#include "bootfont.h"
+#include "MEGH0816.h"
+#define FONT_PROPERTY(x) MEGH0816 ## x
 
 void* memset(void *, int, size_t);
 void* malloc(size_t);
@@ -510,12 +511,12 @@ EFIAPI EFI_STATUS ATOP_init(
     ctx->mode.MaxMode = sizeof(mode_templates)/sizeof(mode_templates[0]);
     ctx->mode.Mode = -1;
 
-    ctx->font_w = bootfont_w;
-    ctx->font_h = bootfont_h;
-    ctx->font_w8 = (bootfont_w+7)/8;
-    ctx->font_data = bootfont_data;
-    ctx->line_height = bootfont_h+((bootfont_h*3)>>4);
-    ctx->font_offset = (ctx->line_height-bootfont_h)/2;
+    ctx->font_w = FONT_PROPERTY(_w);
+    ctx->font_h = FONT_PROPERTY(_h);
+    ctx->font_w8 = (FONT_PROPERTY(_w) + 7) / 8;
+    ctx->font_data = FONT_PROPERTY(_data);
+    ctx->line_height = FONT_PROPERTY(_h) + ((FONT_PROPERTY(_h) * 3) >> 4);
+    ctx->font_offset = (ctx->line_height - FONT_PROPERTY(_h)) / 2;
 
     buffer->Mode = (SIMPLE_TEXT_OUTPUT_MODE*)ctx;
     buffer->Reset = ATOP_RESET;
