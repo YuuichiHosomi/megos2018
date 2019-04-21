@@ -10,6 +10,7 @@
 #include "acpi.h"
 
 
+#define MAX_GATES_INDEX     8
 typedef struct {
     uint64_t master_cr3;
     uint64_t acpi;
@@ -27,6 +28,7 @@ typedef struct {
     _Atomic uint32_t free_memory;
     _Atomic uint32_t static_start;
     uint32_t boottime[4];
+    _Atomic uint32_t gates_memory_bitmap[MAX_GATES_INDEX];
 } moe_bootinfo_t;
 
 
@@ -104,6 +106,8 @@ int acpi_get_number_of_table_entries();
 void* acpi_enum_table_entry(int index);
 void acpi_enter_sleep_state(int state);
 void acpi_reset();
+int acpi_get_pm_timer_type();
+uint32_t acpi_read_pm_timer();
 
 
 //  PCI

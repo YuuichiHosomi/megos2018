@@ -24,8 +24,6 @@ static _Atomic uintptr_t static_start;
 
 
 // "640 k ought to be enough for anybody." - Bill Gates, 1981
-#define MAX_GATES_MEMORY    0xA0000
-#define MAX_GATES_INDEX     8
 _Atomic uint32_t gates_memory_bitmap[MAX_GATES_INDEX];
 
 static int popcnt32(uint32_t bits) {
@@ -34,14 +32,6 @@ static int popcnt32(uint32_t bits) {
     bits = (bits & 0x0f0f0f0f) + (bits >> 4 & 0x0f0f0f0f);
     bits = (bits & 0x00ff00ff) + (bits >> 8 & 0x00ff00ff);
     return (bits & 0x0000ffff) + (bits >>16 & 0x0000ffff);
-}
-
-static void gates_mark_as_free(int base, int n_pages) {
-    for (int i = (base >> 10); i < n_pages; i++) {
-        int offset = i / 32;
-        int position = i % 32;
-        atomic_bit_test_and_set(gates_memory_bitmap + offset, position);
-    }
 }
 
 uintptr_t moe_alloc_gates_memory() {
@@ -94,56 +84,6 @@ void *moe_alloc_object(size_t size, size_t count) {
 
 /*********************************************************************/
 
-
-
-static int mm_type_for_count(uint32_t type) {
-    switch (type) {
-        case EfiReservedMemoryType:
-        case EfiUnusableMemory:
-        case EfiMemoryMappedIO:
-        case EfiMemoryMappedIOPortSpace:
-        default:
-            return 0;
-
-        case EfiConventionalMemory:
-            return EfiConventionalMemory;
-        case EfiBootServicesCode:
-        case EfiBootServicesData:
-        case EfiLoaderCode:
-        case EfiLoaderData:
-        case EfiACPIMemoryNVS:
-        case EfiACPIReclaimMemory:
-        case EfiRuntimeServicesCode:
-        case EfiRuntimeServicesData:
-            return type;
-    }
-}
-
-static int mm_type_for_free(uint32_t type) {
-    switch (type) {
-        case EfiReservedMemoryType:
-        case EfiUnusableMemory:
-        case EfiMemoryMappedIO:
-        case EfiMemoryMappedIOPortSpace:
-        default:
-            return EfiReservedMemoryType;
-
-        case EfiConventionalMemory:
-        case EfiBootServicesCode:
-        case EfiBootServicesData:
-            return EfiConventionalMemory;
-
-        case EfiLoaderCode:
-        case EfiLoaderData:
-        case EfiACPIMemoryNVS:
-        case EfiACPIReclaimMemory:
-        case EfiRuntimeServicesCode:
-        case EfiRuntimeServicesData:
-            return type;
-    }
-}
-
-extern EFI_RUNTIME_SERVICES* gRT;
 static uintptr_t kma_base, kma_size = 0x1000;
 
 void mm_init(moe_bootinfo_t *bootinfo) {
@@ -151,6 +91,8 @@ void mm_init(moe_bootinfo_t *bootinfo) {
     free_memory = bootinfo->free_memory;
     total_memory = bootinfo->total_memory;
     memset32((void*)static_start, 0xdeadbeef, free_memory / 4);
+
+    memcpy(gates_memory_bitmap, bootinfo->gates_memory_bitmap, sizeof(gates_memory_bitmap));
 
     page_init(bootinfo);
 }

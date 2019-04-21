@@ -15,6 +15,7 @@ enum {
     LARGE_PAGE_SIZE = 0x00200000,
     KERNEL_HEAP_PAGE = 0x1FF,
     KERNEL_HEAP_PAGE3 = 0x1FE,
+    MAX_GATES_MEMORY = 0xA0000,
 };
 
 static const uint64_t max_virtual_address = 0x0000FFFFFFFFFFFF;
@@ -117,13 +118,24 @@ void page_init(moe_bootinfo_t *_bootinfo, void *mmap, size_t mmsize, size_t mmde
         EFI_MEMORY_DESCRIPTOR* efi_mem = (EFI_MEMORY_DESCRIPTOR*)(mmap_ptr + i * mmdescsz);
         efi_mem->VirtualStart = efi_mem->PhysicalStart;
         uint32_t type = mm_type_for_count(efi_mem->Type);
-        if (type == EfiConventionalMemory && kma_size < efi_mem->NumberOfPages && roundup(efi_mem->PhysicalStart, NATIVE_PAGE_SIZE) == efi_mem->PhysicalStart && efi_mem->PhysicalStart < UINT32_MAX ) {
-            kma_base = efi_mem->PhysicalStart;
-            kma_size = efi_mem->NumberOfPages;
+        size_t n_pages = efi_mem->NumberOfPages;
+        EFI_PHYSICAL_ADDRESS base_pa = efi_mem->PhysicalStart;
+        EFI_PHYSICAL_ADDRESS last_pa = base_pa + n_pages * NATIVE_PAGE_SIZE - 1;
+        if (type == EfiConventionalMemory) {
+            if (last_pa < MAX_GATES_MEMORY) {
+                for (int i = (base_pa >> 12); i < n_pages; i++) {
+                    int offset = i / 32;
+                    int position = i % 32;
+                    bootinfo->gates_memory_bitmap[offset] |= (1 << position);
+                }
+            }
+            if (kma_size < n_pages && roundup(base_pa, NATIVE_PAGE_SIZE) == base_pa && base_pa < UINT32_MAX ) {
+                kma_base = base_pa;
+                kma_size = n_pages;
+            }
         }
         if (type > 0) {
-            total_memory += efi_mem->NumberOfPages;
-            EFI_PHYSICAL_ADDRESS last_pa = efi_mem->PhysicalStart + efi_mem->NumberOfPages * NATIVE_PAGE_SIZE - 1;
+            total_memory += n_pages;
             if (last_pa <= UINT32_MAX && last_pa > last_pa_4G) {
                 last_pa_4G = last_pa;
             }
