@@ -75,7 +75,7 @@ _Noreturn void moe_shutdown_system() {
 
 static uint64_t base_time;
 uint64_t fw_get_time() {
-    return base_time + moe_get_measure();
+    return base_time + moe_get_tick_count();
 }
 
 
@@ -104,7 +104,8 @@ extern _Noreturn void start_init(void* args);
 _Noreturn void start_kernel(moe_bootinfo_t *info) {
 
     EFI_TIME etime = *(EFI_TIME *)(&info->boottime);
-    base_time = 1000000LL * (etime.Second + etime.Minute * 60 + etime.Hour * 3600) + (etime.Nanosecond / 1000);
+    base_time = 1000LL * (etime.Second + etime.Minute * 60 + etime.Hour * 3600);
+    //  + (etime.Nanosecond / 1000);
 
     gRT = 0; //bootinfo->efiRT;
     mm_init(info);

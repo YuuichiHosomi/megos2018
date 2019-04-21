@@ -168,6 +168,7 @@ typedef double moe_time_interval_t;
 moe_timer_t moe_create_interval_timer(uint64_t);
 int moe_check_timer(moe_timer_t*);
 uint64_t moe_get_measure();
+uint64_t moe_get_tick_count();
 
 typedef struct moe_fifo_t moe_fifo_t;
 typedef struct moe_semaphore_t moe_semaphore_t;

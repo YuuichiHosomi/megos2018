@@ -178,6 +178,7 @@ void idt_init() {
 #define MAX_IRQ                     (MAX_IOAPIC_IRQ + MAX_MSI)
 #define IRQ_INVALIDATE_TLB          0xEE
 #define IRQ_SCHDULE                 0xFC
+#define IRQ_LAPIC_TIMER             IRQ_BASE
 
 #define MAX_CPU                     32
 #define INVALID_CPUID               0xFF
@@ -224,6 +225,10 @@ MOE_PHYSICAL_ADDRESS lapic_base = 0;
 void *ioapic_base = NULL;
 _Atomic int smp_mode = 0;
 _Atomic uint8_t next_msi = 0;
+
+uint32_t lapic_timer_div = 0;
+uint32_t lapic_timer_div2 = 0;
+_Atomic uint64_t lapic_timer_value = 0;
 
 
 static void apic_write_ioapic(int index, uint32_t value) {
@@ -312,6 +317,37 @@ void _irq_main(uint8_t irq, void* p) {
     }
 }
 
+extern moe_dib_t main_screen_dib;
+void irq_livt() {
+    lapic_timer_value++;
+    WRITE_PHYSICAL_UINT32(lapic_base + 0x0B0, 0);
+    moe_draw_pixel(&main_screen_dib, 10, 10, lapic_timer_value);
+    // printf("count: %lld\r", lapic_timer_value);
+    reschedule();
+    if (smp_mode) {
+        WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0xC0000 + IRQ_SCHDULE);
+    }
+}
+
+uint64_t moe_get_tick_count() {
+    return lapic_timer_value;
+}
+
+uint64_t moe_get_measure() {
+    return lapic_timer_value * 1000;
+    // uint32_t m0 = READ_PHYSICAL_UINT32(lapic_base + 0x390);
+    // uint64_t m = (lapic_timer_div - m0) / lapic_timer_div2;
+    // return m;
+}
+
+moe_timer_t moe_create_interval_timer(uint64_t us) {
+    return lapic_timer_value + (us + 1000) / 1000;
+}
+
+int moe_check_timer(moe_timer_t* timer) {
+    return (intptr_t)(*timer - lapic_timer_value) > 0;
+}
+
 int smp_send_invalidate_tlb() {
     if (smp_mode) {
         WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0xC0000 + IRQ_INVALIDATE_TLB);
@@ -339,6 +375,11 @@ void apic_init_ap(uint8_t cpuid) {
     apicid_to_cpuids[apicid] = cpuid;
 
     WRITE_PHYSICAL_UINT32(lapic_base + 0x0F0, 0x10F);
+
+    // WRITE_PHYSICAL_UINT32(lapic_base + 0x3E0, 0x0000000B);
+    // WRITE_PHYSICAL_UINT32(lapic_base + 0x320, 0x00030000 | IRQ_LAPIC_TIMER);
+    // WRITE_PHYSICAL_UINT32(lapic_base + 0x380, lapic_timer_div);
+
 }
 
 
@@ -475,6 +516,28 @@ void apic_init() {
         idt_set_kernel_handler(IRQ_SCHDULE, (uintptr_t)&_ipi_sche, 0);
         idt_set_kernel_handler(IRQ_INVALIDATE_TLB, (uintptr_t)&_ipi_invtlb, 0);
 
+        // LAPIC timer
+        WRITE_PHYSICAL_UINT32(lapic_base + 0x3E0, 0x0000000B);
+        WRITE_PHYSICAL_UINT32(lapic_base + 0x320, 0x00010020);
+        WRITE_PHYSICAL_UINT32(lapic_base + 0x380, UINT32_MAX);
+        const int magic_number = 100;
+        uint32_t timer_val = ACPI_PM_TIMER_DIV / magic_number;
+        uint32_t acpi_tmr_base = acpi_read_pm_timer();
+        uint32_t acpi_tmr_val;
+        do {
+            io_pause();
+            acpi_tmr_val = acpi_read_pm_timer();
+        } while(timer_val > ((acpi_tmr_val - acpi_tmr_base) & 0xFFFFFF));
+        uint32_t count = READ_PHYSICAL_UINT32(lapic_base + 0x390);
+        uint64_t lapic_freq = ((uint64_t)UINT32_MAX - count) * magic_number;
+
+        lapic_timer_div = lapic_freq / 1000;
+        lapic_timer_div2 = lapic_freq / 100000;
+
+        irq_handler[0] = &irq_livt;
+        WRITE_PHYSICAL_UINT32(lapic_base + 0x320, 0x00020000 | IRQ_LAPIC_TIMER);
+        WRITE_PHYSICAL_UINT32(lapic_base + 0x380, lapic_timer_div);
+
         // Then enable IRQ
         __asm__ volatile("sti");
 
@@ -485,7 +548,7 @@ void apic_init() {
 //  because to initialize AP needs Timer
 void apic_init_mp() {
     if (n_cpu > 1) {
-        uint8_t vector_sipi = 16; //moe_alloc_gates_memory() >> 12;
+        uint8_t vector_sipi = moe_alloc_gates_memory() >> 12;
         int max_cpu = MIN(n_cpu, MAX_CPU);
         const uintptr_t stack_chunk_size = 0x4000;
         uintptr_t* stacks = moe_alloc_object(stack_chunk_size, max_cpu);
@@ -524,18 +587,10 @@ void hpet_irq_handler(int irq) {
     hpet_count++;
 }
 
-moe_timer_t moe_create_interval_timer(uint64_t us) {
-    return (us / timer_div) + hpet_count + 1;
-}
-
-int moe_check_timer(moe_timer_t* timer) {
-    return ((intptr_t)(*timer - hpet_count) > 0);
-}
-
-uint64_t moe_get_measure() {
-    uint64_t main_cnt = hpet_read_reg(0xF0);
-    return main_cnt / measure_div;
-}
+// uint64_t moe_get_measure() {
+//     uint64_t main_cnt = hpet_read_reg(0xF0);
+//     return main_cnt / measure_div;
+// }
 
 void hpet_init() {
     acpi_hpet_t* hpet = acpi_find_table(ACPI_HPET_SIGNATURE);
@@ -747,7 +802,7 @@ void arch_init() {
 
     pci_init();
     apic_init();
-    hpet_init();
+    // hpet_init();
     acpi_init_sci();
     apic_init_mp();
     pg_enter_strict_mode();

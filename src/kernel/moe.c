@@ -11,7 +11,7 @@
 #define DEFAULT_QUANTUM     3
 #define CONSUME_QUANTUM_THRESHOLD 2500
 #define THREAD_NAME_SIZE    32
-#define CLEANUP_LOAD_TIME   1000000
+#define CLEANUP_LOAD_TIME   1000
 #define DEFAULT_SCHEDULE_SIZE   1024
 #define DEFAULT_SCHEDULE_QUEUES 2
 #define PREEMPT_PENALTY     10000
@@ -41,7 +41,7 @@ typedef struct moe_thread_t {
         };
     };
     thid_t thid;
-    _Atomic uint64_t measure0;
+    _Atomic uint32_t measure0;
     _Atomic uint64_t cputime;
     _Atomic uint32_t load00, load0, load;
     moe_affinity_t affinity;
@@ -105,7 +105,7 @@ const char *moe_get_current_thread_name() {
     return get_current_thread()->name;
 }
 
-uint64_t moe_get_thread_load(moe_thread_t* thread) {
+uint32_t moe_get_thread_load(moe_thread_t* thread) {
     return moe_get_measure() - atomic_load(&thread->measure0);
 }
 
@@ -355,10 +355,10 @@ _Noreturn void moe_startup_ap(int cpuid) {
 
 
 _Noreturn void scheduler_thread() {
-    int64_t last_cleanup_load_measure = 0;
+    int last_timer = 0;
     for (;;) {
-        int64_t measure = moe_get_measure();
-        if ((measure - last_cleanup_load_measure) >= CLEANUP_LOAD_TIME) {
+        int timer = moe_get_tick_count();
+        if ((timer - last_timer) >= CLEANUP_LOAD_TIME) {
 
             moe_thread_t* thread = root_thread;
             for (; thread; thread = thread->next) {
@@ -372,7 +372,7 @@ _Noreturn void scheduler_thread() {
                 }
             }
 
-            last_cleanup_load_measure = measure;
+            last_timer = timer;
         }
         moe_yield();
     }

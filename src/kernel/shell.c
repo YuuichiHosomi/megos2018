@@ -317,7 +317,7 @@ _Noreturn void statusbar_thread(void *args) {
     while ((event = moe_get_event(statusbar, 500000))) {
         moe_fill_rect(statusbar_dib, &rect_redraw, statusbar_bgcolor);
 
-        uint32_t now = (fw_get_time() / 1000000LL);
+        uint32_t now = (fw_get_time() / 1000LL);
         unsigned time0 = now % 60;
         unsigned time1 = (now / 60) % 60;
         unsigned time2 = (now / 3600) % 24;
