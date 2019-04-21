@@ -89,6 +89,8 @@ typedef struct acpi_fadt_t {
 #define ACPI_PM1_SLP_EN             0x2000
 #define ACPI_SCR_SLP_EN             0x20
 
+#define ACPI_PM_TIMER_DIV           3579545
+
 
 // DSDT Differentiated System Description Table
 typedef struct acpi_dsdt_t {

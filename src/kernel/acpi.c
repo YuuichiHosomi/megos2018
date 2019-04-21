@@ -146,6 +146,30 @@ void acpi_enter_sleep_state(int state) {
     for(;;) { io_hlt(); }
 }
 
+int acpi_get_pm_timer_type() {
+    if (fadt->PM_TMR_BLK) {
+        if (fadt->Flags & ACPI_FADT_TMR_VAL_EXT) {
+            return 32;
+        } else {
+            return 24;
+        }
+    } else {
+        return 0;
+    }
+}
+
+uint32_t acpi_read_pm_timer() {
+    if (fadt->PM_TMR_BLK) {
+        if (fadt->Flags & ACPI_FADT_TMR_VAL_EXT) {
+            return io_in32(fadt->PM_TMR_BLK);
+        } else {
+            return io_in32(fadt->PM_TMR_BLK) & 0x00FFFFFF;
+        }
+    } else {
+        return 0;
+    }
+}
+
 void acpi_init(acpi_rsd_ptr_t* _rsdp) {
     rsdp = _rsdp;
     xsdt = (acpi_xsdt_t*)MOE_PA2VA(rsdp->xsdtaddr);
