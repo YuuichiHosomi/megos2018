@@ -3,6 +3,7 @@
 // License: BSD
 #include "moe.h"
 #include "kernel.h"
+#include <stdatomic.h>
 
 #define DEFAULT_ATTRIBUTES 0x07
 
@@ -25,7 +26,8 @@ typedef struct moe_console_context_t {
     moe_dib_t *dib;
     moe_font_t *font;
     moe_edge_insets_t edge_insets;
-    int cols, rows, cursor_x, cursor_y;
+    int cols, rows;
+    _Atomic int cursor_x, cursor_y;
     uint32_t bgcolor, fgcolor;
     uint32_t attributes;
     int cursor_visible;
@@ -816,22 +818,29 @@ void putchar32(moe_console_context_t *self, uint32_t c) {
     }
     switch (c) {
         default:
-            if (c >= 0x20 && c < 0x80) {
-                moe_rect_t rect = {{col_to_x(self, self->cursor_x), row_to_y(self, self->cursor_y)}, {font->ex, font->line_height}};
-                moe_rect_t rect_f = {{col_to_x(self, self->cursor_x), row_to_y(self, self->cursor_y) + font->font_offset}, {font->ex, font->em}};
-                const uint8_t* font_p = get_glyph(font, c);
-                moe_fill_rect(self->dib, &rect, self->bgcolor);
-                draw_pattern(self->dib, &rect_f, font_p, self->fgcolor);
-                if (self->window) {
-                    moe_invalidate_rect(self->window, &rect);
+            {
+                int cursor_x = atomic_fetch_add(&self->cursor_x, 1);
+                int cursor_y = atomic_load(&self->cursor_y);
+                if (c >= 0x20 && c < 0x80) {
+                    moe_rect_t rect = {{col_to_x(self, cursor_x), row_to_y(self, cursor_y)}, {font->ex, font->line_height}};
+                    moe_rect_t rect_f = {{col_to_x(self, cursor_x), row_to_y(self, cursor_y) + font->font_offset}, {font->ex, font->em}};
+                    const uint8_t* font_p = get_glyph(font, c);
+                    moe_fill_rect(self->dib, &rect, self->bgcolor);
+                    draw_pattern(self->dib, &rect_f, font_p, self->fgcolor);
+                    if (self->window) {
+                        moe_invalidate_rect(self->window, &rect);
+                    }
                 }
             }
-            self->cursor_x++;
             break;
 
         case '\b': // Backspace
-            if (self->cursor_x > 0) {
-                self->cursor_x--;
+            {
+                int cursor_x = self->cursor_x;
+                while (cursor_x > 0) {
+                    if (atomic_compare_exchange_weak(&self->cursor_x, &cursor_x, cursor_x - 1))
+                        break;
+                }
             }
             break;
 

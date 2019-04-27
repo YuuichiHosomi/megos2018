@@ -244,8 +244,16 @@ void apic_set_io_redirect(uint8_t irq, uint8_t vector, uint8_t trigger, int mask
     apic_write_ioapic(0x11 + irq * 2, desination << 24);
 }
 
-void apic_end_of_irq(uint8_t irq) {
-    WRITE_PHYSICAL_UINT32(lapic_base + 0x0B0, 0);
+static void apic_write_lapic(int index, uint32_t value) {
+    WRITE_PHYSICAL_UINT32(lapic_base + index, value);
+}
+
+static uint32_t apic_read_lapic(int index) {
+    return READ_PHYSICAL_UINT32(lapic_base + index);
+}
+
+static void apic_end_of_irq(uint8_t irq) {
+    apic_write_lapic(0x0B0, 0);
 }
 
 apic_madt_ovr_t get_madt_ovr(uint8_t irq) {
@@ -309,23 +317,21 @@ void _irq_main(uint8_t irq, void* p) {
         regs.intnum = IRQ_BASE + irq;
         default_int_handler(&regs);
     }
-    if (irq == 2) {
-        reschedule();
-        if (smp_mode) {
-            WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0xC0000 + IRQ_SCHDULE);
-        }
-    }
 }
 
 extern moe_dib_t main_screen_dib;
 void irq_livt() {
     lapic_timer_value++;
-    WRITE_PHYSICAL_UINT32(lapic_base + 0x0B0, 0);
-    moe_draw_pixel(&main_screen_dib, 10, 10, lapic_timer_value);
+    apic_end_of_irq(0);
+    int x = lapic_timer_value & 15;
+    int y = (lapic_timer_value >> 4) & 15;
+    int q = lapic_timer_value;
+    int c = q ^ (q << 5) ^ (q << 7) ^ (q << 11) ^ (q << 13);
+    moe_draw_pixel(&main_screen_dib, 4 + x, 4 + y, c);
     // printf("count: %lld\r", lapic_timer_value);
     reschedule();
     if (smp_mode) {
-        WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0xC0000 + IRQ_SCHDULE);
+        apic_write_lapic(0x300, 0xC0000 + IRQ_SCHDULE);
     }
 }
 
@@ -334,10 +340,10 @@ uint64_t moe_get_tick_count() {
 }
 
 uint64_t moe_get_measure() {
-    return lapic_timer_value * 1000;
-    // uint32_t m0 = READ_PHYSICAL_UINT32(lapic_base + 0x390);
-    // uint64_t m = (lapic_timer_div - m0) / lapic_timer_div2;
-    // return m;
+    // return lapic_timer_value * 1000;
+    uint32_t m0 = apic_read_lapic(0x390);
+    uint64_t m = (lapic_timer_div - m0) / lapic_timer_div2;
+    return lapic_timer_value * 1000 + m;
 }
 
 moe_timer_t moe_create_interval_timer(uint64_t us) {
@@ -350,19 +356,23 @@ int moe_check_timer(moe_timer_t* timer) {
 
 int smp_send_invalidate_tlb() {
     if (smp_mode) {
-        WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0xC0000 + IRQ_INVALIDATE_TLB);
+        apic_write_lapic(0x300, 0xC0000 + IRQ_INVALIDATE_TLB);
         moe_usleep(10000);
     }
     return 0;
 }
 
+void ipi_invtlb_main(uintptr_t cr3) {
+    apic_end_of_irq(0);
+}
+
 void ipi_sche_main() {
-    WRITE_PHYSICAL_UINT32(lapic_base + 0x0B0, 0);
+    apic_end_of_irq(0);
     reschedule();
 }
 
 uintptr_t moe_get_current_cpuid() {
-    uint32_t apicid = (READ_PHYSICAL_UINT32(lapic_base + 0x20) >> 24);
+    uint32_t apicid = (apic_read_lapic(0x020) >> 24);
     return apicid_to_cpuids[apicid];
 }
 
@@ -371,14 +381,14 @@ void apic_init_ap(uint8_t cpuid) {
     msr_lapic.u64 |= IA32_APIC_BASE_MSR_ENABLE;
     io_wrmsr(IA32_APIC_BASE_MSR, msr_lapic);
 
-    uint8_t apicid = READ_PHYSICAL_UINT32(lapic_base + 0x20) >> 24;
+    uint8_t apicid = apic_read_lapic(0x020) >> 24;
     apicid_to_cpuids[apicid] = cpuid;
 
-    WRITE_PHYSICAL_UINT32(lapic_base + 0x0F0, 0x10F);
+    apic_write_lapic(0x0F0, 0x10F);
 
-    // WRITE_PHYSICAL_UINT32(lapic_base + 0x3E0, 0x0000000B);
-    // WRITE_PHYSICAL_UINT32(lapic_base + 0x320, 0x00030000 | IRQ_LAPIC_TIMER);
-    // WRITE_PHYSICAL_UINT32(lapic_base + 0x380, lapic_timer_div);
+    apic_write_lapic(0x3E0, 0x0000000B);
+    apic_write_lapic(0x320, 0x00030000 | IRQ_LAPIC_TIMER);
+    apic_write_lapic(0x380, lapic_timer_div);
 
 }
 
@@ -411,9 +421,7 @@ void apic_init() {
         lapic_base = msr_lapic.u64 & ~0xFFF;
         pg_map_mmio(lapic_base, 1);
 
-        apic_ids[n_cpu++] = READ_PHYSICAL_UINT32(lapic_base + 0x20) >> 24;
-
-        // WRITE_PHYSICAL_UINT32(lapic_base + 0x0F0, 0x100);
+        apic_ids[n_cpu++] = apic_read_lapic(0x020) >> 24;
 
         //  Parse structures
         size_t max_length = madt->Header.length - 44;
@@ -517,26 +525,26 @@ void apic_init() {
         idt_set_kernel_handler(IRQ_INVALIDATE_TLB, (uintptr_t)&_ipi_invtlb, 0);
 
         // LAPIC timer
-        WRITE_PHYSICAL_UINT32(lapic_base + 0x3E0, 0x0000000B);
-        WRITE_PHYSICAL_UINT32(lapic_base + 0x320, 0x00010020);
-        WRITE_PHYSICAL_UINT32(lapic_base + 0x380, UINT32_MAX);
+        apic_write_lapic(0x3E0, 0x0000000B);
+        apic_write_lapic(0x320, 0x00010020);
+        apic_write_lapic(0x380, UINT32_MAX);
         const int magic_number = 100;
-        uint32_t timer_val = ACPI_PM_TIMER_DIV / magic_number;
+        uint32_t timer_val = ACPI_PM_TIMER_FREQ / magic_number;
         uint32_t acpi_tmr_base = acpi_read_pm_timer();
         uint32_t acpi_tmr_val;
         do {
             io_pause();
             acpi_tmr_val = acpi_read_pm_timer();
         } while(timer_val > ((acpi_tmr_val - acpi_tmr_base) & 0xFFFFFF));
-        uint32_t count = READ_PHYSICAL_UINT32(lapic_base + 0x390);
+        uint32_t count = apic_read_lapic(0x390);
         uint64_t lapic_freq = ((uint64_t)UINT32_MAX - count) * magic_number;
 
         lapic_timer_div = lapic_freq / 1000;
-        lapic_timer_div2 = lapic_freq / 100000;
+        lapic_timer_div2 = lapic_freq / 1000000;
 
         irq_handler[0] = &irq_livt;
-        WRITE_PHYSICAL_UINT32(lapic_base + 0x320, 0x00020000 | IRQ_LAPIC_TIMER);
-        WRITE_PHYSICAL_UINT32(lapic_base + 0x380, lapic_timer_div);
+        apic_write_lapic(0x320, 0x00020000 | IRQ_LAPIC_TIMER);
+        apic_write_lapic(0x380, lapic_timer_div);
 
         // Then enable IRQ
         __asm__ volatile("sti");
@@ -553,9 +561,9 @@ void apic_init_mp() {
         const uintptr_t stack_chunk_size = 0x4000;
         uintptr_t* stacks = moe_alloc_object(stack_chunk_size, max_cpu);
         _Atomic uint32_t* wait_p = smp_setup_init(vector_sipi, max_cpu, stack_chunk_size, stacks);
-        WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4500);
+        apic_write_lapic(0x300, 0x000C4500);
         moe_usleep(10000);
-        WRITE_PHYSICAL_UINT32(lapic_base + 0x300, 0x000C4600 + vector_sipi);
+        apic_write_lapic(0x300, 0x000C4600 + vector_sipi);
         moe_usleep(200000);
         thread_init(atomic_load(wait_p));
         smp_mode = 1;

@@ -65,6 +65,7 @@ extern void io_fsave(void*);
 extern void io_fload(void*);
 extern void setjmp_new_thread(jmp_buf env, uintptr_t* new_sp);
 extern uintptr_t moe_get_current_cpuid();
+extern int io_set_lazy_fpu_restore();
 
 
 typedef struct {
@@ -72,6 +73,7 @@ typedef struct {
     moe_thread_t* idle;
     _Atomic (moe_thread_t*) current;
     _Atomic (moe_thread_t*) retired;
+    // _Atomic moe_irql_t irql;
 } core_specific_data_t;
 
 moe_thread_t *root_thread;
@@ -90,10 +92,10 @@ core_specific_data_t* core_data;
 
 
 moe_thread_t* get_current_thread() {
-    uint32_t eflags = io_lock_irq();
+    uintptr_t flags = io_lock_irq();
     uintptr_t cpuid = moe_get_current_cpuid();
     moe_thread_t *result = atomic_load(&core_data[cpuid].current);
-    io_unlock_irq(eflags);
+    io_unlock_irq(flags);
     return result;
 }
 
@@ -227,7 +229,6 @@ void moe_fpu_restore(uintptr_t delta) {
 
 void reschedule() {
     if (!core_data) return;
-    //TODO: assert(cli)
     uint32_t cpuid = moe_get_current_cpuid();
     moe_thread_t* current = core_data[cpuid].current;
     if (current->priority >= priority_realtime) {
@@ -259,7 +260,7 @@ void moe_yield() {
 }
 
 int moe_wait_for_object(moe_thread_t **obj, uint64_t us) {
-    uint32_t eflags = io_lock_irq();
+    uintptr_t flags = io_lock_irq();
     uint32_t cpuid = moe_get_current_cpuid();
     moe_thread_t* current = core_data[cpuid].current;
     if (obj) {
@@ -267,7 +268,7 @@ int moe_wait_for_object(moe_thread_t **obj, uint64_t us) {
     }
     moe_timer_t timer = moe_create_interval_timer(us);
     next_thread(cpuid, current, obj, timer);
-    io_unlock_irq(eflags);
+    io_unlock_irq(flags);
     return 0;
 }
 
@@ -305,7 +306,7 @@ _Noreturn void moe_exit_thread(uint32_t exit_code) {
 moe_thread_t* create_thread(moe_thread_start start, moe_priority_level_t priority, void* args, const char* name) {
 
     moe_thread_t* new_thread = moe_alloc_object(sizeof(moe_thread_t), 1);
-    memset(new_thread, 0, sizeof(moe_thread_t));
+    // memset(new_thread, 0, sizeof(moe_thread_t));
     new_thread->thid = atomic_fetch_add(&next_thid, 1);
     new_thread->priority = priority;
     if (priority) {
@@ -409,6 +410,8 @@ void thread_init(int _n_active_cpu) {
         _core_data[i].current = th;
     }
     core_data = _core_data;
+
+    io_set_lazy_fpu_restore();
 
     moe_thread_t *sc = create_thread(&scheduler_thread, priority_high, 0, "Scheduler");
     sc->affinity = 1;

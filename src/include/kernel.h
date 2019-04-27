@@ -84,8 +84,8 @@ uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p);
 void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v);
 
 
-uint32_t io_lock_irq();
-void io_unlock_irq(uint32_t);
+uintptr_t io_lock_irq();
+void io_unlock_irq(uintptr_t);
 
 
 // Low Level Memory Manager

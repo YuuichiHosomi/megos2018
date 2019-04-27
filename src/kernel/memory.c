@@ -7,7 +7,6 @@
 #include "efi.h"
 
 #define PAGE_SIZE   0x1000
-#define ROUNDUP_PAGE(n) ((n + 0xFFF) & ~0xFFF)
 
 extern void page_init();
 
@@ -25,6 +24,10 @@ static _Atomic uintptr_t static_start;
 
 // "640 k ought to be enough for anybody." - Bill Gates, 1981
 _Atomic uint32_t gates_memory_bitmap[MAX_GATES_INDEX];
+
+static uintptr_t ROUNDUP_PAGE(size_t n) {
+    return (((n) + 0xFFF) & ~0xFFF);
+}
 
 static int popcnt32(uint32_t bits) {
     bits = (bits & 0x55555555) + (bits >> 1 & 0x55555555);
@@ -71,12 +74,12 @@ uintptr_t moe_alloc_physical_page(size_t n) {
 }
 
 void *moe_alloc_object(size_t size, size_t count) {
-    size_t sz = size * count;
+    size_t sz = ROUNDUP_PAGE(size * count);
     void *va = NULL;
     uintptr_t pa = moe_alloc_physical_page(sz);
     if (pa) {
         va = pg_valloc(pa, sz);
-        memset(va, 0, sz);
+        zmemset_safe(va, sz);
     }
     return va;
 }

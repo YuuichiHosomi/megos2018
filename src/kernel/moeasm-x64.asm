@@ -129,13 +129,13 @@ atomic_bit_test_and_clear:
     ret
 
 
-; void io_set_lazy_fpu_restore();
+; int io_set_lazy_fpu_restore();
+    global io_set_lazy_fpu_restore
 io_set_lazy_fpu_restore:
-    push rax
     mov rax, cr0
     bts rax, 3 ; TS
     mov cr0, rax
-    pop rax
+    mov eax, 512
     ret
 
 
@@ -174,6 +174,24 @@ io_fsave:
     global io_fload
 io_fload:
     fxrstor64 [rcx]
+    ret
+
+
+; void zmemset_safe(void* p, size_t n);
+    global zmemset_safe
+zmemset_safe:
+    push rdi
+    mov rdi, rcx
+    mov rcx, rdx
+    shr rcx, 2
+    xor eax, eax
+    rep stosd
+    mov ecx, edx
+    and ecx, 3
+    jz .skip
+    rep stosb
+.skip:
+    pop rdi
     ret
 
 
@@ -610,11 +628,30 @@ _ipi_sche:
     pop rax
     iretq
 
+
+    extern ipi_invtlb_main
     global _ipi_invtlb
 _ipi_invtlb:
     push rax
-    mov rax, cr3
-    mov cr3, rax
+    push rcx
+    push rdx
+    push r8
+    push r9
+    push r10
+    push r11
+    cld
+
+    mov rcx, cr3
+    mov cr3, rcx
+
+    call ipi_invtlb_main
+
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdx
+    pop rcx
     pop rax
     iretq
 
@@ -745,6 +782,8 @@ _startup32:
     mov ss, eax
     mov ds, eax
     mov es, eax
+    mov fs, eax
+    mov fs, eax
 
     mov eax, [ebx + SMPINFO_CR4]
     mov cr4, eax

@@ -185,3 +185,5 @@ int moe_sem_trywait(moe_semaphore_t *self);
 int moe_sem_wait(moe_semaphore_t *self, uint64_t us);
 void moe_sem_signal(moe_semaphore_t *self);
 intptr_t moe_sem_getvalue(moe_semaphore_t *self);
+
+void zmemset_safe(void* p, size_t n);

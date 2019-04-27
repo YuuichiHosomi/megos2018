@@ -81,7 +81,7 @@ void invalidate_tlb() {
 void *pg_map(uintptr_t base_pa, void *base_va, size_t size, uint64_t attributes) {
     size_t count = ROUNDUP_PAGE(size, NATIVE_PAGE_SIZE) / NATIVE_PAGE_SIZE;
     pte_t common_attributes = PTE_PRESENT | PTE_WRITE;
-    uint32_t eflags = io_lock_irq();
+    uintptr_t flags = io_lock_irq();
     for (size_t i = 0; i < count; i++) {
         uintptr_t target_va = (uintptr_t)base_va + i * NATIVE_PAGE_SIZE;
         uintptr_t target_pa = base_pa + i * NATIVE_PAGE_SIZE;
@@ -98,7 +98,7 @@ void *pg_map(uintptr_t base_pa, void *base_va, size_t size, uint64_t attributes)
         pg_set_pte(target_va, target_pa | attributes, 1);
     }
     invalidate_tlb();
-    io_unlock_irq(eflags);
+    io_unlock_irq(flags);
 
     return base_va;
 }
@@ -116,7 +116,7 @@ void *pg_map_vram(uintptr_t base, size_t size) {
 
 _Atomic uintptr_t valloc_lock = 0;
 void *pg_valloc(uintptr_t pa, size_t size) {
-    return (void*)pa;
+    // return (void*)pa;
     size_t vsize = ROUNDUP_PAGE(size, VIRTUAL_PAGE_SIZE) + VIRTUAL_PAGE_SIZE;
     void *va = (void *)atomic_fetch_add(&base_kernel_heap, vsize);
     pg_map(pa, va, size, PTE_PRESENT | PTE_WRITE);
