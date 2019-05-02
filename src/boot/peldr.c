@@ -11,11 +11,11 @@ uintptr_t pe_offset_0;
 pe64_header_t* pe_hdr;
 pe_section_table_t *sec_tbl;
 
-int pe_preparse(void *obj, size_t size) {
+int pe_prepare(void *obj, size_t size) {
     pe_offset_0 = (uintptr_t)obj;
 
-    uint8_t *mz = (uint8_t*)pe_offset_0;
-    if (mz[0] != 'M' || mz[1] != 'Z') return -1;
+    uint16_t *mz = (uint16_t*)pe_offset_0;
+    if (mz[0] != IMAGE_DOS_SIGNATURE) return -1;
 
     uint32_t ne_ptr = *((uint32_t *)(pe_offset_0 + 0x3C));
     pe_hdr = (pe64_header_t *)(pe_offset_0 + ne_ptr);

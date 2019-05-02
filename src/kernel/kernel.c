@@ -105,7 +105,6 @@ _Noreturn void start_kernel(moe_bootinfo_t *info) {
 
     EFI_TIME etime = *(EFI_TIME *)(&info->boottime);
     base_time = 1000LL * (etime.Second + etime.Minute * 60 + etime.Hour * 3600);
-    //  + (etime.Nanosecond / 1000);
 
     gRT = 0; //bootinfo->efiRT;
     mm_init(info);

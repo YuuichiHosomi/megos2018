@@ -25,7 +25,7 @@ typedef uint64_t pte_t;
 
 extern void arch_cpu_init();
 
-static void io_set_ptbr(uintptr_t cr3) {
+static void io_set_cr3(uintptr_t cr3) {
     __asm__ volatile("movq %0, %%cr3"::"r"(cr3));
 }
 
@@ -114,9 +114,7 @@ void *pg_map_vram(uintptr_t base, size_t size) {
 }
 
 
-_Atomic uintptr_t valloc_lock = 0;
 void *pg_valloc(uintptr_t pa, size_t size) {
-    // return (void*)pa;
     size_t vsize = ROUNDUP_PAGE(size, VIRTUAL_PAGE_SIZE) + VIRTUAL_PAGE_SIZE;
     void *va = (void *)atomic_fetch_add(&base_kernel_heap, vsize);
     pg_map(pa, va, size, PTE_PRESENT | PTE_WRITE);
@@ -156,8 +154,7 @@ void page_init(moe_bootinfo_t *bootinfo) {
     memset(pml2v_va, 0, NATIVE_PAGE_SIZE);
     pml3v_va[0] = pml2v_pa | common_attributes | PTE_USER;
 
-
-    io_set_ptbr(global_cr3);
+    io_set_cr3(global_cr3);
 
 }
 

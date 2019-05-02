@@ -20,10 +20,10 @@ CONST EFI_GUID EfiGraphicsOutputProtocolGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID
 CONST EFI_GUID efi_acpi_20_table_guid = EFI_ACPI_20_TABLE_GUID;
 CONST EFI_GUID smbios3_table_guid = SMBIOS3_TABLE_GUID;
 
-extern int pe_preparse(void *obj, size_t size);
+extern int pe_prepare(void *obj, size_t size);
 extern uint64_t pe_locate(uint64_t base);
 extern void page_init(moe_bootinfo_t *bootinfo, void *mmap, size_t mmsize, size_t mmdescsize);
-extern void *virtual_alloc(uint64_t base, size_t size, int attr);
+extern void *virtual_alloc(uint64_t base, size_t size);
 extern int check_arch(void);
 extern _Noreturn void start_kernel(moe_bootinfo_t* bootinfo, uint64_t* param);
 
@@ -237,7 +237,7 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
             EFI_PRINT("ERROR: KERNEL NOT FOUND\r\n");
             return EFI_NOT_FOUND;
         }
-        status = pe_preparse(kernel_ptr.base, kernel_ptr.size);
+        status = pe_prepare(kernel_ptr.base, kernel_ptr.size);
         if (status < 0) {
             EFI_PRINT("ERROR: BAD KERNEL SIGNATURE FOUND\r\n");
             goto errexit;
@@ -308,7 +308,7 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
     // Start Kernel
     size_t stack_size = 0x4000;
     uint64_t sp = bootinfo.kernel_base + 0x3FFFF000;
-    virtual_alloc(sp - stack_size, stack_size, 0);
+    virtual_alloc(sp - stack_size, stack_size);
     uint64_t params[2] = { entry_point, sp };
     start_kernel(&bootinfo, params);
 

@@ -1,4 +1,4 @@
-// Page Initializer
+// Minimal Page Initializer
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: BSD
 #include <stdatomic.h>

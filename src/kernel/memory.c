@@ -90,6 +90,8 @@ void *moe_alloc_object(size_t size, size_t count) {
 static uintptr_t kma_base, kma_size = 0x1000;
 
 void mm_init(moe_bootinfo_t *bootinfo) {
+    kma_base = bootinfo->static_start;
+    kma_size = bootinfo->free_memory;
     static_start = bootinfo->static_start;
     free_memory = bootinfo->free_memory;
     total_memory = bootinfo->total_memory;
