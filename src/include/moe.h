@@ -160,18 +160,17 @@ const char *moe_get_current_thread_name();
 int moe_get_usage();
 _Noreturn void moe_exit_thread(uint32_t exit_code);
 
-int moe_wait_for_object(moe_thread_t **obj, uint64_t us);
-int moe_signal_object(moe_thread_t **obj);
+// int moe_wait_for_object(moe_thread_t **obj, uint64_t us);
+// int moe_signal_object(moe_thread_t **obj);
 
 typedef uint64_t moe_timer_t;
-typedef double moe_time_interval_t;
-moe_timer_t moe_create_interval_timer(uint64_t);
+// typedef double moe_time_interval_t;
+moe_timer_t moe_create_interval_timer(int64_t);
 int moe_check_timer(moe_timer_t*);
 uint64_t moe_get_measure();
 uint64_t moe_get_tick_count();
 
 typedef struct moe_fifo_t moe_fifo_t;
-typedef struct moe_semaphore_t moe_semaphore_t;
 moe_fifo_t *moe_fifo_init(size_t capacity);
 intptr_t moe_fifo_read(moe_fifo_t *self, intptr_t default_val);
 int moe_fifo_wait(moe_fifo_t* self, intptr_t* result, uint64_t us);
@@ -179,10 +178,11 @@ int moe_fifo_write(moe_fifo_t *self, intptr_t data);
 size_t moe_fifo_get_estimated_count(moe_fifo_t *self);
 size_t moe_fifo_get_estimated_free(moe_fifo_t *self);
 
+typedef struct moe_semaphore_t moe_semaphore_t;
 moe_semaphore_t *moe_sem_create(intptr_t value);
-void moe_sem_init(moe_semaphore_t *self, intptr_t value);
+// void moe_sem_init(moe_semaphore_t *self, intptr_t value);
 int moe_sem_trywait(moe_semaphore_t *self);
-int moe_sem_wait(moe_semaphore_t *self, uint64_t us);
+int moe_sem_wait(moe_semaphore_t *self, int64_t us);
 void moe_sem_signal(moe_semaphore_t *self);
 intptr_t moe_sem_getvalue(moe_semaphore_t *self);
 

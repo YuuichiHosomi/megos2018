@@ -15,13 +15,14 @@
 #define DEFAULT_SCHEDULE_SIZE   1024
 #define DEFAULT_SCHEDULE_QUEUES 2
 #define PREEMPT_PENALTY     10000
+#define MAX_THREADS 512
 
 
 typedef uint32_t moe_affinity_t;
 typedef int thid_t;
 
 typedef struct moe_thread_t {
-    moe_thread_t* next;
+    void *dummy;
     union {
         _Atomic uint32_t flags;
         struct {
@@ -48,7 +49,7 @@ typedef struct moe_thread_t {
     _Atomic uint8_t quantum_left;
     uint8_t quantum, quantum_min, quantum_max;
 
-    _Atomic (moe_thread_t **) signal_object;
+    _Atomic (moe_thread_t *) *signal_object;
     moe_timer_t block;
 
     void *fpu_context;
@@ -76,10 +77,10 @@ typedef struct {
     // _Atomic moe_irql_t irql;
 } core_specific_data_t;
 
-moe_thread_t *root_thread;
 _Atomic thid_t next_thid;
 int n_active_cpu;
 _Atomic moe_affinity_t system_affinity;
+_Atomic (moe_thread_t *) *thread_list;
 
 struct {
     moe_fifo_t* ready[DEFAULT_SCHEDULE_QUEUES];
@@ -88,13 +89,13 @@ struct {
     atomic_flag lock;
 } thread_queue;
 
-core_specific_data_t* core_data;
+core_specific_data_t* psd;
 
 
 moe_thread_t* get_current_thread() {
     uintptr_t flags = io_lock_irq();
     uintptr_t cpuid = moe_get_current_cpuid();
-    moe_thread_t *result = atomic_load(&core_data[cpuid].current);
+    moe_thread_t *result = atomic_load(&psd[cpuid].current);
     io_unlock_irq(flags);
     return result;
 }
@@ -158,7 +159,7 @@ moe_thread_t *sch_next(uint32_t cpuid) {
         atomic_bit_test_and_clear(&thread_queue.lock, 0);
     }
 
-    return core_data[cpuid].idle;
+    return psd[cpuid].idle;
 }
 
 static void unlock_core(uint32_t cpuid) {
@@ -166,7 +167,7 @@ static void unlock_core(uint32_t cpuid) {
 }
 
 //  Context Swicth
-static void next_thread(uint32_t cpuid, moe_thread_t* current, void *obj, moe_timer_t timer) {
+static void next_thread(uint32_t cpuid, moe_thread_t* current, _Atomic (moe_thread_t *) *obj, moe_timer_t timer) {
     if (!atomic_bit_test_and_set(&thread_queue.core_lock, cpuid)) {
         moe_thread_t* next = sch_next(cpuid);
         uint64_t load = moe_get_thread_load(current);
@@ -175,14 +176,14 @@ static void next_thread(uint32_t cpuid, moe_thread_t* current, void *obj, moe_ti
         atomic_fetch_add(&current->load0, load);
         if (next != current) {
             MOE_ASSERT(!next->running, "THREAD RUNNING %d <= %d #%d\n", next->thid, current->thid, cpuid);
-            core_data[cpuid].retired = current;
+            psd[cpuid].retired = current;
             if (!setjmp(current->jmpbuf)) {
                 if (current->fpu_used) {
                     io_fsave(current->fpu_context);
                     current->fpu_used = 0;
                 }
                 moe_thread_t* expected_current = current;
-                if (atomic_compare_exchange_strong(&core_data[cpuid].current, &expected_current, next)) {
+                if (atomic_compare_exchange_strong(&psd[cpuid].current, &expected_current, next)) {
                     current->block = timer;
                     current->signal_object = obj;
                     current->running = 0;
@@ -195,7 +196,7 @@ static void next_thread(uint32_t cpuid, moe_thread_t* current, void *obj, moe_ti
             current->measure0 = moe_get_measure();
             current->last_cpuid = cpuid;
             current->running = 1;
-            sch_retire(core_data[cpuid].retired);
+            sch_retire(psd[cpuid].retired);
         } else {
             current->measure0 = moe_get_measure();
         }
@@ -205,11 +206,11 @@ static void next_thread(uint32_t cpuid, moe_thread_t* current, void *obj, moe_ti
 
 void on_thread_start() {
     uint32_t cpuid = moe_get_current_cpuid();
-    moe_thread_t* current = core_data[cpuid].current;
+    moe_thread_t* current = psd[cpuid].current;
     current->measure0 = moe_get_measure();
     current->last_cpuid = cpuid;
     current->running = 1;
-    sch_retire(core_data[cpuid].retired);
+    sch_retire(psd[cpuid].retired);
     unlock_core(cpuid);
 }
 
@@ -228,9 +229,9 @@ void moe_fpu_restore(uintptr_t delta) {
 
 
 void reschedule() {
-    if (!core_data) return;
+    if (!psd) return;
     uint32_t cpuid = moe_get_current_cpuid();
-    moe_thread_t* current = core_data[cpuid].current;
+    moe_thread_t* current = psd[cpuid].current;
     if (current->priority >= priority_realtime) {
         // do nothing
     } else if (current->priority == priority_idle || (current->priority < priority_high && moe_fifo_get_estimated_count(thread_queue.ready[0]))) {
@@ -252,17 +253,17 @@ void reschedule() {
 }
 
 void moe_yield() {
-    if (core_data) {
+    if (psd) {
         moe_usleep(0);
     } else {
         io_hlt();
     }
 }
 
-int moe_wait_for_object(moe_thread_t **obj, uint64_t us) {
+int moe_wait_for_object(_Atomic (moe_thread_t *) *obj, uint64_t us) {
     uintptr_t flags = io_lock_irq();
     uint32_t cpuid = moe_get_current_cpuid();
-    moe_thread_t* current = core_data[cpuid].current;
+    moe_thread_t* current = psd[cpuid].current;
     if (obj) {
         *obj = current;
     }
@@ -273,7 +274,7 @@ int moe_wait_for_object(moe_thread_t **obj, uint64_t us) {
 }
 
 int moe_usleep(uint64_t us) {
-    if (core_data) {
+    if (psd) {
         return moe_wait_for_object(NULL, us);
     } else {
         moe_timer_t timer = moe_create_interval_timer(us);
@@ -286,8 +287,7 @@ int moe_usleep(uint64_t us) {
 
 int moe_signal_object(moe_thread_t **obj) {
     moe_thread_t *thread = *obj;
-    moe_thread_t **expected = obj;
-    if (atomic_compare_exchange_strong(&thread->signal_object, &expected, NULL)) {
+    if (atomic_compare_exchange_strong(thread->signal_object, &thread, NULL)) {
         thread->block = 0;
         return 0;
     } else {
@@ -331,12 +331,10 @@ moe_thread_t* create_thread(moe_thread_start start, moe_priority_level_t priorit
         setjmp_new_thread(new_thread->jmpbuf, sp);
     }
 
-    if (root_thread) {
-        moe_thread_t* p = root_thread;
-        for (; p->next; p = p->next) {}
-        p->next = new_thread;
-    } else {
-        root_thread = new_thread;
+    for (int i = 0; i< MAX_THREADS; i++) {
+        moe_thread_t *expected = NULL;
+        if (atomic_compare_exchange_weak(&thread_list[i], &expected, new_thread))
+            break;
     }
 
     sch_add(new_thread);
@@ -361,8 +359,9 @@ _Noreturn void scheduler_thread() {
         int timer = moe_get_tick_count();
         if ((timer - last_timer) >= CLEANUP_LOAD_TIME) {
 
-            moe_thread_t* thread = root_thread;
-            for (; thread; thread = thread->next) {
+            for (int i = 0; i < MAX_THREADS; i++) {
+                moe_thread_t * thread = thread_list[i];
+                if (!thread) continue;
                 int load = atomic_load(&thread->load0);
                 atomic_store(&thread->load, load);
                 atomic_fetch_add(&thread->load0, -load);
@@ -382,7 +381,7 @@ _Noreturn void scheduler_thread() {
 int moe_get_usage() {
     int total = 0;
     for (int i = 0; i < n_active_cpu; i++) {
-        total += core_data[i].idle->load;
+        total += psd[i].idle->load;
     }
     int usage = 1000 - (total / (n_active_cpu * 1000));
     return usage > 0 ? usage: 0;
@@ -390,9 +389,11 @@ int moe_get_usage() {
 
 void thread_init(int _n_active_cpu) {
 
+    thread_list = moe_alloc_object(sizeof(void *) * MAX_THREADS, 1);
+
     char name[THREAD_NAME_SIZE];
     n_active_cpu = _n_active_cpu;
-    core_specific_data_t* _core_data = moe_alloc_object(sizeof(core_specific_data_t), n_active_cpu);
+    core_specific_data_t* _psd = moe_alloc_object(sizeof(core_specific_data_t), n_active_cpu);
 
     for (int i = 0; i < DEFAULT_SCHEDULE_QUEUES; i++) {
         thread_queue.ready[i] = moe_fifo_init(DEFAULT_SCHEDULE_SIZE);
@@ -400,16 +401,16 @@ void thread_init(int _n_active_cpu) {
     thread_queue.retired = moe_fifo_init(DEFAULT_SCHEDULE_SIZE);
 
     for (int i = 0; i < n_active_cpu; i++) {
-        _core_data[i].cpuid = i;
+        _psd[i].cpuid = i;
         snprintf(name, THREAD_NAME_SIZE, "(Idle Core #%d)", i);
         moe_thread_t* th = create_thread(NULL, priority_idle, NULL, name);
         th->affinity = 1 << i;
         th->last_cpuid = i;
         th->running = 1;
-        _core_data[i].idle = th;
-        _core_data[i].current = th;
+        _psd[i].idle = th;
+        _psd[i].current = th;
     }
-    core_data = _core_data;
+    psd = _psd;
 
     io_set_lazy_fpu_restore();
 
@@ -422,9 +423,14 @@ void thread_init(int _n_active_cpu) {
 // Semaphore
 
 typedef struct moe_semaphore_t {
-    _Atomic (moe_thread_t *) waiting;
+    moe_thread_t * _Atomic waiting;
     _Atomic intptr_t value;
 } moe_semaphore_t;
+
+static void moe_sem_init(moe_semaphore_t *self, intptr_t value) {
+    self->value = value;
+    self->waiting = NULL;
+}
 
 moe_semaphore_t *moe_sem_create(intptr_t value) {
     moe_semaphore_t *result = moe_alloc_object(sizeof(moe_semaphore_t), 1);
@@ -432,19 +438,8 @@ moe_semaphore_t *moe_sem_create(intptr_t value) {
     return result;
 }
 
-void moe_sem_init(moe_semaphore_t *self, intptr_t value) {
-    self->value = value;
-    self->waiting = NULL;
-}
-
 intptr_t moe_sem_getvalue(moe_semaphore_t *self) {
-    intptr_t result = self->value;
-    if (result > 0) {
-        return result;
-    } else {
-        if (self->waiting) result--;
-        return result;
-    }
+    return self->value;
 }
 
 int moe_sem_trywait(moe_semaphore_t *self) {
@@ -459,31 +454,34 @@ int moe_sem_trywait(moe_semaphore_t *self) {
     return 0;
 }
 
-int moe_sem_wait(moe_semaphore_t *self, uint64_t us) {
+int moe_sem_wait(moe_semaphore_t *self, int64_t us) {
     if (moe_sem_trywait(self)) {
         return 1;
     }
-    const uint64_t div_max = 100000;
-    uint64_t time_div = 1000;
-    moe_thread_t* desired = get_current_thread();
-    while (us > 0) {
-        moe_thread_t* expected = NULL;
+    const intptr_t div_min = 1000;
+    const intptr_t div_max = 100000;
+    intptr_t time_div = div_min;
+    moe_thread_t *desired = get_current_thread();
+    int64_t left = us;
+    while (left) {
+        moe_thread_t *expected = NULL;
         if (atomic_compare_exchange_weak(&self->waiting, &expected, desired)) {
             if (moe_sem_trywait(self)) {
                 atomic_compare_exchange_weak(&self->waiting, &desired, NULL);
                 return 1;
             }
-            moe_wait_for_object(&self->waiting, us);
+            moe_wait_for_object(&self->waiting, left);
             atomic_compare_exchange_weak(&self->waiting, &desired, NULL);
             return moe_sem_trywait(self);
         } else {
-            // MOE_ASSERT(false, "DOUBLE WAIT %08x %08x\n", expected, desired);
-            if (us > time_div) {
+            if (us < 0) {
                 moe_usleep(time_div);
-                us -= time_div;
+            } else if (left > time_div) {
+                moe_usleep(time_div);
+                left -= time_div;
             } else {
-                moe_usleep(us);
-                us = 0;
+                moe_usleep(left);
+                left = 0;
             }
             time_div *= 2;
             if (time_div > div_max) {
@@ -495,12 +493,13 @@ int moe_sem_wait(moe_semaphore_t *self, uint64_t us) {
 }
 
 void moe_sem_signal(moe_semaphore_t *self) {
-    atomic_fetch_add(&self->value, 1);
-
-    if (self->waiting) {
-        moe_signal_object(&self->waiting);
+    intptr_t value = atomic_fetch_add(&self->value, 1);
+    moe_thread_t *obj = atomic_load(&self->waiting);
+    if (value == 0 && obj != NULL) {
+        if (obj) {
+            moe_signal_object(&obj);
+        }
     }
-
 }
 
 
@@ -578,9 +577,10 @@ size_t moe_fifo_get_estimated_free(moe_fifo_t* self) {
 /*********************************************************************/
 
 int cmd_ps(int argc, char **argv) {
-    moe_thread_t* p = root_thread;
     printf("ID context      attr     usage cpu time   name\n");
-    for (; p; p = p->next) {
+    for (int i = 0; i < MAX_THREADS; i++) {
+        moe_thread_t* p = thread_list[i];
+        if (!p) continue;
         uint64_t time = p->cputime / 1000000;
         uint32_t time0 = time % 60;
         uint32_t time1 = (time / 60) % 60;
@@ -621,8 +621,9 @@ int cmd_top(int argc, char **argv) {
         cursor = moe_draw_string(moe_get_window_bitmap(window), font, &cursor, &rect,
         "ID context      attr     quan  usage cpu time   name\n", fgcolor);
 
-        moe_thread_t* p = root_thread;
-        for (; p; p = p->next) {
+        for (int i = 0; i < MAX_THREADS; i++) {
+            moe_thread_t* p = thread_list[i];
+            if (!p) continue;
             uint64_t time = p->cputime / 1000000;
             uint32_t time0 = time % 60;
             uint32_t time1 = (time / 60) % 60;

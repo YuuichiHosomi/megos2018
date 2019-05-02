@@ -105,19 +105,28 @@ x64_idt64_t* idt;
 #define SET_SYSTEM_INT_HANDLER(num, ist)  idt_set_kernel_handler(0x ## num, (uintptr_t)&_int ## num, ist)
 
 void idt_set_handler(uint8_t num, uintptr_t offset, uint16_t sel, uint8_t ist) {
-    x64_idt64_t desc;
+    x64_idt64_t desc = {{0}};
     desc.offset_1   = offset;
     desc.sel        = sel;
     desc.ist        = ist;
     desc.attr       = 0x8E;
     desc.offset_2   = offset >> 16;
     desc.offset_3   = offset >> 32;
-    desc.RESERVED   = 0;
     idt[num] = desc;
 }
 
-void idt_set_kernel_handler(uint8_t num, uintptr_t offset, uint8_t ist) {
+static void idt_set_kernel_handler(uint8_t num, uintptr_t offset, uint8_t ist) {
     idt_set_handler(num, offset, cs_sel, ist);
+}
+
+void tss_init(x64_tss_desc_t *tss, uint64_t base, size_t size) {
+    x64_tss_desc_t _tss = {{size - 1}};
+    _tss.base_1 = base;
+    _tss.base_2 = base >> 24;
+    _tss.base_3 = base >> 32;
+    _tss.type = DESC_TYPE_TSS64;
+    _tss.present = 1;
+    *tss = _tss;
 }
 
 #define BSOD_BUFF_SIZE 1024
@@ -319,16 +328,9 @@ void _irq_main(uint8_t irq, void* p) {
     }
 }
 
-extern moe_dib_t main_screen_dib;
 void irq_livt() {
     lapic_timer_value++;
     apic_end_of_irq(0);
-    int x = lapic_timer_value & 15;
-    int y = (lapic_timer_value >> 4) & 15;
-    int q = lapic_timer_value;
-    int c = q ^ (q << 5) ^ (q << 7) ^ (q << 11) ^ (q << 13);
-    moe_draw_pixel(&main_screen_dib, 4 + x, 4 + y, c);
-    // printf("count: %lld\r", lapic_timer_value);
     reschedule();
     if (smp_mode) {
         apic_write_lapic(0x300, 0xC0000 + IRQ_SCHDULE);
@@ -340,18 +342,27 @@ uint64_t moe_get_tick_count() {
 }
 
 uint64_t moe_get_measure() {
-    // return lapic_timer_value * 1000;
-    uint32_t m0 = apic_read_lapic(0x390);
-    uint64_t m = (lapic_timer_div - m0) / lapic_timer_div2;
-    return lapic_timer_value * 1000 + m;
+    return lapic_timer_value * 1000;
+    // uint32_t m0 = apic_read_lapic(0x390);
+    // uint64_t m = (lapic_timer_div - m0) / lapic_timer_div2;
+    // return lapic_timer_value * 1000 + m;
 }
 
-moe_timer_t moe_create_interval_timer(uint64_t us) {
-    return lapic_timer_value + (us + 1000) / 1000;
+moe_timer_t moe_create_interval_timer(int64_t us) {
+    if (us >= 0) {
+        return lapic_timer_value + (us + 1000) / 1000;
+    } else {
+        return -1;
+    }
 }
 
 int moe_check_timer(moe_timer_t* timer) {
-    return (intptr_t)(*timer - lapic_timer_value) > 0;
+    int64_t value = *timer;
+    if (value >= 0) {
+        return (intptr_t)(value - lapic_timer_value) > 0;
+    } else {
+        return 1;
+    }
 }
 
 int smp_send_invalidate_tlb() {
@@ -798,12 +809,8 @@ void arch_init() {
 
     size_t tss_size = 4096;
     uintptr_t tss_base = (uintptr_t)moe_alloc_object(tss_size, 1);
-    x64_tss_desc_t tss = {{tss_size - 1}};
-    tss.base_1 = tss_base;
-    tss.base_2 = tss_base >> 24;
-    tss.base_3 = tss_base >> 32;
-    tss.type = DESC_TYPE_TSS64;
-    tss.present = 1;
+    x64_tss_desc_t tss;
+    tss_init(&tss, tss_base, tss_size);
 
     cs_sel = gdt_init(&tss);
     idt_init();
