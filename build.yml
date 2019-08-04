@@ -1,0 +1,29 @@
+# build configuration file
+targets:
+  menu:
+    valid_arch: all
+    base_dir: bootmenu
+    dependencies:
+      - osldr
+      - atop
+      - menu
+      - stdlib
+  boot:
+    valid_arch: [x64, i386]
+    base_dir: boot
+    dependencies:
+      - boot
+      - bootpg
+      - peldr
+      # - stdlib
+      - bootasm.asm
+  kernel:
+    valid_arch: [x64]
+    base_dir: kernel
+    no_suffix: true
+    cflags: -mno-sse
+    dependencies:
+      - efistub
+      - kernel
+      - gs
+      - stdlib
