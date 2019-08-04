@@ -66,6 +66,9 @@ static inline uint32_t io_in32(uintptr_t port) {
 static inline void io_hlt() { __asm__ volatile("hlt"); }
 static inline void io_pause() { __asm__ volatile("pause"); }
 
+_Noreturn void moe_bsod(const char *message);
+
+
 typedef void (*MOE_IRQ_HANDLER)(int irq);
 int moe_enable_irq(uint8_t irq, MOE_IRQ_HANDLER handler);
 int moe_disable_irq(uint8_t irq);

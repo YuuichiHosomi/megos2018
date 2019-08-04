@@ -9,6 +9,9 @@ moe_bitmap_t main_screen;
 
 void moe_blt(moe_bitmap_t* dest, moe_bitmap_t* src, moe_point_t *origin, moe_rect_t *rect, uint32_t options) {
 
+    if (!dest) dest = &main_screen;
+    if (!src) src = &main_screen;
+
     intptr_t dx, dy, w, h, sx, sy;
     if (origin) {
         dx = origin->x;
@@ -134,6 +137,9 @@ void moe_blt(moe_bitmap_t* dest, moe_bitmap_t* src, moe_point_t *origin, moe_rec
 
 
 void moe_fill_rect(moe_bitmap_t* dest, moe_rect_t *rect, uint32_t color) {
+
+    if (!dest) dest = &main_screen;
+
     intptr_t dx, dy, w, h;
     if (rect) {
         dx = rect->origin.x;
@@ -195,6 +201,8 @@ void moe_fill_rect(moe_bitmap_t* dest, moe_rect_t *rect, uint32_t color) {
 
 void draw_pattern(moe_bitmap_t *dest, moe_rect_t* rect, const uint8_t* pattern, uint32_t fgcolor) {
 
+    if (!dest) dest = &main_screen;
+
     intptr_t x = rect->origin.x, y = rect->origin.y, w = rect->size.width, h = rect->size.height;
     uintptr_t delta = dest->delta;
     uintptr_t w8 = (w + 7) / 8;
@@ -246,8 +254,8 @@ void draw_pattern(moe_bitmap_t *dest, moe_rect_t* rect, const uint8_t* pattern, 
 }
 
 
-uint32_t main_console_bgcolor = 0xFFFFFF;
-uint32_t main_console_fgcolor = 0x666666;
+uint32_t main_console_bgcolor = 0x000000;
+uint32_t main_console_fgcolor = 0xCCCCCC;
 int main_console_cussor_x = 0;
 int main_console_cussor_y = 0;
 

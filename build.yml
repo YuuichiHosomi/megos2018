@@ -26,4 +26,7 @@ targets:
       - efistub
       - kernel
       - gs
+      - memory
+      - arch
       - stdlib
+      - moeasm.asm
