@@ -180,11 +180,11 @@ void page_init(moe_bootinfo_t *_bootinfo, void *mmap, size_t mmsize, size_t mmde
         ;
 
     // vram (temp)
-    uintptr_t vram_base = bootinfo->vram_base;
-    size_t vram_size = ceil(bootinfo->screen.delta * bootinfo->screen.height * 4, LARGE_2M_PAGE_SIZE) / LARGE_2M_PAGE_SIZE;
-    uintptr_t offset = vram_base / LARGE_2M_PAGE_SIZE;
-    for (uintptr_t i = 0 ; i < vram_size; i++) {
-        pml2v[offset + i] = (vram_base + i * LARGE_2M_PAGE_SIZE) | common_attributes | PTE_LARGE;
-    }
+    // uintptr_t vram_base = bootinfo->vram_base;
+    // size_t vram_size = ceil(bootinfo->screen.delta * bootinfo->screen.height * 4, LARGE_2M_PAGE_SIZE) / LARGE_2M_PAGE_SIZE;
+    // uintptr_t offset = vram_base / LARGE_2M_PAGE_SIZE;
+    // for (uintptr_t i = 0 ; i < vram_size; i++) {
+    //     pml2v[offset + i] = (vram_base + i * LARGE_2M_PAGE_SIZE) | common_attributes | PTE_LARGE;
+    // }
 
 }

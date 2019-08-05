@@ -70,8 +70,8 @@ _Noreturn void moe_bsod(const char *message);
 
 
 typedef void (*MOE_IRQ_HANDLER)(int irq);
-int moe_enable_irq(uint8_t irq, MOE_IRQ_HANDLER handler);
-int moe_disable_irq(uint8_t irq);
+int moe_install_irq(uint8_t irq, MOE_IRQ_HANDLER handler);
+int moe_uninstall_irq(uint8_t irq);
 int moe_install_msi(MOE_IRQ_HANDLER handler);
 uint8_t moe_make_msi_data(int irq, int mode, uint64_t *addr, uint32_t *data);
 

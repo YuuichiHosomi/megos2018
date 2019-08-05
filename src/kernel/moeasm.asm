@@ -68,6 +68,7 @@ gdt_init:
     mov es, ecx
     mov fs, ecx
     mov gs, ecx
+    lldt cx
 
     mov ecx, SEL_TSS
     ltr cx
@@ -105,6 +106,26 @@ io_get_tss:
     add rax, rdx
 
     add rsp, byte 0x10
+    ret
+
+
+;; uint32_t io_lock_irq(void);
+    global io_lock_irq
+io_lock_irq:
+    pushfq
+    cli
+    pop rax
+    and eax, EFLAGS_IF
+    ret
+
+
+;; void io_unlock_irq(uint32_t);
+    global io_unlock_irq
+io_unlock_irq:
+    and ecx, EFLAGS_IF
+    jz .nosti
+    sti
+.nosti:
     ret
 
 
@@ -212,6 +233,7 @@ _int07: ; #NM
     global _irq32, _irq33, _irq34, _irq35, _irq36, _irq37, _irq38, _irq39
     global _irq40, _irq41, _irq42, _irq43, _irq44, _irq45, _irq46, _irq47
 
+    align 16
 _irq47:
 	push rcx
 	mov cl, 47

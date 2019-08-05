@@ -3,7 +3,7 @@ targets:
   menu:
     valid_arch: all
     base_dir: bootmenu
-    dependencies:
+    sources:
       - osldr
       - atop
       - menu
@@ -11,7 +11,7 @@ targets:
   boot:
     valid_arch: [x64, i386]
     base_dir: boot
-    dependencies:
+    sources:
       - boot
       - bootpg
       - peldr
@@ -22,11 +22,14 @@ targets:
     base_dir: kernel
     no_suffix: true
     cflags: -mno-sse
-    dependencies:
+    sources:
       - efistub
       - kernel
+      - moe
+      - acpi
+      - arch
       - gs
       - memory
-      - arch
+      - page
       - stdlib
       - moeasm.asm

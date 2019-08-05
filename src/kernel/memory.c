@@ -33,9 +33,7 @@ void *moe_alloc_object(size_t size, size_t count) {
     void *va = NULL;
     uintptr_t pa = moe_alloc_physical_page(sz);
     if (pa) {
-        va = (void *)pa;
-        // va = pg_valloc(pa, sz);
-        // zmemset(va, sz);
+        va = pg_valloc(pa, sz);
         memset(va, 0, sz);
     }
     return va;
@@ -48,6 +46,4 @@ void mm_init(moe_bootinfo_t *bootinfo) {
     // memset32((void*)static_start, 0xdeadbeef, free_memory / 4);
 
     // memcpy(gates_memory_bitmap, bootinfo->gates_memory_bitmap, sizeof(gates_memory_bitmap));
-
-    // page_init(bootinfo);
 }

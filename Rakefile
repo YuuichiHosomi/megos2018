@@ -263,7 +263,7 @@ namespace :main do
   end
 
   config['targets'].keys.each do |target|
-    sources = config['targets'][target]['dependencies']
+    sources = config['targets'][target]['sources']
     allow = config['targets'][target]['valid_arch']
     if allow == 'all' || allow.include?(ARCH.to_s) then
       targets << make_efi(ARCH, target, sources, config['targets'][target])

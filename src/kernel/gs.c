@@ -2,6 +2,7 @@
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
 #include "moe.h"
+#include "kernel.h"
 
 #include "megh0816.h"
 
@@ -284,9 +285,14 @@ int putchar(int _c) {
 }
 
 
-void gs_init(moe_bitmap_t *screen) {
+void gs_init(moe_bootinfo_t* info) {
 
-    main_screen = *screen;
+    main_screen.width = info->screen.width;
+    main_screen.height = info->screen.height;
+    main_screen.delta = info->screen.delta;
+    // main_screen.bitmap = (void *)info->vram_base;
+    main_screen.bitmap = pg_map_vram(info->vram_base, 4 * info->screen.delta * info->screen.height);
+
     if (main_screen.width < main_screen.height) {
         int temp = main_screen.width;
         main_screen.width = main_screen.height;
