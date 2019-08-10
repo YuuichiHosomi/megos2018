@@ -97,24 +97,24 @@ int acpi_enable(int enabled) {
             return 1;
         }
         io_out8(SMI_CMD, ACPI_ENABLE);
-        moe_timer_t timer = moe_create_interval_timer(3000000);
+        moe_measure_t measure = moe_create_measure(3000000);
         do {
             ax = io_in16(PM1a_CNT);
             if ((ax & ACPI_PM1_SCI_EN) != 0) {
                 break;
             }
             moe_usleep(10000);
-        } while (moe_check_timer(&timer));
+        } while (moe_measure_until(measure));
         uint32_t PM1b_CNT = fadt->PM1b_CNT_BLK;
         if (PM1b_CNT != 0) {
-            moe_timer_t timer = moe_create_interval_timer(3000000);
+            moe_measure_t measure = moe_create_measure(3000000);
             do {
                 ax = io_in16(PM1b_CNT);
                 if ((ax & ACPI_PM1_SCI_EN) != 0) {
                     break;
                 }
                 moe_usleep(10000);
-            } while (moe_check_timer(&timer));
+            } while (moe_measure_until(measure));
         }
         return ((ax & ACPI_PM1_SCI_EN) != 0);
     } else {

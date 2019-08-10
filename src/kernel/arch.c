@@ -78,6 +78,7 @@ extern uint16_t gdt_init(x64_tss_desc_t *tss);
 extern void idt_load(volatile void*, size_t);
 extern x64_tss_t *io_get_tss();
 extern _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stacks);
+extern void thread_init(int);
 
 
 static tuple_eax_edx_t io_rdmsr(uint32_t const addr) {
@@ -99,20 +100,19 @@ uint16_t cs_sel;
 x64_idt64_t* idt;
 
 
-void idt_set_handler(uint8_t num, uintptr_t offset, uint16_t sel, uint8_t ist) {
+void idt_set_handler(uint8_t num, uintptr_t offset, uint16_t sel, uint8_t attr, uint8_t ist) {
     x64_idt64_t desc = {{0}};
     desc.offset_1   = offset;
     desc.sel        = sel;
     desc.ist        = ist;
-    desc.attr       = 0x8E;
+    desc.attr       = attr;
     desc.offset_2   = offset >> 16;
     desc.offset_3   = offset >> 32;
     idt[num] = desc;
 }
 
-#define SET_SYSTEM_INT_HANDLER(num, ist)  idt_set_kernel_handler(0x ## num, (uintptr_t)&_int ## num, ist)
 static void idt_set_kernel_handler(uint8_t num, uintptr_t offset, uint8_t ist) {
-    idt_set_handler(num, offset, cs_sel, ist);
+    idt_set_handler(num, offset, cs_sel, 0x8E, ist);
 }
 
 void tss_init(x64_tss_desc_t *tss, uint64_t base, size_t size) {
@@ -140,7 +140,7 @@ void default_int_handler(x64_context_t* regs) {
         "R10- %016llx %016llx %016llx\n"
         "R13- %016llx %016llx %016llx\n"
         , regs->intnum, regs->err, regs->cr2
-        // , moe_get_current_thread(), moe_get_current_thread_name()
+        // , moe_get_current_thread_id(), moe_get_current_thread_name()
         , regs->cs, regs->rip, regs->ss, regs->rsp, regs->rflags
         , regs->rax, regs->rcx, regs->rdx, regs->rbx, regs->rbp, regs->rsi, regs->rdi
         , regs->r8, regs->r9, regs->r10, regs->r11, regs->r12, regs->r13, regs->r14, regs->r15
@@ -163,13 +163,13 @@ void idt_init() {
     //     tss->IST[i] = ist;
     // }
 
-    SET_SYSTEM_INT_HANDLER(00, 0); // #DE Divide by zero Error
-    SET_SYSTEM_INT_HANDLER(03, 0); // #BP Breakpoint
-    SET_SYSTEM_INT_HANDLER(06, 0); // #UD Undefined Opcode
-    SET_SYSTEM_INT_HANDLER(07, 0); // #NM Device not Available
-    SET_SYSTEM_INT_HANDLER(08, 0); // #DF Double Fault
-    SET_SYSTEM_INT_HANDLER(0D, 0); // #GP General Protection Fault
-    SET_SYSTEM_INT_HANDLER(0E, 0); // #PF Page Fault
+    idt_set_kernel_handler(0x00, (uintptr_t)&_int00, 0); // #DE Divide Error
+    idt_set_kernel_handler(0x03, (uintptr_t)&_int03, 0); // #BP Breakpoint
+    idt_set_kernel_handler(0x06, (uintptr_t)&_int06, 0); // #UD Undefined Opcode
+    idt_set_kernel_handler(0x07, (uintptr_t)&_int07, 0); // #NM Device Not Available
+    idt_set_kernel_handler(0x08, (uintptr_t)&_int08, 0); // #DF Double Fault
+    idt_set_kernel_handler(0x0D, (uintptr_t)&_int0D, 0); // #GP General Protection Fault
+    idt_set_kernel_handler(0x0E, (uintptr_t)&_int0E, 0); // #PF Page Fault
 
     idt_load(idt, idt_size - 1);
 }
@@ -183,7 +183,7 @@ void idt_init() {
 #define MAX_MSI                     24
 #define MAX_IRQ                     (MAX_IOAPIC_IRQ + MAX_MSI)
 #define IRQ_INVALIDATE_TLB          0xEE
-#define IRQ_SCHDULE                 0xFC
+#define IRQ_SCHEDULE                 0xFC
 #define IRQ_LAPIC_TIMER             IRQ_BASE
 
 #define MAX_CPU                     32
@@ -240,23 +240,23 @@ _Atomic uint64_t lapic_timer_value = 0;
 
 
 static void apic_write_ioapic(int index, uint32_t value) {
-    _Atomic uint8_t *ireg = (void *)((uintptr_t)ioapic_base);
+    _Atomic uint32_t *ireg = (void *)((uintptr_t)ioapic_base);
     _Atomic uint32_t *dreg = (void *)((uintptr_t)ioapic_base + 0x10);
     *ireg = index;
     *dreg = value;
 }
 
 static uint32_t apic_read_ioapic(int index) {
-    _Atomic uint8_t *ireg = (void *)((uintptr_t)ioapic_base);
+    _Atomic uint32_t *ireg = (void *)((uintptr_t)ioapic_base);
     _Atomic uint32_t *dreg = (void *)((uintptr_t)ioapic_base + 0x10);
     *ireg = index;
     return *dreg;
 }
 
-static void apic_set_io_redirect(uint8_t irq, uint8_t vector, uint8_t trigger, int mask, apic_id_t desination) {
+static void apic_set_io_redirect(uint8_t irq, uint8_t vector, uint8_t trigger, int mask, apic_id_t destination) {
     uint32_t redir_lo = vector | ((trigger & 0xA)<<12) | (mask ? APIC_REDIR_MASK : 0);
     apic_write_ioapic(0x10 + irq * 2, redir_lo);
-    apic_write_ioapic(0x11 + irq * 2, desination << 24);
+    apic_write_ioapic(0x11 + irq * 2, destination << 24);
 }
 
 static void apic_write_lapic(int index, uint32_t value) {
@@ -281,7 +281,7 @@ static apic_madt_ovr_t get_madt_ovr(uint8_t irq) {
     }
 }
 
-int apic_disable_irq(uint8_t irq) {
+static void apic_disable_irq(uint8_t irq) {
     uint32_t reg = apic_read_ioapic(0x10 + irq * 2);
     reg |= APIC_REDIR_MASK;
     apic_write_ioapic(0x10 + irq * 2, reg);
@@ -330,9 +330,8 @@ void _irq_main(uint8_t irq, void* p) {
         apic_end_of_irq(irq);
     } else {
         if (irq < MAX_IOAPIC_IRQ) {
-            // moe_disable_irq(irq);
+            apic_disable_irq(irq);
         }
-        //  TODO: Simulate GPF
         x64_context_t regs;
         regs.err = ((IRQ_BASE + irq) << 3) | ERROR_IDT | ERROR_EXT;
         regs.intnum = IRQ_BASE + irq;
@@ -345,19 +344,11 @@ void irq_livt() {
     apic_end_of_irq(0);
     // reschedule();
     // if (smp_mode) {
-    //     apic_write_lapic(0x300, 0xC0000 + IRQ_SCHDULE);
+    //     apic_write_lapic(0x300, 0xC0000 + IRQ_SCHEDULE);
     // }
 }
 
-uint64_t moe_get_tick_count() {
-    return lapic_timer_value;
-}
-
-uint64_t moe_get_measure() {
-    return lapic_timer_value * 1000;
-}
-
-moe_timer_t moe_create_interval_timer(int64_t us) {
+moe_measure_t moe_create_measure(int64_t us) {
     if (us >= 0) {
         return lapic_timer_value + (us + 1000) / 1000;
     } else {
@@ -365,10 +356,9 @@ moe_timer_t moe_create_interval_timer(int64_t us) {
     }
 }
 
-int moe_check_timer(moe_timer_t* timer) {
-    int64_t value = *timer;
-    if (value >= 0) {
-        return (intptr_t)(value - lapic_timer_value) > 0;
+int moe_measure_until(moe_measure_t timeout) {
+    if (timeout >= 0) {
+        return (intptr_t)(timeout - lapic_timer_value) > 0;
     } else {
         return 1;
     }
@@ -396,7 +386,9 @@ uintptr_t moe_get_current_cpuid() {
     return apicid_to_cpuids[apicid];
 }
 
-void apic_init_ap(uint8_t cpuid) {
+
+// Initialize Application Processor (SMP)
+void smp_init_ap(uint8_t cpuid) {
     tuple_eax_edx_t msr_lapic = io_rdmsr(IA32_APIC_BASE_MSR);
     msr_lapic.u64 |= IA32_APIC_BASE_MSR_ENABLE;
     io_wrmsr(IA32_APIC_BASE_MSR, msr_lapic);
@@ -410,6 +402,7 @@ void apic_init_ap(uint8_t cpuid) {
     apic_write_lapic(0x320, 0x00030000 | IRQ_LAPIC_TIMER);
     apic_write_lapic(0x380, lapic_timer_div);
 
+    __asm__ volatile ("sti");
 }
 
 
@@ -541,7 +534,7 @@ void apic_init() {
         idt_set_kernel_handler(IRQ_BASE+46, (uintptr_t)&_irq46, 0);
         idt_set_kernel_handler(IRQ_BASE+47, (uintptr_t)&_irq47, 0);
 
-        // idt_set_kernel_handler(IRQ_SCHDULE, (uintptr_t)&_ipi_sche, 0);
+        // idt_set_kernel_handler(IRQ_SCHEDULE, (uintptr_t)&_ipi_sche, 0);
         // idt_set_kernel_handler(IRQ_INVALIDATE_TLB, (uintptr_t)&_ipi_invtlb, 0);
 
         // LAPIC timer
@@ -551,11 +544,14 @@ void apic_init() {
         const int magic_number = 100;
         uint32_t timer_val = ACPI_PM_TIMER_FREQ / magic_number;
         uint32_t acpi_tmr_base = acpi_read_pm_timer();
-        uint32_t acpi_tmr_val;
+        uint32_t acpi_tmr_val = acpi_read_pm_timer();
+        do {
+            io_pause();
+        } while (acpi_tmr_val == acpi_read_pm_timer());
         do {
             io_pause();
             acpi_tmr_val = acpi_read_pm_timer();
-        } while(timer_val > ((acpi_tmr_val - acpi_tmr_base) & 0xFFFFFF));
+        } while (timer_val > ((acpi_tmr_val - acpi_tmr_base) & 0xFFFFFF));
         uint32_t count = apic_read_lapic(0x390);
         uint64_t lapic_freq = ((uint64_t)UINT32_MAX - count) * magic_number;
 
@@ -569,6 +565,22 @@ void apic_init() {
         // Then enable IRQ
         __asm__ volatile("sti");
 
+        // Initialize SMP
+        if (n_cpu > 1) {
+            uint8_t vector_sipi = moe_alloc_gates_memory() >> 12;
+            int max_cpu = MIN(n_cpu, MAX_CPU);
+            const uintptr_t stack_chunk_size = 0x4000;
+            uintptr_t* stacks = moe_alloc_object(stack_chunk_size, max_cpu);
+            _Atomic uint32_t* wait_p = smp_setup_init(vector_sipi, max_cpu, stack_chunk_size, stacks);
+            apic_write_lapic(0x300, 0x000C4500);
+            moe_usleep(10000);
+            apic_write_lapic(0x300, 0x000C4600 + vector_sipi);
+            moe_usleep(200000);
+            thread_init(atomic_load(wait_p));
+            smp_mode = 1;
+        } else {
+            thread_init(1);
+        }
     }
 }
 

@@ -15,10 +15,9 @@
 %define SMPINFO_CR3         0x18
 %define SMPINFO_IDT         0x22
 %define SMPINFO_CR4         0x2C
-%define SMPINFO_START32     0x30
-%define SMPINFO_START64     0x38
-%define SMPINFO_START_AP      0x40
-%define SMPINFO_MSR_MISC    0x48
+%define SMPINFO_START64     0x30
+%define SMPINFO_START_AP      0x38
+%define SMPINFO_MSR_MISC    0x40
 %define SMPINFO_GDTR        0x50
 
 %define	EFLAGS_IF       0x00000200
@@ -32,6 +31,7 @@
     extern default_int_handler
     extern _int07_main
     extern _irq_main
+    extern smp_init_ap
     ; extern ipi_sche_main
 
 
@@ -106,6 +106,33 @@ io_get_tss:
     add rax, rdx
 
     add rsp, byte 0x10
+    ret
+
+
+;; int atomic_bit_test(void *p, uintptr_t bit);
+    global atomic_bit_test
+atomic_bit_test:
+    bt [rcx + rax], edx
+    sbb eax, eax
+    neg eax
+    ret
+
+
+;; int atomic_bit_test_and_set(void *p, uintptr_t bit);
+    global atomic_bit_test_and_set
+atomic_bit_test_and_set:
+    lock bts [rcx], edx
+    sbb eax, eax
+    neg eax
+    ret
+
+
+;; int atomic_bit_test_and_clear(void *p, uintptr_t bit);
+    global atomic_bit_test_and_clear
+atomic_bit_test_and_clear:
+    lock btr [rcx], edx
+    sbb eax, eax
+    neg eax
     ret
 
 
@@ -448,6 +475,150 @@ _irqXX:
     iretq
 
 
+; _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stacks);
+    global smp_setup_init
+smp_setup_init:
+    push rsi
+    push rdi
+
+    movzx r11d, cl
+    shl r11d, 12
+    mov edi, r11d
+    lea rsi, [rel _mp_rm_payload]
+    mov ecx, _end_mp_rm_payload - _mp_rm_payload
+    rep movsb
+
+    mov r10d, SMPINFO
+    mov [r10 + SMPINFO_MAX_CPU], edx
+    mov [r10 + SMPINFO_STACK_SIZE], r8d
+    mov [r10 + SMPINFO_STACKS], r9
+    lea edx, [r10 + SMPINFO_GDTR]
+    lea rsi, [rel __GDT]
+    mov edi, edx
+    mov ecx, (__end_common_GDT - __GDT)/4
+    rep movsd
+    mov [edx+2], edx
+    mov word [edx], (__end_common_GDT - __GDT)-1
+
+    mov edx, 1
+    mov [r10], edx
+    mov rdx, cr4
+    mov [r10 + SMPINFO_CR4], edx
+    mov rdx, cr3
+    mov [r10 + SMPINFO_CR3], rdx
+    sidt [r10 + SMPINFO_IDT]
+    mov ecx, IA32_EFER_MSR
+    rdmsr
+    mov [r10 + SMPINFO_EFER], eax
+    mov ecx, IA32_MISC_MSR
+    rdmsr
+    mov [r10 + IA32_MISC_MSR], eax
+    mov [r10 + IA32_MISC_MSR + 4], edx
+
+    lea ecx, [r11 + _startup64 - _mp_rm_payload]
+    mov edx, LOADER_CS64
+    mov [r10 + SMPINFO_START64], ecx
+    mov [r10 + SMPINFO_START64 + 4], edx
+    lea rax, [rel _startup_ap]
+    mov [r10 + SMPINFO_START_AP], rax
+
+    mov eax, r10d
+    pop rdi
+    pop rsi
+    ret
+
+
+_startup_ap:
+    lidt [rbx + SMPINFO_IDT]
+
+    ; init stack pointer
+    mov eax, ebp
+    imul eax, [rbx + SMPINFO_STACK_SIZE]
+    mov rcx, [rbx + SMPINFO_STACKS]
+    lea rsp, [rcx + rax]
+
+    ; init APIC
+    mov ecx, ebp
+    call smp_init_ap
+
+    ;; TODO: thread dispatcher
+.forever:
+    hlt
+    jmp .forever
+
+
+[bits 16]
+
+_mp_rm_payload:
+    cli
+    xor ax, ax
+    mov ds, ax
+    mov ebx, SMPINFO
+
+    ; acquire core-id
+    mov al, [bx]
+    mov cl, [bx + SMPINFO_MAX_CPU]
+.loop:
+    cmp al, cl
+    jae .fail
+    mov dl, al
+    inc dx
+    lock cmpxchg [bx], dl
+    jz .core_ok
+    pause
+    jmp short .loop
+.fail:
+.forever:
+    hlt
+    jmp short .forever
+
+.core_ok:
+    movzx ebp, al
+
+    lgdt [bx + SMPINFO_GDTR]
+
+    ; enter to PM
+    mov eax, cr0
+    bts eax, 0
+    mov cr0, eax
+
+    mov ax, LOADER_SS
+    mov ss, ax
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+    mov eax, [bx + SMPINFO_CR4]
+    mov cr4, eax
+    mov eax, [bx + SMPINFO_CR3]
+    mov cr3 ,eax
+
+    mov eax, [bx + SMPINFO_MSR_MISC]
+    mov edx, [bx + SMPINFO_MSR_MISC + 4]
+    mov ecx, IA32_MISC_MSR
+    wrmsr
+
+    mov ecx, IA32_EFER_MSR
+    xor edx, edx
+    mov eax, [bx+ SMPINFO_EFER]
+    wrmsr
+
+    ; enter to LM
+    mov eax, cr0
+    bts eax, 31
+    mov cr0, eax
+
+    o32 jmp far [bx + SMPINFO_START64]
+
+[BITS 64]
+
+_startup64:
+    jmp [rbx + SMPINFO_START_AP]
+
+_end_mp_rm_payload:
+
+
 [section .data]
 align 16
 __GDT:
@@ -458,6 +629,6 @@ __GDT:
     dw 0xFFFF, 0x0000, 0xFA00, 0x00AF   ; 23 64bit USER TEXT FLAT
     dw 0xFFFF, 0x0000, 0xF200, 0x00CF   ; 2B 32bit USER DATA FLAT
 __end_common_GDT:
-    dw 0xFFFF, 0x0000, 0x8900, 0x0000   ; 30 64bit TSS (Low)
-    dw 0, 0, 0, 0                       ; 38 64bit TSS (High)
+    dw 0xFFFF, 0x0000, 0x8900, 0x0000   ; 30 64bit TSS
+    dw 0, 0, 0, 0                       ; 38 64bit TSS (cont)
 __end_GDT:

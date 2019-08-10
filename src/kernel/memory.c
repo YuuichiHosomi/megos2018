@@ -9,9 +9,21 @@
 uintptr_t total_memory = 0;
 static _Atomic uintptr_t free_memory;
 static _Atomic uintptr_t static_start;
+static _Atomic uint32_t gates_memory_bitmap[MAX_GATES_INDEX];
 
 static uintptr_t ceil_pagesize(size_t n) {
     return (((n) + 0xFFF) & ~0xFFF);
+}
+
+uintptr_t moe_alloc_gates_memory() {
+    for (int i = 1; i < 255; i++) {
+        uintptr_t offset = i / 32;
+        uintptr_t position = i % 32;
+        if (atomic_bit_test_and_clear(gates_memory_bitmap + offset, position)) {
+            return i << 10;
+        }
+    }
+    return 0;
 }
 
 uintptr_t moe_alloc_physical_page(size_t n) {
@@ -45,5 +57,5 @@ void mm_init(moe_bootinfo_t *bootinfo) {
     total_memory = bootinfo->total_memory;
     // memset32((void*)static_start, 0xdeadbeef, free_memory / 4);
 
-    // memcpy(gates_memory_bitmap, bootinfo->gates_memory_bitmap, sizeof(gates_memory_bitmap));
+    memcpy(gates_memory_bitmap, bootinfo->gates_memory_bitmap, sizeof(gates_memory_bitmap));
 }

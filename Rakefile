@@ -64,7 +64,7 @@ end
 CFLAGS  = "-Os -std=c11 -fno-stack-protector -fshort-wchar -mno-red-zone -nostdlibinc -I #{PATH_INC} -I #{PATH_SRC} -I #{PATH_SRC_FONTS} -Wall -Wpedantic -fno-exceptions"
 AS      = ENV['AS'] || "nasm"
 AFLAGS  = "-s -I #{ PATH_SRC }"
-LFLAGS  = "-subsystem:efi_application -nodefaultlib -entry:efi_main"
+LFLAGS  = "-nodefaultlib -entry:efi_main"
 
 INCS  = [FileList["#{PATH_SRC}*.h"], FileList["#{PATH_INC}*.h"]]
 
@@ -92,7 +92,7 @@ task :install => [:default, PATH_MNT, PATH_EFI_BOOT, PATH_EFI_VENDOR, PATH_OVMF,
   (target, efi_suffix) = convert_arch(ARCH)
   FileUtils.cp("#{PATH_BIN}menu#{efi_suffix}.efi", "#{PATH_EFI_BOOT}boot#{efi_suffix}.efi")
   FileUtils.cp("#{PATH_BIN}boot#{efi_suffix}.efi", "#{PATH_EFI_VENDOR}boot#{efi_suffix}.efi")
-  FileUtils.cp("#{PATH_BIN}kernel.efi", "#{PATH_EFI_VENDOR}kernel.bin")
+  FileUtils.cp("#{PATH_BIN}kernel.bin", "#{PATH_EFI_VENDOR}kernel.bin")
 end
 
 desc "Make an ISO image"
@@ -160,10 +160,11 @@ def make_efi(cputype, target, src_tokens, options = {})
   end
 
   if options['no_suffix']
-    efi_output    = "#{PATH_BIN}#{target}.efi"
+    output    = "#{PATH_BIN}#{target}"
   else
-    efi_output    = "#{PATH_BIN}#{target}#{efi_suffix}.efi"
+    output    = "#{PATH_BIN}#{target}#{efi_suffix}.efi"
   end
+  subsystem = options['subsystem'] || 'efi_application'
 
   rsrc = "#{path_src_p}rsrc.yml"
   if File.exist?(rsrc)
@@ -246,11 +247,11 @@ def make_efi(cputype, target, src_tokens, options = {})
     obj
   end
 
-  file efi_output => objs do |t|
-    sh "#{LD} #{ LFLAGS} #{ t.prerequisites.join(' ') } -out:#{ t.name }"
+  file output => objs do |t|
+    sh "#{LD} -subsystem:#{subsystem} #{ LFLAGS} #{ t.prerequisites.join(' ') } -out:#{ t.name }"
   end
 
-  efi_output
+  output
 end
 
 

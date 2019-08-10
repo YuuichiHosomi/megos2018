@@ -17,13 +17,13 @@ targets:
       - peldr
       # - stdlib
       - bootasm.asm
-  kernel:
-    valid_arch: [x64]
+  kernel.bin:
+    valid_arch: x64
     base_dir: kernel
     no_suffix: true
+    subsystem: native
     cflags: -mno-sse
     sources:
-      - efistub
       - kernel
       - moe
       - acpi

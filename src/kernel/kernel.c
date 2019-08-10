@@ -16,7 +16,6 @@ extern int vprintf(const char *format, va_list args);
 extern int putchar(int);
 
 void moe_assert(const char* file, uintptr_t line, ...) {
-    // mgs_bsod();
     va_list list;
     va_start(list, line);
 
@@ -30,7 +29,7 @@ void moe_assert(const char* file, uintptr_t line, ...) {
 
     va_end(list);
     // __asm__ volatile("int3");
-    // for (;;) io_hlt();
+    for (;;) io_hlt();
 }
 
 _Noreturn void moe_bsod(const char *message) {
@@ -39,31 +38,44 @@ _Noreturn void moe_bsod(const char *message) {
         putchar(*p);
     }
 
-    for (;;) { __asm__ volatile("hlt"); }
+    for (;;) io_hlt();
 }
 
 
+/*********************************************************************/
+
 moe_bootinfo_t bootinfo;
 
-_Noreturn void start_kernel(moe_bootinfo_t* info) {
+_Noreturn void start_kernel() {
 
-    mm_init(info);
-    page_init(info);
-    gs_init(info);
-    acpi_init((void *)info->acpi);
-    arch_init(info);
+    mm_init(&bootinfo);
+    page_init(&bootinfo);
+    gs_init(&bootinfo);
+    acpi_init((void *)bootinfo.acpi);
+    arch_init(&bootinfo);
 
-    printf("MEG-OS v0.6.0 (codename warbler) [Memory %dMB]\n\n",
-        (int)(info->total_memory >> 8));
+    printf("MEG-OS v0.6.0 (codename warbler) [%d Active Cores, Memory %dMB]\n",
+        moe_get_number_of_active_cpus(), (int)(bootinfo.total_memory >> 8));
 
+    printf("\n");
     printf("Hello, world!\n");
+    printf("\n");
 
     for (int i = 0; i < 5; i++) {
         putchar('.');
         moe_usleep(1000000);
     }
 
+    // __asm__ volatile("int3");
     __asm__ volatile("movl %%eax, (%0)":: "r"(0xdeadbeef));
 
-    for (;;) { __asm__ volatile("hlt"); }
+    for (;;) io_hlt();
+}
+
+/*********************************************************************/
+
+_Noreturn void efi_main(moe_bootinfo_t *info) {
+    // TODO: UEFI stub is no longer supported
+    bootinfo = *info;
+    start_kernel();
 }

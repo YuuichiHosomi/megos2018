@@ -272,7 +272,7 @@ int putchar(int _c) {
         default:
         {
             moe_rect_t rect = {{console_padding_h + main_console_cussor_x * font_w, console_padding_v + main_console_cussor_y * font_h}, {font_w, font_h}};
-            moe_fill_rect(&main_screen, &rect, main_console_bgcolor);
+            // moe_fill_rect(&main_screen, &rect, main_console_bgcolor);
             if (c > 0x20 && c < 0x7F) {
                 uint8_t *p = (void *)MEGH0816_fontdata;
                 p += (c - 0x20) << 4;
@@ -282,6 +282,27 @@ int putchar(int _c) {
         }
     }
     return 1;
+}
+
+
+typedef union {
+    uint32_t rgb32;
+    uint8_t components[4];
+} rgb_color_t;
+
+void gradient(moe_bitmap_t *dest, uint32_t _start, uint32_t _end) {
+    int width = dest->width;
+    intptr_t sigma = dest->height;
+    rgb_color_t start = { _start }, end = { _end };
+    for (int i = 0; i < sigma; i++) {
+        moe_rect_t rect = {{0, i}, {width, 1}};
+        uint8_t c[3];
+        for (int j = 0; j < 3; j++) {
+            c[j] = (start.components[j] * (sigma - i) + end.components[j] * i) / sigma;
+        }
+        uint32_t color = (c[2] << 16) | (c[1] << 8) | (c[0]);
+        moe_fill_rect(dest, &rect, color);
+    }
 }
 
 
@@ -300,8 +321,9 @@ void gs_init(moe_bootinfo_t* info) {
         main_screen.flags |= MOE_BMP_ROTATE;
     }
 
-    if (main_console_bgcolor) {
-        moe_fill_rect(&main_screen, NULL, main_console_bgcolor);
-    }
+    // if (main_console_bgcolor) {
+    //     moe_fill_rect(&main_screen, NULL, main_console_bgcolor);
+    // }
+    gradient(&main_screen, 0x1A237E, 0x455A64);
 
 }

@@ -55,8 +55,6 @@ typedef struct moe_bitmap_t {
     uint32_t flags, delta, color_key;
 } moe_bitmap_t;
 
-typedef struct moe_window_t moe_window_t;
-typedef struct moe_view_t moe_view_t;
 typedef struct moe_console_context_t moe_console_context_t;
 typedef struct moe_font_t moe_font_t;
 typedef struct moe_hid_kbd_report_t moe_hid_kbd_report_t;
@@ -86,47 +84,6 @@ moe_font_t *moe_get_system_font(int type);
 void moe_set_console_attributes(moe_console_context_t *self, uint32_t attributes);
 int moe_set_console_cursor_visible(moe_console_context_t *self, int visible);
 
-void mgs_bsod(const char *);
-
-typedef enum {
-    window_level_desktop,
-    window_level_desktop_items,
-    window_level_normal = 32,
-    window_level_higher = 64,
-    window_level_popup_barrier = 96,
-    window_level_popup,
-    window_level_pointer = 127,
-} moe_window_level_t;
-
-#define MOE_WS_BORDER       0x0100
-#define MOE_WS_CAPTION      0x0200
-#define MOE_WS_TRANSPARENT  0x0400
-#define MOE_WS_CLIENT_RECT  0x0800
-#define MOE_WS_PINCHABLE    0x1000
-
-moe_size_t moe_get_screen_size();
-moe_edge_insets_t moe_add_screen_insets(moe_edge_insets_t *insets);
-moe_window_t *moe_create_window(moe_rect_t *frame, uint32_t stlye, moe_window_level_t window_level, const char *title);
-int moe_destroy_window(moe_window_t *self);
-void moe_set_window_bgcolor(moe_window_t *self, uint32_t color);
-moe_bitmap_t *moe_get_window_bitmap(moe_window_t *self);
-moe_rect_t moe_get_window_bounds(moe_window_t *window);
-moe_edge_insets_t moe_get_client_insets(moe_window_t *window);
-moe_rect_t moe_get_client_rect(moe_window_t *window);
-moe_point_t moe_convert_window_point_to_screen(moe_window_t *window, moe_point_t *point);
-void moe_blt_to_window(moe_window_t *window, moe_bitmap_t *dib);
-void moe_invalidate_rect(moe_window_t *window, moe_rect_t *rect);
-void moe_show_window(moe_window_t *window);
-void moe_hide_window(moe_window_t *window);
-void moe_set_active_window(moe_window_t *window);
-void moe_set_window_title(moe_window_t *window, const char *title);
-int moe_alert(const char *title, const char *message, uint32_t flags);
-
-int moe_send_key_event(moe_hid_kbd_report_t* report);
-int moe_send_event(moe_window_t *window, uintptr_t event);
-uintptr_t moe_get_event(moe_window_t *window, int wait);
-uint32_t moe_translate_key_event(moe_window_t *window, uintptr_t event);
-
 
 //  Minimal Memory Subsystem
 void *moe_alloc_object(size_t size, size_t count);
@@ -139,7 +96,6 @@ void *moe_alloc_object(size_t size, size_t count);
 
 //  Threading Service
 typedef struct moe_thread_t moe_thread_t;
-typedef uint8_t moe_priority_level_t;
 typedef enum {
     priority_idle = 0,
     priority_low,
@@ -147,34 +103,21 @@ typedef enum {
     priority_high,
     priority_realtime,
     priority_max,
-} moe_priority_type_t;
+} moe_priority_level_t;
 
 typedef void (*moe_thread_start)(void *args);
 int moe_create_thread(moe_thread_start start, moe_priority_level_t priority, void *args, const char *name);
-void moe_yield();
 int moe_usleep(uint64_t us);
-int moe_get_current_thread();
+int moe_get_current_thread_id();
 const char *moe_get_current_thread_name();
-int moe_get_usage();
+// int moe_get_usage();
 _Noreturn void moe_exit_thread(uint32_t exit_code);
+int moe_get_number_of_active_cpus();
 
-// int moe_wait_for_object(moe_thread_t **obj, uint64_t us);
-// int moe_signal_object(moe_thread_t **obj);
-
-typedef uint64_t moe_timer_t;
-// typedef double moe_time_interval_t;
-moe_timer_t moe_create_interval_timer(int64_t);
-int moe_check_timer(moe_timer_t*);
-uint64_t moe_get_measure();
-uint64_t moe_get_tick_count();
-
-typedef struct moe_fifo_t moe_fifo_t;
-moe_fifo_t *moe_fifo_init(size_t capacity);
-intptr_t moe_fifo_read(moe_fifo_t *self, intptr_t default_val);
-int moe_fifo_wait(moe_fifo_t* self, intptr_t* result, uint64_t us);
-int moe_fifo_write(moe_fifo_t *self, intptr_t data);
-size_t moe_fifo_get_estimated_count(moe_fifo_t *self);
-size_t moe_fifo_get_estimated_free(moe_fifo_t *self);
+typedef _Atomic uintptr_t * moe_spinlock_t;
+int moe_spinlock_try(moe_spinlock_t lock);
+int moe_spinlock_acquire(moe_spinlock_t lock, uintptr_t ms);
+void moe_spinlock_release(moe_spinlock_t lock);
 
 typedef struct moe_semaphore_t moe_semaphore_t;
 moe_semaphore_t *moe_sem_create(intptr_t value);
@@ -184,4 +127,16 @@ int moe_sem_wait(moe_semaphore_t *self, int64_t us);
 void moe_sem_signal(moe_semaphore_t *self);
 intptr_t moe_sem_getvalue(moe_semaphore_t *self);
 
-void zmemset(void* p, size_t n);
+
+typedef uint64_t moe_measure_t;
+moe_measure_t moe_create_measure(int64_t);
+int moe_measure_until(moe_measure_t);
+
+typedef struct moe_fifo_t moe_fifo_t;
+moe_fifo_t *moe_fifo_init(size_t capacity);
+intptr_t moe_fifo_read(moe_fifo_t *self, intptr_t default_val);
+int moe_fifo_wait(moe_fifo_t* self, intptr_t* result, uint64_t us);
+int moe_fifo_write(moe_fifo_t *self, intptr_t data);
+size_t moe_fifo_get_estimated_count(moe_fifo_t *self);
+size_t moe_fifo_get_estimated_free(moe_fifo_t *self);
+
