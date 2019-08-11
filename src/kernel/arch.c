@@ -74,11 +74,15 @@ extern void *_irq46;
 extern void *_irq47;
 
 
-extern uint16_t gdt_init(x64_tss_desc_t *tss);
+#define SIZE_TSS    0x10000
+extern uint16_t gdt_init();
+extern void gdt_load(void *gdt, x64_tss_desc_t *tss);
 extern void idt_load(volatile void*, size_t);
 extern x64_tss_t *io_get_tss();
 extern _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stacks);
+extern void io_set_lazy_fpu_restore();
 extern void thread_init(int);
+extern void thread_reschedule();
 
 
 static tuple_eax_edx_t io_rdmsr(uint32_t const addr) {
@@ -125,28 +129,49 @@ void tss_init(x64_tss_desc_t *tss, uint64_t base, size_t size) {
     *tss = _tss;
 }
 
+void gdt_setup() {
+    uintptr_t tss_base = (uintptr_t)moe_alloc_object(SIZE_TSS, 1);
+    x64_tss_desc_t tss;
+    tss_init(&tss, tss_base, SIZE_TSS);
+
+    // const size_t ist_size = 0x4000;
+    // for (int i = 0; i < 7; i++) {
+    //     uintptr_t ist = (uintptr_t)moe_alloc_object(ist_size, 1) + ist_size;
+    //     tss->IST[i] = ist;
+    // }
+
+    void *gdt = moe_alloc_object(4096, 1);
+    gdt_load(gdt, &tss);
+
+    io_set_lazy_fpu_restore();
+}
 
 #define BSOD_BUFF_SIZE 1024
 static char bsod_buff[BSOD_BUFF_SIZE];
+extern int putchar(int);
 void default_int_handler(x64_context_t* regs) {
+    static moe_spinlock_t lock;
+    moe_spinlock_acquire(&lock, -1);
 
     snprintf(bsod_buff, BSOD_BUFF_SIZE,
-        "#### EXCEPTION %02llx-%04llx-%016llx\n"
-        // "Thread %d: %s\n"
-        "IP %02llx:%012llx SP %02llx:%012llx F %08llx\n"
-        "AX %016llx CX %016llx DX %016llx\n"
-        "BX %016llx BP %016llx SI %016llx\n"
-        "DI %016llx R8 %016llx R9 %016llx\n"
-        "R10- %016llx %016llx %016llx\n"
-        "R13- %016llx %016llx %016llx\n"
-        , regs->intnum, regs->err, regs->cr2
-        // , moe_get_current_thread_id(), moe_get_current_thread_name()
-        , regs->cs, regs->rip, regs->ss, regs->rsp, regs->rflags
-        , regs->rax, regs->rcx, regs->rdx, regs->rbx, regs->rbp, regs->rsi, regs->rdi
+        "#### EXCEPTION on thread %d: %s\n"
+        "ERR %02llx-%04llx-%016llx IP %02llx:%012llx F %08llx\n"
+        "AX %016llx BX %016llx CX %016llx DX %016llx\n"
+        "SP %012llx BP %016llx SI %016llx DI %016llx\n"
+        "R8- %016llx %016llx %016llx %016llx\n"
+        "R12- %016llx %016llx %016llx %016llx\n"
+
+        , moe_get_current_thread_id(), moe_get_current_thread_name()
+        , regs->intnum, regs->err, regs->cr2, regs->cs, regs->rip, regs->rflags
+        , regs->rax, regs->rbx, regs->rcx, regs->rdx, regs->rsp, regs->rbp, regs->rsi, regs->rdi
         , regs->r8, regs->r9, regs->r10, regs->r11, regs->r12, regs->r13, regs->r14, regs->r15
         );
 
-    moe_bsod(bsod_buff);
+    // moe_bsod(bsod_buff);
+    for (const char *p = bsod_buff; *p; p++) {
+        putchar(*p);
+    }
+    moe_spinlock_release(&lock);
     for (;;) { io_hlt(); }
 }
 
@@ -155,13 +180,6 @@ void idt_init() {
 
     const size_t idt_size = MAX_IDT_NUM * sizeof(x64_idt64_t);
     idt = moe_alloc_object(idt_size, 1);
-
-    // x64_tss_t *tss = io_get_tss();
-    // const size_t ist_size = 0x4000;
-    // for (int i = 0; i < 7; i++) {
-    //     uintptr_t ist = (uintptr_t)moe_alloc_object(ist_size, 1) + ist_size;
-    //     tss->IST[i] = ist;
-    // }
 
     idt_set_kernel_handler(0x00, (uintptr_t)&_int00, 0); // #DE Divide Error
     idt_set_kernel_handler(0x03, (uintptr_t)&_int03, 0); // #BP Breakpoint
@@ -183,7 +201,7 @@ void idt_init() {
 #define MAX_MSI                     24
 #define MAX_IRQ                     (MAX_IOAPIC_IRQ + MAX_MSI)
 #define IRQ_INVALIDATE_TLB          0xEE
-#define IRQ_SCHEDULE                 0xFC
+#define IRQ_SCHEDULE                0xFC
 #define IRQ_LAPIC_TIMER             IRQ_BASE
 
 #define MAX_CPU                     32
@@ -342,10 +360,10 @@ void _irq_main(uint8_t irq, void* p) {
 void irq_livt() {
     lapic_timer_value++;
     apic_end_of_irq(0);
-    // reschedule();
-    // if (smp_mode) {
-    //     apic_write_lapic(0x300, 0xC0000 + IRQ_SCHEDULE);
-    // }
+    thread_reschedule();
+    if (smp_mode) {
+        apic_write_lapic(0x300, 0xC0000 + IRQ_SCHEDULE);
+    }
 }
 
 moe_measure_t moe_create_measure(int64_t us) {
@@ -378,7 +396,7 @@ void ipi_invtlb_main(uintptr_t cr3) {
 
 void ipi_sche_main() {
     apic_end_of_irq(0);
-    // reschedule();
+    thread_reschedule();
 }
 
 uintptr_t moe_get_current_cpuid() {
@@ -389,6 +407,8 @@ uintptr_t moe_get_current_cpuid() {
 
 // Initialize Application Processor (SMP)
 void smp_init_ap(uint8_t cpuid) {
+    gdt_setup();
+
     tuple_eax_edx_t msr_lapic = io_rdmsr(IA32_APIC_BASE_MSR);
     msr_lapic.u64 |= IA32_APIC_BASE_MSR_ENABLE;
     io_wrmsr(IA32_APIC_BASE_MSR, msr_lapic);
@@ -534,7 +554,7 @@ void apic_init() {
         idt_set_kernel_handler(IRQ_BASE+46, (uintptr_t)&_irq46, 0);
         idt_set_kernel_handler(IRQ_BASE+47, (uintptr_t)&_irq47, 0);
 
-        // idt_set_kernel_handler(IRQ_SCHEDULE, (uintptr_t)&_ipi_sche, 0);
+        idt_set_kernel_handler(IRQ_SCHEDULE, (uintptr_t)&_ipi_sche, 0);
         // idt_set_kernel_handler(IRQ_INVALIDATE_TLB, (uintptr_t)&_ipi_invtlb, 0);
 
         // LAPIC timer
@@ -598,12 +618,8 @@ void _int07_main() {
 
 void arch_init(moe_bootinfo_t* info) {
 
-    size_t tss_size = 4096;
-    uintptr_t tss_base = (uintptr_t)moe_alloc_object(tss_size, 1);
-    x64_tss_desc_t tss;
-    tss_init(&tss, tss_base, tss_size);
-
-    cs_sel = gdt_init(&tss);
+    cs_sel = gdt_init();
+    gdt_setup();
     idt_init();
 
     apic_init();

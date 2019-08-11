@@ -6,6 +6,9 @@
 #include "rsrc.h"
 
 
+#define RES_X_MIN 800
+#define RES_Y_MIN 600
+
 #define	GOP_STANDARD_RGB	PixelBlueGreenRedReserved8BitPerColor
 
 #define	OS_INDICATIONS_SUPPORTED_NAME	L"OsIndicationsSupported"
@@ -293,7 +296,6 @@ void gop_cls(EFI_GRAPHICS_OUTPUT_PROTOCOL* gop) {
     }
 }
 
-
 void change_resolution_menu() {
 
     menu_buffer* items = init_menu();
@@ -311,8 +313,8 @@ void change_resolution_menu() {
         if (info->HorizontalResolution == edid_x && info->VerticalResolution == edid_y) {
             white = TRUE;
         } else if (
-            info->HorizontalResolution < 640 ||
-            info->VerticalResolution < 400 ||
+            info->HorizontalResolution < RES_X_MIN ||
+            info->VerticalResolution < RES_Y_MIN ||
             (info->HorizontalResolution & 7) != 0 ||
             (info->VerticalResolution & 7) != 0
         ) {
@@ -704,7 +706,7 @@ cp932_exit:
         snprintf(buffer, 256, get_string(rsrc_press_esc_to_menu), t);
         print_center(-2, buffer);
         EFI_INPUT_KEY key = efi_wait_any_key(FALSE, 1000);
-        if(key.ScanCode == 0x17){
+        if(key.ScanCode == 0x17 || key.UnicodeChar == 0x20){
             menu_flag = TRUE;
             break;
         }

@@ -123,7 +123,7 @@ void *pg_valloc(uintptr_t pa, size_t size) {
 
 
 void pg_enter_strict_mode() {
-    return;
+    // return;
     pg_set_pte(0, 0, 4);
     invalidate_tlb();
 }

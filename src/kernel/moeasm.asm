@@ -32,18 +32,13 @@
     extern _int07_main
     extern _irq_main
     extern smp_init_ap
-    ; extern ipi_sche_main
+    extern ipi_sche_main
+    extern thread_on_start
 
 
-;; int gdt_init(x64_tss_desc_t *tss);
+;; int gdt_init();
     global gdt_init
 gdt_init:
-
-    lea r11, [rel (__GDT + SEL_TSS)]
-    mov r10, [rcx]
-    mov [r11], r10
-    mov r10, [rcx + 8]
-    mov [r11 + 8], r10
 
     ; load GDTR
     lea rax, [rel __GDT]
@@ -70,9 +65,39 @@ gdt_init:
     mov gs, ecx
     lldt cx
 
+    ret
+
+
+; void gdt_load(void *gdt, x64_tss_desc_t *tss);
+    global gdt_load
+gdt_load:
+    push rsi
+    push rdi
+
+    mov r11, rcx
+
+    mov rdi, rcx
+    lea rsi, [rel __GDT]
+    mov ecx, (__end_common_GDT - __GDT) / 8
+    rep movsq
+
+    mov rax, [rdx]
+    mov rcx, [rdx + 8]
+    mov [r11 + SEL_TSS], rax
+    mov [r11 + SEL_TSS + 8], rcx
+
+    push r11
+    mov ecx, (__end_GDT - __GDT)-1
+    shl rcx, 48
+    push rcx
+    lgdt [rsp+6]
+    add rsp, 16
+
     mov ecx, SEL_TSS
     ltr cx
 
+    pop rdi
+    pop rsi
     ret
 
 
@@ -133,6 +158,79 @@ atomic_bit_test_and_clear:
     lock btr [rcx], edx
     sbb eax, eax
     neg eax
+    ret
+
+
+; moe_thread_t *io_do_context_switch(moe_thread_t *from, moe_thread_t *to);
+%define CTX_IP  0x200
+%define CTX_SP  0x208
+%define CTX_BP  0x210
+%define CTX_BX  0x218
+%define CTX_SI  0x220
+%define CTX_DI  0x228
+%define CTX_R12 0x230
+%define CTX_R13 0x238
+%define CTX_R14 0x240
+%define CTX_R15 0x248
+    global io_do_context_switch
+io_do_context_switch:
+    call io_set_lazy_fpu_restore
+
+    mov [rcx + CTX_SP], rsp
+    mov [rcx + CTX_BP], rbp
+    mov [rcx + CTX_BX], rbx
+    mov [rcx + CTX_SI], rsi
+    mov [rcx + CTX_DI], rdi
+    mov [rcx + CTX_R12], r12
+    mov [rcx + CTX_R13], r13
+    mov [rcx + CTX_R14], r14
+    mov [rcx + CTX_R15], r15
+
+    mov rsp, [rdx + CTX_SP]
+    mov rbp, [rdx + CTX_BP]
+    mov rbx, [rdx + CTX_BX]
+    mov rsi, [rdx + CTX_SI]
+    mov rdi, [rdx + CTX_DI]
+    mov r12, [rdx + CTX_R12]
+    mov r13, [rdx + CTX_R13]
+    mov r14, [rdx + CTX_R14]
+    mov r15, [rdx + CTX_R15]
+
+    mov rax, rcx
+    xor ecx, ecx
+    xor edx, edx
+    xor r8d, r8d
+    xor r9d, r9d
+    xor r10d, r10d
+    xor r11d, r11d
+
+    ret
+
+
+; void io_setup_new_thread(moe_thread_t *thread, uintptr_t* new_sp);
+    global io_setup_new_thread
+io_setup_new_thread:
+    lea rax, [rel _new_thread]
+    sub rdx, BYTE 8
+    mov [rdx], rax
+    mov [rcx + CTX_SP], rdx
+    ret
+
+_new_thread:
+    call thread_on_start
+    sti
+    pop rax
+    pop rcx
+    call rax
+    ud2
+
+
+; void io_set_lazy_fpu_restore();
+    global io_set_lazy_fpu_restore
+io_set_lazy_fpu_restore:
+    mov rax, cr0
+    bts rax, 3 ; TS
+    mov cr0, rax
     ret
 
 
@@ -230,27 +328,30 @@ _iretq:
 
     global _int07
 _int07: ; #NM
-    push rax
-    push rcx
-    push rdx
-    push r8
-    push r9
-    push r10
-    push r11
-    cld
-    clts
+    push BYTE 0
+    push BYTE 0x07
+    jmp short _intXX
+    ; push rax
+    ; push rcx
+    ; push rdx
+    ; push r8
+    ; push r9
+    ; push r10
+    ; push r11
+    ; cld
+    ; clts
 
-    mov ecx, 512
-    call _int07_main
+    ; mov ecx, 512
+    ; call _int07_main
  
-    pop r11
-    pop r10
-    pop r9
-    pop r8
-    pop rdx
-    pop rcx
-    pop rax
-    iretq
+    ; pop r11
+    ; pop r10
+    ; pop r9
+    ; pop r8
+    ; pop rdx
+    ; pop rcx
+    ; pop rax
+    ; iretq
 
 
     global _irq0, _irq1, _irq2, _irq3, _irq4, _irq5, _irq6, _irq7
@@ -474,6 +575,28 @@ _irqXX:
     pop rcx
     iretq
 
+    global _ipi_sche
+_ipi_sche:
+    push rax
+    push rcx
+    push rdx
+    push r8
+    push r9
+    push r10
+    push r11
+    cld
+
+    call ipi_sche_main
+
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdx
+    pop rcx
+    pop rax
+    iretq
+
 
 ; _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stacks);
     global smp_setup_init
@@ -609,7 +732,8 @@ _mp_rm_payload:
     bts eax, 31
     mov cr0, eax
 
-    o32 jmp far [bx + SMPINFO_START64]
+    ; o32 jmp far [bx + SMPINFO_START64]
+    jmp far dword [bx + SMPINFO_START64]
 
 [BITS 64]
 
@@ -629,6 +753,6 @@ __GDT:
     dw 0xFFFF, 0x0000, 0xFA00, 0x00AF   ; 23 64bit USER TEXT FLAT
     dw 0xFFFF, 0x0000, 0xF200, 0x00CF   ; 2B 32bit USER DATA FLAT
 __end_common_GDT:
-    dw 0xFFFF, 0x0000, 0x8900, 0x0000   ; 30 64bit TSS
-    dw 0, 0, 0, 0                       ; 38 64bit TSS (cont)
+    dw 0, 0, 0, 0, 0, 0, 0, 0           ; 30:38 64bit TSS
+
 __end_GDT:

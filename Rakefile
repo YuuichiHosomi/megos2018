@@ -178,29 +178,50 @@ def make_efi(cputype, target, src_tokens, options = {})
       end
 
       prefix = rsrc_yaml['prefix']
-      strings = rsrc_yaml['strings']
-      keys = strings['default'].keys
 
       File.open(t.name, 'w') do |file|
         file.puts '// AUTO GENERATED rsrc.h'
-        file.puts "typedef enum {"
-        keys.each do |key|
-          file.puts "\t#{prefix}_#{key},"
-        end
-        file.puts "\t#{prefix}_max"
-        file.puts "} #{prefix};"
 
-        %w(default ja).each do |lang|
-          if strings[lang]
-            file.puts "const char* #{prefix}_#{lang}[] = {"
-            keys.each do |key|
-              value = strings[lang][key]
-               file.puts "\t#{value ? value.inspect : 'NULL'},"
+        enums = rsrc_yaml['enum']
+        if enums
+          enums.keys.each do |ns|
+            file.puts "typedef enum {"
+            enums[ns].each do |item|
+              file.puts "\t#{ns}_#{item.gsub(/\W/, '_')},"
+            end
+            file.puts "\t#{ns}_max"
+            file.puts "} #{ns};"
+            file.puts "const char * #{ns}_strings[] = {"
+            enums[ns].each do |item|
+              file.puts "\t#{item.inspect},"
             end
             file.puts "};"
           end
         end
 
+        strings = rsrc_yaml['strings']
+        if strings
+          keys = strings['default'].keys
+          file.puts "typedef enum {"
+          keys.each do |key|
+            file.puts "\t#{prefix}_#{key},"
+          end
+          file.puts "\t#{prefix}_max"
+          file.puts "} #{prefix};"
+
+          %w(default ja).each do |lang|
+            if strings[lang]
+              file.puts "const char* #{prefix}_#{lang}[] = {"
+              keys.each do |key|
+                value = strings[lang][key]
+                file.puts "\t#{value ? value.inspect : 'NULL'},"
+              end
+              file.puts "};"
+            end
+          end
+        end
+
+        file.puts "\n"
       end
     end
   end

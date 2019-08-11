@@ -257,8 +257,8 @@ void draw_pattern(moe_bitmap_t *dest, moe_rect_t* rect, const uint8_t* pattern, 
 
 uint32_t main_console_bgcolor = 0x000000;
 uint32_t main_console_fgcolor = 0xCCCCCC;
-int main_console_cussor_x = 0;
-int main_console_cussor_y = 0;
+int main_console_cursor_x = 0;
+int main_console_cursor_y = 0;
 
 int putchar(int _c) {
     int c = _c & 0xFF;
@@ -266,19 +266,23 @@ int putchar(int _c) {
     const int console_padding_h = 16, console_padding_v = 16;
     switch (c) {
         case '\n':
-            main_console_cussor_x = 0;
-            main_console_cussor_y ++;
+            main_console_cursor_x = 0;
+            main_console_cursor_y ++;
             break;
         default:
         {
-            moe_rect_t rect = {{console_padding_h + main_console_cussor_x * font_w, console_padding_v + main_console_cussor_y * font_h}, {font_w, font_h}};
+            moe_rect_t rect = {{console_padding_h + main_console_cursor_x * font_w, console_padding_v + main_console_cursor_y * font_h}, {font_w, font_h}};
             // moe_fill_rect(&main_screen, &rect, main_console_bgcolor);
             if (c > 0x20 && c < 0x7F) {
+                moe_rect_t rect2 = rect;
+                rect2.origin.x++;
+                rect2.origin.y++;
                 uint8_t *p = (void *)MEGH0816_fontdata;
                 p += (c - 0x20) << 4;
+                draw_pattern(&main_screen, &rect2, p, main_console_bgcolor);
                 draw_pattern(&main_screen, &rect, p, main_console_fgcolor);
             }
-            main_console_cussor_x ++;
+            main_console_cursor_x ++;
         }
     }
     return 1;
@@ -311,7 +315,6 @@ void gs_init(moe_bootinfo_t* info) {
     main_screen.width = info->screen.width;
     main_screen.height = info->screen.height;
     main_screen.delta = info->screen.delta;
-    // main_screen.bitmap = (void *)info->vram_base;
     main_screen.bitmap = pg_map_vram(info->vram_base, 4 * info->screen.delta * info->screen.height);
 
     if (main_screen.width < main_screen.height) {

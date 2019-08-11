@@ -10,6 +10,7 @@ extern void arch_init(moe_bootinfo_t* info);
 extern void gs_init(moe_bootinfo_t *bootinfo);
 extern void mm_init(moe_bootinfo_t *bootinfo);
 extern void page_init(moe_bootinfo_t *bootinfo);
+extern void pg_enter_strict_mode();
 
 extern char *strchr(const char *s, int c);
 extern int vprintf(const char *format, va_list args);
@@ -28,23 +29,53 @@ void moe_assert(const char* file, uintptr_t line, ...) {
     }
 
     va_end(list);
-    // __asm__ volatile("int3");
     for (;;) io_hlt();
 }
 
-_Noreturn void moe_bsod(const char *message) {
-
-    for (const char *p = message; *p; p++) {
-        putchar(*p);
-    }
-
-    for (;;) io_hlt();
-}
+// _Noreturn void moe_bsod(const char *message) {
+//     for (const char *p = message; *p; p++) {
+//         putchar(*p);
+//     }
+//     for (;;) io_hlt();
+// }
 
 
 /*********************************************************************/
 
 moe_bootinfo_t bootinfo;
+
+_Noreturn void thread_2(void *args) {
+    int k = moe_get_current_thread_id();
+    int padding = 2;
+    int w = 10;
+    moe_rect_t rect = {{k * w, padding}, {w - padding, w - padding}};
+    uint32_t color = k * 0x010101;
+    for (;;) {
+        moe_fill_rect(NULL, &rect, color);
+        color += k;
+        moe_usleep(k);
+    }
+}
+
+_Noreturn void kernel_thread(void *args) {
+    printf("MEG-OS v0.6.0 (codename warbler) [%d Active Cores, Memory %dMB]\n",
+        moe_get_number_of_active_cpus(), (int)(bootinfo.total_memory >> 8));
+
+    printf("\n");
+    printf("Hello, world!\n");
+    printf("\n");
+
+    for (int i = 0; i < 20; i++) {
+        moe_create_thread(&thread_2, 0, NULL, "test");
+    }
+
+    for (int i = 0; i < 10; i++) {
+        putchar('.');
+        moe_usleep(1000000);
+    }
+
+    moe_exit_thread(0);
+}
 
 _Noreturn void start_kernel() {
 
@@ -54,20 +85,9 @@ _Noreturn void start_kernel() {
     acpi_init((void *)bootinfo.acpi);
     arch_init(&bootinfo);
 
-    printf("MEG-OS v0.6.0 (codename warbler) [%d Active Cores, Memory %dMB]\n",
-        moe_get_number_of_active_cpus(), (int)(bootinfo.total_memory >> 8));
+    pg_enter_strict_mode();
 
-    printf("\n");
-    printf("Hello, world!\n");
-    printf("\n");
-
-    for (int i = 0; i < 5; i++) {
-        putchar('.');
-        moe_usleep(1000000);
-    }
-
-    // __asm__ volatile("int3");
-    __asm__ volatile("movl %%eax, (%0)":: "r"(0xdeadbeef));
+    moe_create_thread(&kernel_thread, 0, NULL, "kernel");
 
     for (;;) io_hlt();
 }
