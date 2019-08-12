@@ -79,7 +79,7 @@ extern uint16_t gdt_init();
 extern void gdt_load(void *gdt, x64_tss_desc_t *tss);
 extern void idt_load(volatile void*, size_t);
 extern x64_tss_t *io_get_tss();
-extern _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stacks);
+extern _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stack_base);
 extern void io_set_lazy_fpu_restore();
 extern void thread_init(int);
 extern void thread_reschedule();
@@ -119,7 +119,7 @@ static void idt_set_kernel_handler(uint8_t num, uintptr_t offset, uint8_t ist) {
     idt_set_handler(num, offset, cs_sel, 0x8E, ist);
 }
 
-void tss_init(x64_tss_desc_t *tss, uint64_t base, size_t size) {
+static void tss_init(x64_tss_desc_t *tss, uint64_t base, size_t size) {
     x64_tss_desc_t _tss = {{size - 1}};
     _tss.base_1 = base;
     _tss.base_2 = base >> 24;
@@ -129,7 +129,7 @@ void tss_init(x64_tss_desc_t *tss, uint64_t base, size_t size) {
     *tss = _tss;
 }
 
-void gdt_setup() {
+static void gdt_setup() {
     uintptr_t tss_base = (uintptr_t)moe_alloc_object(SIZE_TSS, 1);
     x64_tss_desc_t tss;
     tss_init(&tss, tss_base, SIZE_TSS);
@@ -142,8 +142,6 @@ void gdt_setup() {
 
     void *gdt = moe_alloc_object(4096, 1);
     gdt_load(gdt, &tss);
-
-    io_set_lazy_fpu_restore();
 }
 
 #define BSOD_BUFF_SIZE 1024
@@ -176,7 +174,7 @@ void default_int_handler(x64_context_t* regs) {
 }
 
 
-void idt_init() {
+static void idt_init() {
 
     const size_t idt_size = MAX_IDT_NUM * sizeof(x64_idt64_t);
     idt = moe_alloc_object(idt_size, 1);
@@ -211,7 +209,7 @@ void idt_init() {
 #define IA32_APIC_BASE_MSR_BSP      0x100
 #define IA32_APIC_BASE_MSR_ENABLE   0x800
 
-#define MSI_BASE        0xFEE00000
+#define MSI_BASE                    0xFEE00000
 
 #define APIC_REDIR_MASK             0x10000
 
@@ -399,8 +397,12 @@ void ipi_sche_main() {
     thread_reschedule();
 }
 
-uintptr_t moe_get_current_cpuid() {
-    uint32_t apicid = (apic_read_lapic(0x020) >> 24);
+apic_id_t apic_read_apicid() {
+    return apic_read_lapic(0x020) >> 24;
+}
+
+uintptr_t smp_get_current_cpuid() {
+    uint32_t apicid = apic_read_apicid();
     return apicid_to_cpuids[apicid];
 }
 
@@ -409,11 +411,13 @@ uintptr_t moe_get_current_cpuid() {
 void smp_init_ap(uint8_t cpuid) {
     gdt_setup();
 
+    io_set_lazy_fpu_restore();
+
     tuple_eax_edx_t msr_lapic = io_rdmsr(IA32_APIC_BASE_MSR);
     msr_lapic.u64 |= IA32_APIC_BASE_MSR_ENABLE;
     io_wrmsr(IA32_APIC_BASE_MSR, msr_lapic);
 
-    uint8_t apicid = apic_read_lapic(0x020) >> 24;
+    apic_id_t apicid = apic_read_apicid();
     apicid_to_cpuids[apicid] = cpuid;
 
     apic_write_lapic(0x0F0, 0x10F);
@@ -426,7 +430,7 @@ void smp_init_ap(uint8_t cpuid) {
 }
 
 
-void apic_init() {
+static void apic_init() {
     acpi_madt_t* madt = acpi_find_table(ACPI_MADT_SIGNATURE);
     if (madt) {
 
@@ -454,7 +458,7 @@ void apic_init() {
         lapic_base = msr_lapic.u64 & ~0xFFF;
         pg_map_mmio(lapic_base, 1);
 
-        apic_ids[n_cpu++] = apic_read_lapic(0x020) >> 24;
+        apic_ids[n_cpu++] = apic_read_apicid();
 
         //  Parse structures
         size_t max_length = madt->Header.length - 44;
@@ -614,7 +618,146 @@ void _int07_main() {
 
 
 /*********************************************************************/
+//  Peripheral Component Interconnect
 
+#define PCI_CONFIG_ADDRESS  0x0CF8
+#define PCI_CONFIG_DATA     0x0CFC
+#define PCI_ADDRESS_ENABLE  0x80000000
+
+uint32_t pci_make_reg_addr(uint8_t bus, uint8_t dev, uint8_t func, uintptr_t reg) {
+    return (reg & 0xFC) | ((func) << 8) | ((dev) << 11) | (bus << 16) | ((reg & 0xF00) << 16);
+}
+
+static uint32_t _pci_read_config(uint32_t addr) {
+    io_out32(PCI_CONFIG_ADDRESS, PCI_ADDRESS_ENABLE | addr);
+    return io_in32(PCI_CONFIG_DATA);
+}
+
+static void _pci_write_config(uint32_t addr, uint32_t val) {
+    io_out32(PCI_CONFIG_ADDRESS, PCI_ADDRESS_ENABLE | addr);
+    io_out32(PCI_CONFIG_DATA, val);
+}
+
+static void _pci_disable_config() {
+    io_out32(PCI_CONFIG_ADDRESS, 0);
+}
+
+int pci_parse_bar(uint32_t _base, unsigned idx, uint64_t *_bar, uint64_t *_size) {
+
+    if (idx >= 6) return 0;
+
+    uint32_t base = (_base & ~0xFF) + 0x10 + idx * 4;
+    uint64_t bar0 = _pci_read_config(base);
+    uint64_t nbar;
+    int is_bar64 = ((bar0 & 7) == 0x04);
+
+    if (!_size) {
+        if (is_bar64) {
+            uint32_t bar1 = _pci_read_config(base + 4);
+            bar0 |= (uint64_t)bar1 << 32;
+        }
+        *_bar = bar0;
+        return is_bar64 ? 2 : 1;
+    }
+
+    if (is_bar64) {
+        uint32_t bar1 = _pci_read_config(base + 4);
+        _pci_write_config(base, UINT32_MAX);
+        _pci_write_config(base + 4, UINT32_MAX);
+        nbar = _pci_read_config(base) | ((uint64_t)_pci_read_config(base + 4) << 32);
+        _pci_write_config(base, bar0);
+        _pci_write_config(base + 4, bar1);
+        bar0 |= (uint64_t)bar1 << 32;
+    } else {
+        _pci_write_config(base, UINT32_MAX);
+        nbar = _pci_read_config(base);
+        _pci_write_config(base, bar0);
+    }
+    _pci_disable_config();
+    if (nbar) {
+        if (is_bar64) {
+            nbar ^= UINT64_MAX;
+        } else {
+            nbar ^= UINT32_MAX;
+        }
+        if (bar0 & 1) {
+            nbar = (nbar | 3) & UINT16_MAX;
+        } else {
+            nbar |= 15;
+        }
+        *_bar = bar0;
+        *_size = nbar;
+        return is_bar64 ? 2 : 1;
+    } else {
+        return 0;
+    }
+}
+
+
+uint32_t pci_find_by_class(uint32_t cls, uint32_t mask) {
+    int bus = 0;
+    for (int dev = 0; dev < 32; dev++) {
+        uint32_t data = _pci_read_config(pci_make_reg_addr(bus, dev, 0, 0));
+        if ((data & 0xFFFF) == 0xFFFF) continue;
+            uint32_t PCI0C = _pci_read_config(pci_make_reg_addr(bus, dev, 0, 0x0C));
+            int limit = (PCI0C & 0x00800000) ? 8 : 1;
+            for (int func = 0; func < limit; func++) {
+                uint32_t base = pci_make_reg_addr(bus, dev, func, 0);
+                uint32_t data = pci_read_config(base);
+                if ((data & 0xFFFF) != 0xFFFF) {
+                    uint32_t PCI08 = pci_read_config(base + 0x08);
+                    if ((PCI08 & mask) == cls) {
+                        _pci_disable_config();
+                        return PCI_ADDRESS_ENABLE | base;
+                    }
+                }
+            }
+    }
+    _pci_disable_config();
+    return 0;
+}
+
+uint32_t pci_find_capability(uint32_t base, uint8_t id) {
+    uint8_t cap_ptr = _pci_read_config(base + 0x34) & 0xFF;
+    while (cap_ptr) {
+        uint32_t data = _pci_read_config(base + cap_ptr);
+        if ((data & 0xFF) == id) {
+            _pci_disable_config();
+            return cap_ptr;
+        }
+        cap_ptr = (data >> 8) & 0xFF;
+    }
+    _pci_disable_config();
+    return 0;
+}
+
+void pci_dump_config(uint32_t base, void *p) {
+    uint32_t *d = (uint32_t *)p;
+    for (uint32_t i = 0; i < 256 / 4; i++) {
+        d[i] = _pci_read_config(base + i * 4);
+    }
+    _pci_disable_config();
+}
+
+
+uint32_t pci_read_config(uint32_t addr) {
+    uint32_t retval = _pci_read_config(addr);
+    _pci_disable_config();
+    return retval;
+}
+
+void pci_write_config(uint32_t addr, uint32_t val) {
+    _pci_write_config(addr, val);
+    _pci_disable_config();
+}
+
+
+static void pci_init() {
+    // do nothing
+}
+
+
+/*********************************************************************/
 
 void arch_init(moe_bootinfo_t* info) {
 
@@ -622,6 +765,7 @@ void arch_init(moe_bootinfo_t* info) {
     gdt_setup();
     idt_init();
 
+    pci_init();
     apic_init();
 
 }

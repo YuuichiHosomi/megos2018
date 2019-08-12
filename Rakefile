@@ -33,19 +33,23 @@ TARGET_ISO      = "var/moe.iso"
 
 case ARCH.to_sym
 when :x64
-  PATH_OVMF     = "var/bios64.bin"
+  URL_OVMF      = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEX64_OVMF.fd"
+  PATH_OVMF     = "var/ovmfx64.fd"
   QEMU_ARCH     = "x86_64"
   QEMU_OPTS     = "-smp 4 -rtc base=localtime -device nec-usb-xhci,id=xhci"
   #  -device usb-kbd -device usb-mouse -device usb-tablet"
 when :i386
-  PATH_OVMF     = "var/bios32.bin"
+  URL_OVMF      = nil
+  PATH_OVMF     = "var/ovmfia32.fd"
   QEMU_ARCH     = "x86_64"
   QEMU_OPTS     = "-smp 4 -rtc base=localtime -device nec-usb-xhci,id=xhci"
 when :arm
+  URL_OVMF      = nil
   PATH_OVMF     = "var/ovmfarm.fd"
   QEMU_ARCH     = "aarch64"
   QEMU_OPTS     = "-M virt -cpu cortex-a15"
 when :aa64
+  URL_OVMF      = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEAARCH64_QEMU_EFI.fd"
   PATH_OVMF     = "var/ovmfaa64.fd"
   QEMU_ARCH     = "aarch64"
   QEMU_OPTS     = "-M virt -cpu cortex-a57"
@@ -84,7 +88,6 @@ TASKS.each do |t|
   task t => [t.to_s + ":build"]
 end
 
-desc "Defaults"
 task :default => [PATH_OBJ, PATH_BIN, TASKS].flatten
 
 desc "Install to #{PATH_MNT}"
@@ -101,13 +104,22 @@ task :iso => [PATH_MNT, :install] do
 end
 
 desc "Run with QEMU"
-task :run => :install do
+task :run => [:ovmf, :install] do
   sh "qemu-system-#{QEMU_ARCH} #{QEMU_OPTS} -bios #{PATH_OVMF} -monitor stdio -drive format=raw,file=fat:rw:mnt"
 end
 
 desc "Format"
 task :format do
   sh "clang-format -i #{ FileList["#{PATH_SRC}**/*.c"] } #{ FileList["#{PATH_SRC}**/*.h"] }"
+end
+
+desc "Download OVMF"
+task :ovmf => PATH_OVMF do
+end
+if URL_OVMF
+  file PATH_OVMF do |t|
+    sh "curl -# -L -o #{t.name} #{URL_OVMF}"
+  end
 end
 
 
@@ -121,7 +133,6 @@ file CP932_BIN => [ PATH_EFI_VENDOR, "#{PATH_SRC}cp932.txt"] do |t|
   File.binwrite(t.name, bin.join(''))
   raise unless File.exist?(t.name)
 end
-
 
 def convert_arch(s)
   case s.to_sym

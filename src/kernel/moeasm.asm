@@ -2,29 +2,29 @@
 ;; Copyright (c) 2018 MEG-OS project, All rights reserved.
 ;; License: MIT
 
-%define LOADER_CS32 0x08
-%define LOADER_CS64 0x10
-%define LOADER_SS   0x18
-%define SEL_TSS     0x30
+%define LOADER_CS32         0x08
+%define KERNEL_CS64         0x10
+%define KERNEL_SS           0x18
+%define SEL_TSS             0x30
 
 %define SMPINFO             0x0800
 %define SMPINFO_MAX_CPU     0x04
 %define SMPINFO_EFER        0x08
 %define SMPINFO_STACK_SIZE  0x0C
-%define SMPINFO_STACKS      0x10
+%define SMPINFO_STACK_BASE  0x10
 %define SMPINFO_CR3         0x18
 %define SMPINFO_IDT         0x22
 %define SMPINFO_CR4         0x2C
 %define SMPINFO_START64     0x30
-%define SMPINFO_START_AP      0x38
+%define SMPINFO_START_AP    0x38
 %define SMPINFO_MSR_MISC    0x40
 %define SMPINFO_GDTR        0x50
 
-%define	EFLAGS_IF       0x00000200
-%define IA32_APIC_BASE_MSR          0x0000001B
+%define	EFLAGS_IF           0x00000200
+%define IA32_APIC_BASE_MSR  0x0000001B
 %define IA32_APIC_BASE_MSR_ENABLE   0x00000800
-%define IA32_MISC_MSR   0x000001A0
-%define IA32_EFER_MSR   0xC0000080
+%define IA32_MISC_MSR       0x000001A0
+%define IA32_EFER_MSR       0xC0000080
 
 [BITS 64]
 [section .text]
@@ -50,9 +50,9 @@ gdt_init:
     add rsp, 16
 
     ; refresh CS and SS
-    mov eax, LOADER_CS64
+    mov eax, KERNEL_CS64
     mov rcx, rsp
-    push byte LOADER_SS
+    push byte KERNEL_SS
     push rcx
     pushfq
     push rax
@@ -162,16 +162,16 @@ atomic_bit_test_and_clear:
 
 
 ; moe_thread_t *io_do_context_switch(moe_thread_t *from, moe_thread_t *to);
-%define CTX_IP  0x200
-%define CTX_SP  0x208
-%define CTX_BP  0x210
-%define CTX_BX  0x218
-%define CTX_SI  0x220
-%define CTX_DI  0x228
-%define CTX_R12 0x230
-%define CTX_R13 0x238
-%define CTX_R14 0x240
-%define CTX_R15 0x248
+%define CTX_IP  0x00
+%define CTX_SP  0x08
+%define CTX_BP  0x10
+%define CTX_BX  0x18
+%define CTX_SI  0x20
+%define CTX_DI  0x28
+%define CTX_R12 0x30
+%define CTX_R13 0x38
+%define CTX_R14 0x40
+%define CTX_R15 0x48
     global io_do_context_switch
 io_do_context_switch:
     call io_set_lazy_fpu_restore
@@ -598,7 +598,7 @@ _ipi_sche:
     iretq
 
 
-; _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stacks);
+; _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stack_base);
     global smp_setup_init
 smp_setup_init:
     push rsi
@@ -614,7 +614,7 @@ smp_setup_init:
     mov r10d, SMPINFO
     mov [r10 + SMPINFO_MAX_CPU], edx
     mov [r10 + SMPINFO_STACK_SIZE], r8d
-    mov [r10 + SMPINFO_STACKS], r9
+    mov [r10 + SMPINFO_STACK_BASE], r9
     lea edx, [r10 + SMPINFO_GDTR]
     lea rsi, [rel __GDT]
     mov edi, edx
@@ -639,7 +639,7 @@ smp_setup_init:
     mov [r10 + IA32_MISC_MSR + 4], edx
 
     lea ecx, [r11 + _startup64 - _mp_rm_payload]
-    mov edx, LOADER_CS64
+    mov edx, KERNEL_CS64
     mov [r10 + SMPINFO_START64], ecx
     mov [r10 + SMPINFO_START64 + 4], edx
     lea rax, [rel _startup_ap]
@@ -657,7 +657,7 @@ _startup_ap:
     ; init stack pointer
     mov eax, ebp
     imul eax, [rbx + SMPINFO_STACK_SIZE]
-    mov rcx, [rbx + SMPINFO_STACKS]
+    mov rcx, [rbx + SMPINFO_STACK_BASE]
     lea rsp, [rcx + rax]
 
     ; init APIC
@@ -705,7 +705,7 @@ _mp_rm_payload:
     bts eax, 0
     mov cr0, eax
 
-    mov ax, LOADER_SS
+    mov ax, KERNEL_SS
     mov ss, ax
     mov ds, ax
     mov es, ax

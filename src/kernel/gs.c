@@ -7,6 +7,7 @@
 #include "megh0816.h"
 
 moe_bitmap_t main_screen;
+moe_bitmap_t back_buffer;
 
 void moe_blt(moe_bitmap_t* dest, moe_bitmap_t* src, moe_point_t *origin, moe_rect_t *rect, uint32_t options) {
 
@@ -261,6 +262,7 @@ int main_console_cursor_x = 0;
 int main_console_cursor_y = 0;
 
 int putchar(int _c) {
+    moe_bitmap_t *dest = &main_screen;
     int c = _c & 0xFF;
     const int font_w = MEGH0816_width, font_h = MEGH0816_height;
     const int console_padding_h = 16, console_padding_v = 16;
@@ -272,6 +274,7 @@ int putchar(int _c) {
         default:
         {
             moe_rect_t rect = {{console_padding_h + main_console_cursor_x * font_w, console_padding_v + main_console_cursor_y * font_h}, {font_w, font_h}};
+            moe_blt(dest, &back_buffer, &rect.origin, &rect, 0);
             // moe_fill_rect(&main_screen, &rect, main_console_bgcolor);
             if (c > 0x20 && c < 0x7F) {
                 moe_rect_t rect2 = rect;
@@ -279,8 +282,8 @@ int putchar(int _c) {
                 rect2.origin.y++;
                 uint8_t *p = (void *)MEGH0816_fontdata;
                 p += (c - 0x20) << 4;
-                draw_pattern(&main_screen, &rect2, p, main_console_bgcolor);
-                draw_pattern(&main_screen, &rect, p, main_console_fgcolor);
+                draw_pattern(dest, &rect2, p, main_console_bgcolor);
+                draw_pattern(dest, &rect, p, main_console_fgcolor);
             }
             main_console_cursor_x ++;
         }
@@ -327,6 +330,12 @@ void gs_init(moe_bootinfo_t* info) {
     // if (main_console_bgcolor) {
     //     moe_fill_rect(&main_screen, NULL, main_console_bgcolor);
     // }
-    gradient(&main_screen, 0x1A237E, 0x455A64);
+
+    back_buffer.width = main_screen.width;
+    back_buffer.height = main_screen.height;
+    back_buffer.delta = main_screen.width;
+    back_buffer.bitmap = moe_alloc_object(back_buffer.delta * back_buffer.delta * 4, 1);
+    gradient(&back_buffer, 0x1A237E, 0x455A64);
+    moe_blt(NULL, &back_buffer, NULL, NULL, 0);
 
 }

@@ -58,7 +58,7 @@ _Noreturn void thread_2(void *args) {
 }
 
 _Noreturn void kernel_thread(void *args) {
-    printf("MEG-OS v0.6.0 (codename warbler) [%d Active Cores, Memory %dMB]\n",
+    printf("Minimal Operating Environment v0.6.0 (codename warbler) [%d Active Cores, Memory %dMB]\n",
         moe_get_number_of_active_cpus(), (int)(bootinfo.total_memory >> 8));
 
     printf("\n");

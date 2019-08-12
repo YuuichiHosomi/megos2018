@@ -63,12 +63,13 @@ static struct {
     moe_queue_t *retired;
     _Atomic thid_t next_thid;
     moe_affinity_t system_affinity;
-    int n_active_cpu;
+    int ncpu;
     atomic_flag lock;
 } moe;
 
 extern moe_thread_t *io_do_context_switch(moe_thread_t *from, moe_thread_t *to);
 extern void io_setup_new_thread(moe_thread_t *thread, uintptr_t* new_sp);
+extern int smp_get_current_cpuid();
 
 
 /*********************************************************************/
@@ -82,7 +83,7 @@ static moe_affinity_t AFFINITY(int n) {
 }
 
 static core_specific_data_t *_get_current_csd() {
-    return &moe.csd[moe_get_current_cpuid()];
+    return &moe.csd[smp_get_current_cpuid()];
 }
 
 static moe_thread_t *_get_current_thread() {
@@ -94,6 +95,7 @@ static moe_thread_t *_get_current_thread() {
 }
 
 static int sch_add(moe_thread_t *thread) {
+    // MOE_ASSERT(thread->running == 0, "Thread %d is still running", thread->thid);
     if (thread->priority) {
         return moe_queue_write(moe.ready, (uintptr_t)thread);
     } else {
@@ -102,15 +104,18 @@ static int sch_add(moe_thread_t *thread) {
 }
 
 static int sch_retire(moe_thread_t *thread) {
+    if (!thread) return 0;
     if (thread->zombie) {
+        // TODO: remove thread
         return 0;
     }
+    // MOE_ASSERT(thread->running == 0, "Thread %d is still running", thread->thid);
     if (thread->priority) {
-        while (atomic_bit_test_and_set(&moe.lock, 0)) {
+        while (atomic_flag_test_and_set(&moe.lock)) {
             io_pause();
         }
         int retval = moe_queue_write(moe.retired, (intptr_t)thread);
-        atomic_bit_test_and_clear(&moe.lock, 0);
+        atomic_flag_clear(&moe.lock);
         return retval;
     } else {
         return -1;
@@ -118,23 +123,25 @@ static int sch_retire(moe_thread_t *thread) {
 }
 
 static moe_thread_t *sch_next() {
-    moe_thread_t *result;
-    result = (moe_thread_t*)moe_queue_read(moe.ready, 0);
-    if (result) {
-        if (moe_measure_until(result->deadline)) {
-            sch_retire(result);
-        } else {
-            return result;
+    moe_thread_t *thread;
+    do {
+        thread = (moe_thread_t*)moe_queue_read(moe.ready, 0);
+        if (thread) {
+            if (moe_measure_until(thread->deadline)) {
+                sch_retire(thread);
+            } else {
+                return thread;
+            }
         }
-    }
+    } while (thread);
 
     //  Wait queue is empty
-    if (!atomic_bit_test_and_set(&moe.lock, 0)) {
+    if (!atomic_flag_test_and_set(&moe.lock)) {
         moe_thread_t *p;
         while ((p = (moe_thread_t*)moe_queue_read(moe.retired, 0))) {
             sch_add(p);
         }
-        atomic_bit_test_and_clear(&moe.lock, 0);
+        atomic_flag_clear(&moe.lock);
     }
 
     return _get_current_csd()->idle;
@@ -151,10 +158,9 @@ static void _next_thread(core_specific_data_t *csd, moe_thread_t *current, _Atom
         csd->current = next;
         next->running = 1;
         csd->retired = current;
-        // moe_thread_t *retired = 
         io_do_context_switch(current, next);
         csd = _get_current_csd();
-        sch_retire(csd->retired);
+        sch_retire(atomic_exchange(&csd->retired, NULL));
     }
 }
 
@@ -162,7 +168,7 @@ void thread_on_start() {
     core_specific_data_t *csd = _get_current_csd();
     moe_thread_t *current = csd->current;
     current->running = 1;
-    sch_retire(csd->retired);
+    sch_retire(atomic_exchange(&csd->retired, NULL));
 }
 
 
@@ -182,8 +188,12 @@ int moe_wait_for_object(_Atomic (moe_thread_t *) *obj, int64_t us) {
 
 int moe_signal_object(moe_thread_t **obj) {
     moe_thread_t *thread = *obj;
-
-    return 0;
+    if (atomic_compare_exchange_strong(thread->signal_object, &thread, NULL)) {
+        thread->deadline = 0;
+        return 0;
+    } else {
+        return -1;
+    }
 }
 
 
@@ -274,17 +284,24 @@ int moe_usleep(int64_t us) {
 }
 
 
-void thread_init(int n_cpu) {
+_Noreturn void scheduler_thread(void *args) {
+    for (;;) {
+        moe_usleep(10000000);
+    }
+}
+
+
+void thread_init(int ncpu) {
     char name[THREAD_NAME_SIZE];
 
-    moe.n_active_cpu = n_cpu;
-    moe.system_affinity = AFFINITY(n_cpu) - 1;
+    moe.ncpu = ncpu;
+    moe.system_affinity = AFFINITY(ncpu) - 1;
     moe.thread_list = moe_alloc_object(sizeof(void *), MAX_THREADS);
     moe.ready = moe_queue_create(DEFAULT_SCHEDULE_SIZE);
     moe.retired = moe_queue_create(DEFAULT_SCHEDULE_SIZE);
 
-    core_specific_data_t *_csd = moe_alloc_object(sizeof(core_specific_data_t), n_cpu);
-    for (int i = 0; i < n_cpu; i++) {
+    core_specific_data_t *_csd = moe_alloc_object(sizeof(core_specific_data_t), ncpu);
+    for (int i = 0; i < ncpu; i++) {
         _csd[i].cpuid = i;
         snprintf(name, THREAD_NAME_SIZE, "(Idle Core #%d)", i);
         moe_thread_t *th = _create_thread(NULL, priority_idle, NULL, name);
@@ -294,10 +311,11 @@ void thread_init(int n_cpu) {
     }
     moe.csd = _csd;
 
+    _create_thread(&scheduler_thread, priority_realtime, NULL, "scheduler");
 }
 
 int moe_get_number_of_active_cpus() {
-    return moe.n_active_cpu;
+    return moe.ncpu;
 }
 
 
@@ -341,7 +359,7 @@ void moe_sem_init(moe_semaphore_t *self, intptr_t value) {
 }
 
 moe_semaphore_t *moe_sem_create(intptr_t value) {
-    moe_semaphore_t *result = NULL;
+    moe_semaphore_t *result = moe_alloc_object(sizeof(moe_semaphore_t), 1);
     if (result) {
         moe_sem_init(result, value);
     }
@@ -377,7 +395,6 @@ void moe_sem_signal(moe_semaphore_t *self) {
 }
 
 
-
 /*********************************************************************/
 // Concurrent Queue
 
@@ -398,13 +415,13 @@ moe_queue_t *moe_queue_create(size_t capacity) {
     return self;
 }
 
-static _Atomic intptr_t *fifo_get_data_ptr(moe_queue_t *self) {
+static _Atomic intptr_t *_queue_get_data_ptr(moe_queue_t *self) {
     return (void *)((intptr_t)self + sizeof(moe_queue_t));
 }
 
 intptr_t fifo_read_main(moe_queue_t* self) {
     uintptr_t read_ptr = atomic_fetch_add(&self->read, 1);
-    intptr_t retval = atomic_load(fifo_get_data_ptr(self) + (read_ptr & self->mask));
+    intptr_t retval = atomic_load(_queue_get_data_ptr(self) + (read_ptr & self->mask));
     atomic_fetch_add(&self->free, 1);
     return retval;
 }
@@ -431,7 +448,7 @@ int moe_queue_write(moe_queue_t* self, intptr_t data) {
     while (free > 0) {
         if (atomic_compare_exchange_weak(&self->free, &free, free - 1)) {
             uintptr_t write_ptr = atomic_fetch_add(&self->write, 1);
-            atomic_store(fifo_get_data_ptr(self) + (write_ptr & self->mask), data);
+            atomic_store(_queue_get_data_ptr(self) + (write_ptr & self->mask), data);
             moe_sem_signal(&self->read_sem);
             return 0;
         } else {
@@ -451,5 +468,3 @@ size_t moe_queue_get_estimated_free(moe_queue_t* self) {
 }
 
 /*********************************************************************/
-
-
