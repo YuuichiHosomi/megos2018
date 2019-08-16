@@ -25,6 +25,8 @@
 %define IA32_APIC_BASE_MSR_ENABLE   0x00000800
 %define IA32_MISC_MSR       0x000001A0
 %define IA32_EFER_MSR       0xC0000080
+%define IA32_TSC_AUX_MSR    0xC0000103
+
 
 [BITS 64]
 [section .text]
@@ -131,33 +133,6 @@ io_get_tss:
     add rax, rdx
 
     add rsp, byte 0x10
-    ret
-
-
-;; int atomic_bit_test(void *p, uintptr_t bit);
-    global atomic_bit_test
-atomic_bit_test:
-    bt [rcx + rax], edx
-    sbb eax, eax
-    neg eax
-    ret
-
-
-;; int atomic_bit_test_and_set(void *p, uintptr_t bit);
-    global atomic_bit_test_and_set
-atomic_bit_test_and_set:
-    lock bts [rcx], edx
-    sbb eax, eax
-    neg eax
-    ret
-
-
-;; int atomic_bit_test_and_clear(void *p, uintptr_t bit);
-    global atomic_bit_test_and_clear
-atomic_bit_test_and_clear:
-    lock btr [rcx], edx
-    sbb eax, eax
-    neg eax
     ret
 
 

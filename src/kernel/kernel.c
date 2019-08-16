@@ -16,7 +16,7 @@ extern char *strchr(const char *s, int c);
 extern int vprintf(const char *format, va_list args);
 extern int putchar(int);
 
-void moe_assert(const char* file, uintptr_t line, ...) {
+void _moe_assert(const char* file, uintptr_t line, ...) {
     va_list list;
     va_start(list, line);
 
@@ -58,21 +58,18 @@ _Noreturn void thread_2(void *args) {
 }
 
 _Noreturn void kernel_thread(void *args) {
+
     printf("Minimal Operating Environment v0.6.0 (codename warbler) [%d Active Cores, Memory %dMB]\n",
         moe_get_number_of_active_cpus(), (int)(bootinfo.total_memory >> 8));
 
-    printf("\n");
-    printf("Hello, world!\n");
-    printf("\n");
-
     for (int i = 0; i < 20; i++) {
+        moe_usleep(500000);
         moe_create_thread(&thread_2, 0, NULL, "test");
+        putchar('.');
     }
 
-    for (int i = 0; i < 10; i++) {
-        putchar('.');
-        moe_usleep(1000000);
-    }
+    printf("\n\n");
+    printf("Hello, world!\n");
 
     moe_exit_thread(0);
 }

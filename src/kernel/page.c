@@ -18,8 +18,8 @@ enum {
     RECURSIVE_PAGE = 0x1FE,
     KERNEL_HEAP_PAGE = 0x1FF,
 };
-static const uint64_t MAX_PA = 0x000000FFFFFFFFFFLL;
-static const uint64_t MAX_VA = 0x0000FFFFFFFFFFFFLL;
+static const uint64_t MAX_PA = UINT64_C(0x000000FFFFFFFFFF);
+static const uint64_t MAX_VA = UINT64_C(0x0000FFFFFFFFFFFF);
 static MOE_PHYSICAL_ADDRESS global_cr3;
 static _Atomic uintptr_t base_kernel_heap = 0;
 typedef uint64_t pte_t;

@@ -64,9 +64,12 @@ static inline uint32_t io_in32(uintptr_t port) {
 }
 
 static inline void io_hlt() { __asm__ volatile("hlt"); }
-static inline void io_pause() { __asm__ volatile("pause"); }
+#define io_pause __builtin_ia32_pause
+// static inline void io_pause() { __asm__ volatile("pause"); }
 
-_Noreturn void moe_bsod(const char *message);
+// int atomic_bit_test_and_set(void *p, size_t bit);
+// static int atomic_bit_test_and_clear(void *p, size_t bit) {
+// int atomic_bit_test(void *p, size_t bit);
 
 
 typedef void (*MOE_IRQ_HANDLER)(int irq);

@@ -18,40 +18,37 @@ static uint8_t SLP_TYP5b = 0;
 // Generic Address Structure
 void acpi_gas_output(acpi_gas_t *_gas, uintptr_t value) {
     acpi_gas_t gas = *_gas;
-    MOE_ASSERT(gas.bit_offset == 0, "Cannot decode GAS");
-    MOE_ASSERT(gas.bit_width, "UNKNOWN BIT WIDTH");
+    moe_assert(gas.bit_offset == 0, "Cannot decode GAS");
+    moe_assert(gas.bit_width, "UNKNOWN BIT WIDTH");
     switch(gas.address_space_id) {
         case 0: // MEMORY
             switch(gas.bit_width) {
                 case 8:
                     WRITE_PHYSICAL_UINT8(gas.address, value);
-                    break;
+                    return;
                 case 16:
                     WRITE_PHYSICAL_UINT16(gas.address, value);
-                    break;
+                    return;
                 case 32:
                     WRITE_PHYSICAL_UINT32(gas.address, value);
-                    break;
-                default:
-                    MOE_ASSERT(false, "Cannot access GAS");
+                    return;
             }
             break;
         case 1: // I/O
             switch(gas.bit_width) {
                 case 8:
                     io_out8(gas.address, value);
-                    break;
+                    return;
                 case 16:
                     io_out16(gas.address, value);
-                    break;
+                    return;
                 case 32:
                     io_out32(gas.address, value);
-                    break;
+                    return;
             }
             break;
-        default:
-            MOE_ASSERT(false, "UNKNOWN GAS");
     }
+    moe_assert(false, "UNKNOWN GAS");
 
 }
 
@@ -176,16 +173,16 @@ void acpi_init(acpi_rsd_ptr_t* _rsdp) {
     n_entries_xsdt = (xsdt->Header.length - 0x24 /* offset_of Entry */ ) / sizeof(xsdt->Entry[0]);
 
     fadt = moe_alloc_object(sizeof(acpi_fadt_t), 1);
-    MOE_ASSERT(fadt, "FADT NOT FOUND");
+    moe_assert(fadt, "FADT NOT FOUND");
     acpi_fadt_t *p = acpi_find_table(ACPI_FADT_SIGNATURE);
-    MOE_ASSERT(p, "FADT NOT FOUND");
+    moe_assert(p, "FADT NOT FOUND");
     memcpy(fadt, p, MIN(p->Header.length, sizeof(acpi_fadt_t)));
 
     dsdt = (void*)(uintptr_t)fadt->X_DSDT;
     if (dsdt == NULL) {
         dsdt = (void*)(uintptr_t)fadt->DSDT;
     }
-    MOE_ASSERT(dsdt, "DSDT NOT FOUND");
+    moe_assert(dsdt, "DSDT NOT FOUND");
 
     // Search S5
     {

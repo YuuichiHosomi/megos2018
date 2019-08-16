@@ -7,15 +7,14 @@ targets:
       - osldr
       - atop
       - menu
-      - stdlib
+      - libstd
   boot:
-    valid_arch: [x64, i386]
+    valid_arch: x64 i386
     base_dir: boot
     sources:
       - boot
       - bootpg
       - peldr
-      # - stdlib
       - bootasm.asm
   kernel.bin:
     valid_arch: x64
@@ -31,5 +30,5 @@ targets:
       - gs
       - memory
       - page
-      - stdlib
+      - libstd
       - moeasm.asm

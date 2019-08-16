@@ -64,6 +64,7 @@ static struct {
     _Atomic thid_t next_thid;
     moe_affinity_t system_affinity;
     int ncpu;
+    _Atomic int n_active_cpu;
     atomic_flag lock;
 } moe;
 
@@ -95,7 +96,6 @@ static moe_thread_t *_get_current_thread() {
 }
 
 static int sch_add(moe_thread_t *thread) {
-    // MOE_ASSERT(thread->running == 0, "Thread %d is still running", thread->thid);
     if (thread->priority) {
         return moe_queue_write(moe.ready, (uintptr_t)thread);
     } else {
@@ -109,7 +109,6 @@ static int sch_retire(moe_thread_t *thread) {
         // TODO: remove thread
         return 0;
     }
-    // MOE_ASSERT(thread->running == 0, "Thread %d is still running", thread->thid);
     if (thread->priority) {
         while (atomic_flag_test_and_set(&moe.lock)) {
             io_pause();
@@ -330,7 +329,7 @@ int moe_spinlock_try(moe_spinlock_t *lock) {
     return atomic_compare_exchange_weak(lock, &expected, desired);
 }
 
-int moe_spinlock_acquire(moe_spinlock_t *lock, uintptr_t ms) {
+int moe_spinlock_acquire(moe_spinlock_t *lock) {
     for (;;) {
         if (moe_spinlock_try(lock)) {
             return 0;
@@ -386,7 +385,7 @@ int moe_sem_wait(moe_semaphore_t *self, int64_t us) {
     if (moe_sem_trywait(self)) {
         return 1;
     }
-    MOE_ASSERT(false, "not implemented moe_sem_wait");
+    moe_assert(false, "not implemented moe_sem_wait");
     return 0;
 }
 
@@ -396,7 +395,7 @@ void moe_sem_signal(moe_semaphore_t *self) {
 
 
 /*********************************************************************/
-// Concurrent Queue
+// Queue
 
 typedef struct moe_queue_t {
     moe_semaphore_t read_sem;
