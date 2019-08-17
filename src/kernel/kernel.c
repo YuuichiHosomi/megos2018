@@ -10,6 +10,7 @@ extern void arch_init(moe_bootinfo_t* info);
 extern void gs_init(moe_bootinfo_t *bootinfo);
 extern void mm_init(moe_bootinfo_t *bootinfo);
 extern void page_init(moe_bootinfo_t *bootinfo);
+extern void xhci_init();
 extern void pg_enter_strict_mode();
 
 extern char *strchr(const char *s, int c);
@@ -59,17 +60,19 @@ _Noreturn void thread_2(void *args) {
 
 _Noreturn void kernel_thread(void *args) {
 
-    printf("Minimal Operating Environment v0.6.0 (codename warbler) [%d Active Cores, Memory %dMB]\n",
+    printf("Minimal Operating Environment v0.6.0 (codename warbler) [%d Cores, Memory %dMB]\n",
         moe_get_number_of_active_cpus(), (int)(bootinfo.total_memory >> 8));
 
-    for (int i = 0; i < 20; i++) {
-        moe_usleep(500000);
-        moe_create_thread(&thread_2, 0, NULL, "test");
-        putchar('.');
-    }
+    xhci_init();
 
-    printf("\n\n");
-    printf("Hello, world!\n");
+    // for (int i = 0; i < 20; i++) {
+    //     moe_usleep(500000);
+    //     moe_create_thread(&thread_2, 0, NULL, "test");
+    //     putchar('.');
+    // }
+
+    // printf("\n\n");
+    // printf("Hello, world!\n");
 
     moe_exit_thread(0);
 }

@@ -28,7 +28,8 @@ targets:
       - acpi
       - arch
       - gs
+      - libstd
       - memory
       - page
-      - libstd
+      - xhci
       - moeasm.asm

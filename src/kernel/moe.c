@@ -185,9 +185,10 @@ int moe_wait_for_object(_Atomic (moe_thread_t *) *obj, int64_t us) {
 }
 
 
-int moe_signal_object(moe_thread_t **obj) {
+int moe_signal_object(_Atomic (moe_thread_t *) *obj) {
     moe_thread_t *thread = *obj;
-    if (atomic_compare_exchange_strong(thread->signal_object, &thread, NULL)) {
+    _Atomic (moe_thread_t *) *signal_object = thread->signal_object;
+    if (signal_object && atomic_compare_exchange_strong(thread->signal_object, &thread, NULL)) {
         thread->deadline = 0;
         return 0;
     } else {
@@ -373,24 +374,63 @@ int moe_sem_trywait(moe_semaphore_t *self) {
     intptr_t value = atomic_load(&self->value);
     while (value > 0) {
         if (atomic_compare_exchange_weak(&self->value, &value, value - 1)) {
-            return 1;
+            return 0;
         } else {
             io_pause();
         }
     }
-    return 0;
+    return -1;
 }
 
 int moe_sem_wait(moe_semaphore_t *self, int64_t us) {
-    if (moe_sem_trywait(self)) {
-        return 1;
+    if (!moe_sem_trywait(self)) {
+        return 0;
     }
-    moe_assert(false, "not implemented moe_sem_wait");
-    return 0;
+    // moe_assert(false, "not implemented moe_sem_wait");
+
+    if (atomic_load(&self->thread) != NULL) {
+        int64_t timeout_us = MIN(us, 1000);
+        moe_measure_t deadline1 = moe_create_measure(timeout_us);
+        do {
+            if (!moe_sem_trywait(self)) {
+                return 0;
+            } else {
+                io_pause();
+            }
+        } while (moe_measure_until(deadline1));
+    }
+
+    moe_measure_t deadline2 = moe_create_measure(us);
+    const int64_t timeout_min = 1000;
+    const int64_t timeout_max = 100000;
+    int64_t timeout = timeout_min;
+
+    do {
+        moe_thread_t *current = _get_current_thread();
+        moe_thread_t *expected = NULL;
+        if (atomic_compare_exchange_weak(&self->thread, &expected, current)) {
+            moe_wait_for_object(&self->thread, 0);
+            if (!moe_sem_trywait(self)) {
+                return 0;
+            }
+            timeout = timeout_min;
+        }
+        moe_usleep(timeout);
+        if (timeout < timeout_max) {
+            timeout *= 2;
+        }
+    } while (moe_measure_until(deadline2));
+
+    return -1;
 }
 
 void moe_sem_signal(moe_semaphore_t *self) {
+    moe_thread_t *thread = atomic_load(&self->thread);
     atomic_fetch_add(&self->value, 1);
+    if (thread) {
+        moe_signal_object(&self->thread);
+        atomic_compare_exchange_weak(&self->thread, &thread, NULL);
+    }
 }
 
 
@@ -418,7 +458,7 @@ static _Atomic intptr_t *_queue_get_data_ptr(moe_queue_t *self) {
     return (void *)((intptr_t)self + sizeof(moe_queue_t));
 }
 
-intptr_t fifo_read_main(moe_queue_t* self) {
+intptr_t queue_read_main(moe_queue_t* self) {
     uintptr_t read_ptr = atomic_fetch_add(&self->read, 1);
     intptr_t retval = atomic_load(_queue_get_data_ptr(self) + (read_ptr & self->mask));
     atomic_fetch_add(&self->free, 1);
@@ -426,16 +466,16 @@ intptr_t fifo_read_main(moe_queue_t* self) {
 }
 
 intptr_t moe_queue_read(moe_queue_t* self, intptr_t default_val) {
-    if (moe_sem_trywait(&self->read_sem)) {
-        return fifo_read_main(self);
+    if (!moe_sem_trywait(&self->read_sem)) {
+        return queue_read_main(self);
     } else {
         return default_val;
     }
 }
 
 int moe_queue_wait(moe_queue_t* self, intptr_t* result, uint64_t us) {
-    if (moe_sem_wait(&self->read_sem, us)) {
-        *result = fifo_read_main(self);
+    if (!moe_sem_wait(&self->read_sem, us)) {
+        *result = queue_read_main(self);
         return 1;
     } else {
         return 0;
