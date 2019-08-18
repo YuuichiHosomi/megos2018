@@ -265,12 +265,19 @@ int main_console_cursor_y = 0;
 int main_console_cols = 0;
 
 int putchar(int _c) {
+    // static moe_spinlock_t lock;
+    // moe_spinlock_acquire(&lock);
     moe_bitmap_t *dest = &main_screen;
     int c = _c & 0xFF;
     switch (c) {
         case '\n':
             main_console_cursor_x = 0;
             main_console_cursor_y ++;
+            break;
+        case '\b':
+            if (main_console_cursor_x > 0) {
+                main_console_cursor_x--;
+            }
             break;
         default:
         {
@@ -293,6 +300,7 @@ int putchar(int _c) {
             main_console_cursor_x ++;
         }
     }
+    // moe_spinlock_release(&lock);
     return 1;
 }
 

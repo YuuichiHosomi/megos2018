@@ -1,4 +1,4 @@
-// Virtual Shell Interface
+// Pseudo Shell Interface
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
 #include "moe.h"
@@ -58,14 +58,15 @@ _Noreturn void fiber_test_thread(void *args) {
     }
 }
 
+
 void shell_init() {
+
+    cin = moe_queue_create(256);
 
     moe_create_thread(&fiber_test_thread, 0, NULL, "fiber_test");
     moe_usleep(1000000);
 
-    cin = moe_queue_create(256);
-
-    // 💩
+    // 💩 mode
     printf("\n\nUNCommand Mode");
     for (;;) {
         printf("\n# ");
@@ -73,6 +74,9 @@ void shell_init() {
         do {
             int c = key_in(1);
             switch (c) {
+                case 8:
+                    printf("\b \b");
+                    break;
                 case 10:
                 case 13:
                     cont = 0;

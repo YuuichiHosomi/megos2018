@@ -19,6 +19,10 @@ extern char *strchr(const char *s, int c);
 extern int vprintf(const char *format, va_list args);
 extern int putchar(int);
 
+
+/*********************************************************************/
+
+
 _Noreturn void _panic(const char* file, uintptr_t line, ...) {
     va_list list;
     va_start(list, line);
@@ -45,7 +49,7 @@ _Noreturn void moe_reboot() {
 
 moe_bootinfo_t bootinfo;
 
-_Noreturn void kernel_thread(void *args) {
+void kernel_thread(void *args) {
 
     printf("Minimal Operating Environment v0.6.1 (codename warbler) [%d Cores, Memory %dMB]\n",
         moe_get_number_of_active_cpus(), (int)(bootinfo.total_memory >> 8));
@@ -53,11 +57,9 @@ _Noreturn void kernel_thread(void *args) {
     // xhci_init();
     hid_init();
     shell_init();
-
-    moe_exit_thread(0);
 }
 
-_Noreturn void start_kernel() {
+static _Noreturn void start_kernel() {
 
     mm_init(&bootinfo);
     page_init(&bootinfo);
@@ -68,13 +70,14 @@ _Noreturn void start_kernel() {
 
     moe_create_thread(&kernel_thread, 0, NULL, "kernel");
 
+    // Idle thread
     for (;;) io_hlt();
 }
 
 /*********************************************************************/
 
 _Noreturn void efi_main(moe_bootinfo_t *info) {
-    // TODO: UEFI stub is no longer supported
+    // UEFI stub is no longer supported
     bootinfo = *info;
     start_kernel();
 }
