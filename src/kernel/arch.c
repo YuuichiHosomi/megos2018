@@ -87,6 +87,7 @@ extern _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t
 extern void io_set_lazy_fpu_restore();
 extern void thread_init(int);
 extern void thread_reschedule();
+extern void lpc_init();
 
 
 static tuple_eax_edx_t io_rdmsr(uint32_t const addr) {
@@ -802,10 +803,5 @@ void arch_init(moe_bootinfo_t* info) {
     pci_init();
     apic_init();
 
-    cpuid_t regs = {0x80000001};
-    io_cpuid(&regs);
-    if (regs.eax & 0x12345678) {
-        io_hlt();
-    }
-    // printf("cpuid: %08x %08x\n", regs.edx, regs.ecx);
+    lpc_init();
 }

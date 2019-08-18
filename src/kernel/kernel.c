@@ -12,12 +12,14 @@ extern void mm_init(moe_bootinfo_t *bootinfo);
 extern void page_init(moe_bootinfo_t *bootinfo);
 extern void xhci_init();
 extern void pg_enter_strict_mode();
+extern void hid_init();
+extern void shell_init();
 
 extern char *strchr(const char *s, int c);
 extern int vprintf(const char *format, va_list args);
 extern int putchar(int);
 
-void _moe_assert(const char* file, uintptr_t line, ...) {
+_Noreturn void _panic(const char* file, uintptr_t line, ...) {
     va_list list;
     va_start(list, line);
 
@@ -33,46 +35,24 @@ void _moe_assert(const char* file, uintptr_t line, ...) {
     for (;;) io_hlt();
 }
 
-// _Noreturn void moe_bsod(const char *message) {
-//     for (const char *p = message; *p; p++) {
-//         putchar(*p);
-//     }
-//     for (;;) io_hlt();
-// }
+_Noreturn void moe_reboot() {
+    acpi_reset();
+    for (;;) io_hlt();
+}
 
 
 /*********************************************************************/
 
 moe_bootinfo_t bootinfo;
 
-_Noreturn void thread_2(void *args) {
-    int k = moe_get_current_thread_id();
-    int padding = 2;
-    int w = 10;
-    moe_rect_t rect = {{k * w, padding}, {w - padding, w - padding}};
-    uint32_t color = k * 0x010101;
-    for (;;) {
-        moe_fill_rect(NULL, &rect, color);
-        color += k;
-        moe_usleep(k);
-    }
-}
-
 _Noreturn void kernel_thread(void *args) {
 
-    printf("Minimal Operating Environment v0.6.0 (codename warbler) [%d Cores, Memory %dMB]\n",
+    printf("Minimal Operating Environment v0.6.1 (codename warbler) [%d Cores, Memory %dMB]\n",
         moe_get_number_of_active_cpus(), (int)(bootinfo.total_memory >> 8));
 
-    xhci_init();
-
-    // for (int i = 0; i < 20; i++) {
-    //     moe_usleep(500000);
-    //     moe_create_thread(&thread_2, 0, NULL, "test");
-    //     putchar('.');
-    // }
-
-    // printf("\n\n");
-    // printf("Hello, world!\n");
+    // xhci_init();
+    hid_init();
+    shell_init();
 
     moe_exit_thread(0);
 }
@@ -84,7 +64,6 @@ _Noreturn void start_kernel() {
     gs_init(&bootinfo);
     acpi_init((void *)bootinfo.acpi);
     arch_init(&bootinfo);
-
     pg_enter_strict_mode();
 
     moe_create_thread(&kernel_thread, 0, NULL, "kernel");

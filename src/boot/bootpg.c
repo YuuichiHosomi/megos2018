@@ -92,7 +92,7 @@ void vprotect(uint64_t base, size_t size, int attr) {
     pte_t attrmask = ~(PTE_NOT_EXECUTE | PTE_WRITE | PTE_PRESENT);
     pte_t attrval = ((attr & PROT_READ) ? PTE_PRESENT : 0)
         | ((attr & PROT_WRITE) ? PTE_WRITE : 0)
-        // | ((attr & PROT_EXEC) ? 0 : PTE_NOT_EXECUTE)
+        | ((attr & PROT_EXEC) ? 0 : PTE_NOT_EXECUTE)
         ;
     size_t sz = ceil(size, NATIVE_PAGE_SIZE) / NATIVE_PAGE_SIZE;
 

@@ -286,6 +286,7 @@ int moe_usleep(int64_t us) {
 
 _Noreturn void scheduler_thread(void *args) {
     for (;;) {
+        // TODO: everything
         moe_usleep(10000000);
     }
 }
@@ -317,7 +318,6 @@ void thread_init(int ncpu) {
 int moe_get_number_of_active_cpus() {
     return moe.ncpu;
 }
-
 
 
 /*********************************************************************/
@@ -383,30 +383,29 @@ int moe_sem_trywait(moe_semaphore_t *self) {
 }
 
 int moe_sem_wait(moe_semaphore_t *self, int64_t us) {
+
     if (!moe_sem_trywait(self)) {
         return 0;
     }
-    // moe_assert(false, "not implemented moe_sem_wait");
 
-    if (atomic_load(&self->thread) != NULL) {
-        int64_t timeout_us = MIN(us, 1000);
-        moe_measure_t deadline1 = moe_create_measure(timeout_us);
-        do {
-            if (!moe_sem_trywait(self)) {
-                return 0;
-            } else {
-                io_pause();
-            }
-        } while (moe_measure_until(deadline1));
-    }
+    // if (atomic_load(&self->thread) != NULL) {
+    //     int64_t timeout_us = MIN(us, 1000);
+    //     moe_measure_t deadline1 = moe_create_measure(timeout_us);
+    //     do {
+    //         if (!moe_sem_trywait(self)) {
+    //             return 0;
+    //         } else {
+    //             io_pause();
+    //         }
+    //     } while (moe_measure_until(deadline1));
+    // }
 
     moe_measure_t deadline2 = moe_create_measure(us);
     const int64_t timeout_min = 1000;
     const int64_t timeout_max = 100000;
     int64_t timeout = timeout_min;
-
+    moe_thread_t *current = _get_current_thread();
     do {
-        moe_thread_t *current = _get_current_thread();
         moe_thread_t *expected = NULL;
         if (atomic_compare_exchange_weak(&self->thread, &expected, current)) {
             moe_wait_for_object(&self->thread, 0);
@@ -416,9 +415,7 @@ int moe_sem_wait(moe_semaphore_t *self, int64_t us) {
             timeout = timeout_min;
         }
         moe_usleep(timeout);
-        if (timeout < timeout_max) {
-            timeout *= 2;
-        }
+        timeout = MIN(timeout_max, timeout * 2);
     } while (moe_measure_until(deadline2));
 
     return -1;
@@ -458,7 +455,7 @@ static _Atomic intptr_t *_queue_get_data_ptr(moe_queue_t *self) {
     return (void *)((intptr_t)self + sizeof(moe_queue_t));
 }
 
-intptr_t queue_read_main(moe_queue_t* self) {
+static intptr_t queue_read_main(moe_queue_t* self) {
     uintptr_t read_ptr = atomic_fetch_add(&self->read, 1);
     intptr_t retval = atomic_load(_queue_get_data_ptr(self) + (read_ptr & self->mask));
     atomic_fetch_add(&self->free, 1);
@@ -505,5 +502,25 @@ size_t moe_queue_get_estimated_count(moe_queue_t* self) {
 size_t moe_queue_get_estimated_free(moe_queue_t* self) {
     return atomic_load(&self->free);
 }
+
+
+/*********************************************************************/
+
+size_t atomic_bit_scan_and_reset(_Atomic uint32_t *p, size_t limit, size_t def_val) {
+    size_t words = (limit + 31) / 32;
+    for (size_t i = 0; i < words; i++) {
+        uint32_t word = p[i];
+        while (word != 0) {
+            size_t position = __builtin_ctz(word);
+            uint32_t mask = 1 << position;
+            uint32_t desired = word & ~mask;
+            if (atomic_compare_exchange_weak(&p[i], &word, desired)) {
+                return i * 32 + position;
+            }
+        }
+    }
+    return def_val;
+}
+
 
 /*********************************************************************/

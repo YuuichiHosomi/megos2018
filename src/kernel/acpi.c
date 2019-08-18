@@ -48,9 +48,38 @@ void acpi_gas_output(acpi_gas_t *_gas, uintptr_t value) {
             }
             break;
     }
-    moe_assert(false, "UNKNOWN GAS");
-
+    moe_panic("UNKNOWN GAS");
 }
+
+uintptr_t acpi_gas_input(acpi_gas_t *_gas) {
+    acpi_gas_t gas = *_gas;
+    moe_assert(gas.bit_offset == 0, "Cannot decode GAS");
+    moe_assert(gas.bit_width, "UNKNOWN BIT WIDTH");
+    switch(gas.address_space_id) {
+        case 0: // MEMORY
+            switch(gas.bit_width) {
+                case 8:
+                    return READ_PHYSICAL_UINT8(gas.address);
+                case 16:
+                    return READ_PHYSICAL_UINT16(gas.address);
+                case 32:
+                    return READ_PHYSICAL_UINT32(gas.address);
+            }
+            break;
+        case 1: // I/O
+            switch(gas.bit_width) {
+                case 8:
+                    return io_in8(gas.address);
+                case 16:
+                    return io_in16(gas.address);
+                case 32:
+                    return io_in32(gas.address);
+            }
+            break;
+    }
+    moe_panic("UNKNOWN GAS");
+}
+
 
 static int is_equal_signature(const void* p1, const void* p2) {
     const uint32_t* _p1 = (const uint32_t*)p1;
@@ -144,26 +173,27 @@ void acpi_enter_sleep_state(int state) {
 }
 
 int acpi_get_pm_timer_type() {
-    if (fadt->PM_TMR_BLK) {
-        if (fadt->Flags & ACPI_FADT_TMR_VAL_EXT) {
-            return 32;
-        } else {
-            return 24;
-        }
-    } else {
+    if (fadt->X_PM_TMR_BLK.bit_width == 0 && fadt->PM_TMR_BLK == 0) {
         return 0;
+    }
+    if (fadt->Flags & ACPI_FADT_TMR_VAL_EXT) {
+        return 32;
+    } else {
+        return 24;
     }
 }
 
 uint32_t acpi_read_pm_timer() {
-    if (fadt->PM_TMR_BLK) {
-        if (fadt->Flags & ACPI_FADT_TMR_VAL_EXT) {
-            return io_in32(fadt->PM_TMR_BLK);
-        } else {
-            return io_in32(fadt->PM_TMR_BLK) & 0x00FFFFFF;
-        }
+    uint32_t value = 0;
+    if (fadt->X_PM_TMR_BLK.bit_width) {
+        value = acpi_gas_input(&fadt->X_PM_TMR_BLK);
+    } else if (fadt->PM_TMR_BLK) {
+        value = io_in32(fadt->PM_TMR_BLK);
+    }
+    if (fadt->Flags & ACPI_FADT_TMR_VAL_EXT) {
+        return value;
     } else {
-        return 0;
+        return value & 0x00FFFFFF;
     }
 }
 
@@ -206,6 +236,8 @@ void acpi_init(acpi_rsd_ptr_t* _rsdp) {
             break;
         }
     }
+
+    // printf("ACPI %d %08x %08x (%d) %08llx\n", acpi_get_pm_timer_type(), acpi_read_pm_timer(), fadt->PM_TMR_BLK, fadt->X_PM_TMR_BLK.address_space_id, fadt->X_PM_TMR_BLK.address);
 }
 
 // void irq_sci(int irq) {
@@ -253,13 +285,6 @@ void acpi_init(acpi_rsd_ptr_t* _rsdp) {
 //     if (fadt->SCI_INT) {
 //         moe_enable_irq(fadt->SCI_INT, irq_sci);
 //     }
-
-//     // printf("ACPI %08llx %08x %02x %04x %02x %04x %02x %04x\n", (uintptr_t)fadt, fadt->Flags, fadt->SCI_INT, fadt->SMI_CMD, fadt->ACPI_ENABLE, fadt->PM1a_CNT_BLK, SLP_TYP5a, (uint16_t)fadt->SLEEP_CONTROL_REG.address);
-//     // for (int i = 0; i < 15; i++) {
-//     //     moe_usleep(1000000);
-//     //     printf(".");
-//     // }
-//     // acpi_set_sleep(5);
 
 //     acpi_enable(1);
 

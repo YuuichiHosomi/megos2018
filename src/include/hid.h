@@ -36,10 +36,25 @@ typedef struct {
     int16_t x, y;
 } moe_hid_mouse_report_t;
 
+typedef struct {
+    union {
+        uint8_t buttons;
+        struct {
+            uint8_t l_button:1;
+            uint8_t r_button:1;
+            uint8_t m_button:1;
+        };
+    };
+    int8_t x, y;
+} moe_hid_raw_mouse_report_t;
+
 typedef struct moe_hid_kbd_report_t {
     uint8_t modifier;
     uint8_t RESERVED_1;
     uint8_t keydata[6];
 } moe_hid_kbd_report_t;
 
-int hid_report_key(moe_hid_kbd_report_t *keyreport);
+int hid_process_key_report(moe_hid_kbd_report_t *keyreport);
+int hid_report_mouse(moe_hid_mouse_report_t *mouse_report);
+uint32_t hid_usage_to_unicode(uint8_t usage, uint8_t modifier);
+int moe_send_key_event(moe_hid_kbd_report_t *keyreport);

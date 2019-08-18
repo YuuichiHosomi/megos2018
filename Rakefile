@@ -36,7 +36,8 @@ when :x64
   URL_OVMF      = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEX64_OVMF.fd"
   PATH_OVMF     = "var/ovmfx64.fd"
   QEMU_ARCH     = "x86_64"
-  QEMU_OPTS     = "-smp 4 -rtc base=localtime -device nec-usb-xhci,id=xhci -device usb-kbd -device usb-mouse -device usb-tablet"
+  QEMU_OPTS     = "-smp 4 -rtc base=localtime -device nec-usb-xhci,id=xhci "
+  # "-device usb-kbd -device usb-mouse -device usb-tablet"
 when :i386
   URL_OVMF      = nil
   PATH_OVMF     = "var/ovmfia32.fd"

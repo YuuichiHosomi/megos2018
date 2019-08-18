@@ -19,10 +19,11 @@ void *memcpy(void *p, const void *q, size_t n);
 void *memset(void *p, int v, size_t n);
 void memset32(uint32_t *p, uint32_t v, size_t n);
 
-void _moe_assert(const char *file, uintptr_t line, ...);
-#define moe_assert(cond, ...) if (!(cond)) { _moe_assert(__FILE__, __LINE__, __VA_ARGS__); }
-void moe_reboot();
-void moe_shutdown_system();
+_Noreturn void _panic(const char *file, uintptr_t line, ...);
+#define moe_assert(cond, ...) if (!(cond)) { _panic(__FILE__, __LINE__, __VA_ARGS__); }
+#define moe_panic(...) _panic(__FILE__, __LINE__, __VA_ARGS__)
+_Noreturn void moe_reboot();
+_Noreturn void moe_shutdown_system();
 
 
 //  Minimal Graphics Subsystem
@@ -49,33 +50,19 @@ typedef struct moe_bitmap_t {
     uint32_t flags, delta, color_key;
 } moe_bitmap_t;
 
-typedef struct moe_console_context_t moe_console_context_t;
-typedef struct moe_font_t moe_font_t;
-typedef struct moe_hid_kbd_report_t moe_hid_kbd_report_t;
-
 #define MOE_BMP_ALPHA       0x0001
 #define MOE_BMP_ROTATE      0x0002
 
-extern const moe_point_t *moe_point_zero;
-extern const moe_size_t *moe_size_zero;
-extern const moe_rect_t *moe_rect_zero;
-extern const moe_edge_insets_t *moe_edge_insets_zero;
+// extern const moe_point_t *moe_point_zero;
+// extern const moe_size_t *moe_size_zero;
+// extern const moe_rect_t *moe_rect_zero;
+// extern const moe_edge_insets_t *moe_edge_insets_zero;
 
 #define MOE_COLOR_TRANSPARENT   0x00000000
 
 moe_bitmap_t *moe_create_bitmap(moe_size_t *size, uint32_t flags, uint32_t color);
 void moe_blt(moe_bitmap_t *dest, moe_bitmap_t *src, moe_point_t *origin, moe_rect_t *rect, uint32_t options);
 void moe_fill_rect(moe_bitmap_t *dest, moe_rect_t *rect, uint32_t color);
-// void moe_blend_rect(moe_bitmap_t *dest, moe_rect_t *rect, uint32_t color);
-// void moe_fill_round_rect(moe_bitmap_t *dest, moe_rect_t *rect, intptr_t radius, uint32_t color);
-// void moe_draw_round_rect(moe_bitmap_t *dest, moe_rect_t *rect, intptr_t radius, uint32_t color);
-// void moe_draw_pixel(moe_bitmap_t *dest, intptr_t x, intptr_t y, uint32_t color);
-// void moe_draw_multi_pixels(moe_bitmap_t *dest, size_t count, moe_point_t *points, uint32_t color);
-// moe_rect_t moe_edge_insets_inset_rect(moe_rect_t *rect, moe_edge_insets_t *insets);
-// moe_point_t moe_draw_string(moe_bitmap_t *dib, moe_font_t *font, moe_point_t *cursor, moe_rect_t *rect, const char *s, uint32_t color);
-// moe_font_t *moe_get_system_font(int type);
-// void moe_set_console_attributes(moe_console_context_t *self, uint32_t attributes);
-// int moe_set_console_cursor_visible(moe_console_context_t *self, int visible);
 
 
 //  Minimal Memory Subsystem
@@ -103,7 +90,6 @@ int moe_create_thread(moe_thread_start start, moe_priority_level_t priority, voi
 int moe_usleep(int64_t us);
 int moe_get_current_thread_id();
 const char *moe_get_current_thread_name();
-// int moe_get_usage();
 _Noreturn void moe_exit_thread(uint32_t exit_code);
 int moe_get_number_of_active_cpus();
 

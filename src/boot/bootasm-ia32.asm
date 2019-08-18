@@ -7,6 +7,9 @@
 %define LOADER_SS   0x18
 
 %define IA32_EFER_MSR   0xC0000080
+%define IA32_MISC_ENABLE_MSR    0x000001A0
+%define IA32_MISC_XD_DISABLE    2
+%define IA32_EFER_NXE           11
 
 [BITS 32]
 [section .text]
@@ -50,10 +53,22 @@ _start_kernel:
     mov [ebx + 4], ebx
     lgdt [ebx + 2]
 
-    ; disable paging before enter LM
+    ; disable paging before enter to LM
     mov eax, cr0
     btr eax, 31 ; PG
     mov cr0, eax
+
+    ; enable XD
+    mov ecx, IA32_MISC_ENABLE_MSR
+    rdmsr
+    btr edx, IA32_MISC_XD_DISABLE
+    jnc .xd_ok
+    wrmsr
+.xd_ok:
+    mov ecx, IA32_EFER_MSR
+    rdmsr
+    bts eax, IA32_EFER_NXE
+    wrmsr
 
     ; load page table for LM
     mov ebx, [ebp + 8]

@@ -23,13 +23,16 @@ targets:
     subsystem: native
     cflags: -mno-sse
     sources:
-      - kernel
-      - moe
       - acpi
       - arch
       - gs
+      - hidmgr
+      - kernel
       - libstd
+      - lpc
       - memory
-      - page
-      - xhci
+      - moe
       - moeasm.asm
+      - page
+      - shell
+      - xhci
