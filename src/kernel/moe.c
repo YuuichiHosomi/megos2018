@@ -12,15 +12,22 @@
 #define CLEANUP_LOAD_TIME   1000
 #define DEFAULT_SCHEDULE_SIZE   256
 #define MAX_THREADS         256
+#define CONTEXT_SAVE_AREA_SIZE  1024
 
 typedef uint32_t moe_affinity_t;
-typedef int thid_t;
+typedef int context_id;
+
+
+typedef union {
+    uint8_t context_save_area[CONTEXT_SAVE_AREA_SIZE];
+} cpu_context_t;
 
 typedef struct moe_thread_t {
-    union {
-        uint8_t context_save_area[1024];
-    };
+    cpu_context_t context;
+    char name[THREAD_NAME_SIZE];
 
+    moe_fiber_t *current_fiber;
+    moe_fiber_t *primary_fiber, *last_fiber;
     union {
         uintptr_t flags;
         struct {
@@ -28,8 +35,9 @@ typedef struct moe_thread_t {
             unsigned running:1;
         };
     };
-    thid_t thid;
+    context_id thid;
     int exit_code;
+
     moe_priority_level_t priority;
     moe_affinity_t soft_affinity, hard_affinity;
     _Atomic uint8_t quantum_left;
@@ -38,8 +46,27 @@ typedef struct moe_thread_t {
     _Atomic (moe_thread_t *) *signal_object;
     moe_measure_t deadline;
 
-    char name[THREAD_NAME_SIZE];
 } moe_thread_t;
+
+
+typedef struct moe_fiber_t {
+    cpu_context_t context;
+    char name[THREAD_NAME_SIZE];
+
+    moe_thread_t *parent_thread;
+    moe_fiber_t *next_sibling, *prev_sibling;
+    union {
+        uintptr_t flags;
+        struct {
+            unsigned zombie:1;
+            unsigned running:1;
+        };
+    };
+    context_id fiber_id;
+    int exit_code;
+
+} moe_fiber_t;
+
 
 typedef enum {
     moe_irql_passive,
@@ -61,15 +88,17 @@ static struct {
     core_specific_data_t *csd;
     moe_queue_t *ready;
     moe_queue_t *retired;
-    _Atomic thid_t next_thid;
+    _Atomic context_id next_thid;
+    _Atomic context_id next_fibid;
     moe_affinity_t system_affinity;
     int ncpu;
     _Atomic int n_active_cpu;
     atomic_flag lock;
 } moe;
 
-extern moe_thread_t *io_do_context_switch(moe_thread_t *from, moe_thread_t *to);
+extern moe_thread_t *_do_switch_context(cpu_context_t *from, cpu_context_t *to);
 extern void io_setup_new_thread(moe_thread_t *thread, uintptr_t* new_sp);
+extern void io_setup_new_fiber(moe_fiber_t *fiber, uintptr_t* new_sp);
 extern int smp_get_current_cpuid();
 
 
@@ -91,7 +120,7 @@ static moe_thread_t *_get_current_thread() {
     uintptr_t flags = io_lock_irq();
     core_specific_data_t *csd = _get_current_csd();
     moe_thread_t *current = csd->current;
-    io_unlock_irq(flags);
+    io_restore_irq(flags);
     return current;
 }
 
@@ -157,7 +186,7 @@ static void _next_thread(core_specific_data_t *csd, moe_thread_t *current, _Atom
         csd->current = next;
         next->running = 1;
         csd->retired = current;
-        io_do_context_switch(current, next);
+        _do_switch_context(&current->context, &next->context);
         csd = _get_current_csd();
         sch_retire(atomic_exchange(&csd->retired, NULL));
     }
@@ -165,8 +194,8 @@ static void _next_thread(core_specific_data_t *csd, moe_thread_t *current, _Atom
 
 void thread_on_start() {
     core_specific_data_t *csd = _get_current_csd();
-    moe_thread_t *current = csd->current;
-    current->running = 1;
+    // moe_thread_t *current = csd->current;
+    // current->running = 1;
     sch_retire(atomic_exchange(&csd->retired, NULL));
 }
 
@@ -180,7 +209,7 @@ int moe_wait_for_object(_Atomic (moe_thread_t *) *obj, int64_t us) {
     }
     moe_measure_t deadline = moe_create_measure(us);
     _next_thread(csd, current, obj, deadline);
-    io_unlock_irq(flags);
+    io_restore_irq(flags);
     return 0;
 }
 
@@ -198,7 +227,7 @@ int moe_signal_object(_Atomic (moe_thread_t *) *obj) {
 
 
 static moe_thread_t *_create_thread(moe_thread_start start, moe_priority_level_t priority, void *args, const char *name) {
-    moe_thread_t* new_thread = moe_alloc_object(sizeof(moe_thread_t), 1);
+    moe_thread_t *new_thread = moe_alloc_object(sizeof(moe_thread_t), 1);
     new_thread->thid = atomic_fetch_add(&moe.next_thid, 1);
     new_thread->priority = priority;
     if (priority) {
@@ -253,7 +282,6 @@ void thread_reschedule() {
 }
 
 
-
 int moe_create_thread(moe_thread_start start, moe_priority_level_t priority, void *args, const char *name) {
     moe_thread_t *self = _create_thread(start, priority ? priority : priority_normal, args, name);
     if (self) {
@@ -284,6 +312,102 @@ int moe_usleep(int64_t us) {
 }
 
 
+moe_fiber_t *_create_fiber(moe_thread_start start, void *args, size_t stack_size, const char *name) {
+    moe_thread_t *current_thread = _get_current_thread();
+    moe_fiber_t *new_fiber = moe_alloc_object(sizeof(moe_fiber_t), 1);
+    new_fiber->parent_thread = current_thread;
+    new_fiber->fiber_id = atomic_fetch_add(&moe.next_fibid, 1);
+    if (name) {
+        strncpy(&new_fiber->name[0], name, THREAD_NAME_SIZE - 1);
+    }
+    if (start) {
+        stack_size = stack_size ? stack_size : 0x10000;
+        uintptr_t stack_count = stack_size / sizeof(uintptr_t);
+        uintptr_t* stack = moe_alloc_object(stack_size, 1);
+        uintptr_t* sp = stack + stack_count;
+        *--sp = 0;
+        *--sp = 0x00007fffdeadbeef;
+        *--sp = (uintptr_t)args;
+        *--sp = (uintptr_t)start;
+        io_setup_new_fiber(new_fiber, sp);
+    }
+    return new_fiber;
+}
+
+
+moe_fiber_t *moe_get_primary_fiber() {
+    moe_thread_t *current_thread = _get_current_thread();
+    if (current_thread->primary_fiber == 0) {
+        moe_fiber_t *new_fiber = _create_fiber(NULL, NULL, 0, current_thread->name);
+        current_thread->primary_fiber = new_fiber;
+        current_thread->last_fiber = new_fiber;
+        current_thread->current_fiber = new_fiber;
+    }
+    return current_thread->primary_fiber;
+}
+
+moe_fiber_t *moe_create_fiber(moe_thread_start start, void *args, size_t stack_size, const char *name) {
+    moe_thread_t *current_thread = _get_current_thread();
+    // moe_fiber_t *primary_fiber = 
+    moe_get_primary_fiber();
+    moe_fiber_t *new_fiber =_create_fiber(start, args, stack_size, name);
+
+    moe_fiber_t *last_fiber = current_thread->last_fiber;
+    last_fiber->next_sibling = new_fiber;
+    new_fiber->prev_sibling = last_fiber;
+    current_thread->last_fiber = new_fiber;
+
+    return new_fiber;
+}
+
+void fiber_on_start() {
+    // __asm__ volatile ("int3");
+    // moe_fiber_t *current = moe_get_current_fiber();
+    // current->running = 1;
+}
+
+
+moe_fiber_t *moe_get_current_fiber() {
+    return _get_current_thread()->current_fiber;
+}
+
+int moe_get_current_fiber_id() {
+    moe_fiber_t *current = moe_get_current_fiber();
+    return current ? current->fiber_id : 0;
+}
+
+const char *moe_get_current_fiber_name() {
+    moe_fiber_t *current = moe_get_current_fiber();
+    return current ? current->name : NULL;
+}
+
+void moe_yield() {
+    if (!moe.csd) return;
+    moe_thread_t *current_thread = _get_current_thread();
+    moe_fiber_t *current = current_thread->current_fiber;
+    if (!current) return;
+    moe_fiber_t *next = current->next_sibling;
+    if (!next) {
+        next = current->parent_thread->primary_fiber;
+    }
+    if (current != next) {
+        current->running = 0;
+        next->running = 1;
+        current_thread->current_fiber = next;
+        _do_switch_context(&current->context, &next->context);
+    }
+}
+
+_Noreturn void moe_exit_fiber(uint32_t exit_code) {
+    moe_fiber_t *current = moe_get_current_fiber();
+    current->zombie = 1;
+    current->exit_code = exit_code;
+    // TODO: everything
+    moe_yield();
+    for (;;) io_hlt();
+}
+
+
 _Noreturn void scheduler_thread(void *args) {
     for (;;) {
         // TODO: everything
@@ -300,6 +424,7 @@ void thread_init(int ncpu) {
     moe.thread_list = moe_alloc_object(sizeof(void *), MAX_THREADS);
     moe.ready = moe_queue_create(DEFAULT_SCHEDULE_SIZE);
     moe.retired = moe_queue_create(DEFAULT_SCHEDULE_SIZE);
+    moe.next_fibid = 1;
 
     core_specific_data_t *_csd = moe_alloc_object(sizeof(core_specific_data_t), ncpu);
     for (int i = 0; i < ncpu; i++) {
@@ -408,7 +533,7 @@ int moe_sem_wait(moe_semaphore_t *self, int64_t us) {
     do {
         moe_thread_t *expected = NULL;
         if (atomic_compare_exchange_weak(&self->thread, &expected, current)) {
-            moe_wait_for_object(&self->thread, 0);
+            moe_wait_for_object(&self->thread, timeout);
             if (!moe_sem_trywait(self)) {
                 return 0;
             }

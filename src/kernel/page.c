@@ -98,7 +98,7 @@ void *pg_map(uintptr_t base_pa, void *base_va, size_t size, uint64_t attributes)
         pg_set_pte(target_va, target_pa | attributes, 1);
     }
     invalidate_tlb();
-    io_unlock_irq(flags);
+    io_restore_irq(flags);
 
     return base_va;
 }

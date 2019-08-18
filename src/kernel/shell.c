@@ -31,8 +31,8 @@ uint32_t key_in(int wait) {
     return result;
 }
 
-_Noreturn void test_thread(void *args) {
-    int k = moe_get_current_thread_id();
+_Noreturn void fiber_test_1(void *args) {
+    int k = moe_get_current_fiber_id();
     int padding = 2;
     int w = 10;
     moe_rect_t rect = {{k * w, padding}, {w - padding, w - padding}};
@@ -40,19 +40,30 @@ _Noreturn void test_thread(void *args) {
     for (;;) {
         moe_fill_rect(NULL, &rect, color);
         color += k;
-        moe_usleep(10000);
+        moe_yield();
+    }
+}
+
+_Noreturn void fiber_test_thread(void *args) {
+    for (int i = 0; i < 20; i++) {
+        char name[32];
+        snprintf(name, 32, "test_#%d", 1 + i);
+        moe_create_fiber(&fiber_test_1, NULL, 0, name);
+        putchar('.');
+        moe_yield();
+    }
+    for (;;) {
+        moe_usleep(1);
+        moe_yield();
     }
 }
 
 void shell_init() {
 
-    cin = moe_queue_create(256);
+    moe_create_thread(&fiber_test_thread, 0, NULL, "fiber_test");
+    moe_usleep(1000000);
 
-    for (int i = 0; i < 20; i++) {
-        moe_usleep(100000);
-        moe_create_thread(&test_thread, 0, NULL, "test");
-        putchar('.');
-    }
+    cin = moe_queue_create(256);
 
     // 💩
     printf("\n\nUNCommand Mode");
