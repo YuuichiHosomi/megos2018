@@ -69,7 +69,6 @@ static inline void io_hlt() { __asm__ volatile("hlt"); }
 
 int atomic_bit_test_and_set(void *p, size_t bit);
 int atomic_bit_test_and_clear(void *p, size_t bit);
-int atomic_bit_test(void *p, size_t bit);
 
 
 typedef void (*MOE_IRQ_HANDLER)(int irq);

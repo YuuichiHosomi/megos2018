@@ -116,6 +116,7 @@ int moe_sem_wait(moe_semaphore_t *self, int64_t us);
 void moe_sem_signal(moe_semaphore_t *self);
 intptr_t moe_sem_getvalue(moe_semaphore_t *self);
 
+#define MOE_FOREVER INT64_MAX
 typedef uint64_t moe_measure_t;
 moe_measure_t moe_create_measure(int64_t);
 int moe_measure_until(moe_measure_t);

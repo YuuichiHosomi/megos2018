@@ -57,6 +57,7 @@ void kernel_thread(void *args) {
     // xhci_init();
     hid_init();
     shell_init();
+    for (;;) io_hlt();
 }
 
 static _Noreturn void start_kernel() {
