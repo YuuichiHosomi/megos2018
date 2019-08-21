@@ -10,7 +10,6 @@
 #define DEBUG
 
 #define MAX_SLOTS           64
-#define EVENT_QUEUE_SIZE    64
 #define EVENT_MSI_VALUE     1
 
 #define MAX_TR              256
@@ -304,6 +303,9 @@ typedef struct {
 } usb_device_context;
 
 
+/*********************************************************************/
+
+
 typedef enum {
     urb_state_any = -1,
     urb_state_none = 0,
@@ -341,7 +343,9 @@ typedef struct {
 typedef struct xhci_t {
     usb_host_controller_t uhci;
 
-    moe_queue_t *event_queue;
+    moe_semaphore_t *sem_event;
+    moe_semaphore_t *sem_urb;
+    moe_semaphore_t *sem_request;
 
     ring_context tr_ctx[MAX_TR];
 
@@ -357,8 +361,6 @@ typedef struct xhci_t {
     xhci_trb_t *ERS0;
 
     usb_request_block_t *urbs;
-    moe_semaphore_t *sem_urb;
-    moe_semaphore_t *sem_request;
     _Atomic uint64_t port_change_request;
     moe_queue_t *port_change_queue;
 
@@ -373,7 +375,7 @@ int xhci_init_dev(xhci_t *self);
 
 
 void xhci_msi_handler(int irq) {
-    moe_queue_write(xhci.event_queue, EVENT_MSI_VALUE);
+    moe_sem_signal(xhci.sem_event);
 }
 
 
@@ -435,18 +437,18 @@ static uintptr_t alloc_ep_ring(xhci_t *self, int slot_id, int epno) {
 
 
 uint32_t xhci_reset_port(xhci_t *self, int port_id) {
-    uintptr_t portsc = get_portsc(self, port_id);
+    _Atomic uint32_t *portsc = MOE_PA2VA(get_portsc(self, port_id));
     wait_cnr(self, 0);
-    uint32_t status = READ_PHYSICAL_UINT32(portsc);
+    uint32_t status = atomic_load(portsc);
     uint32_t ccs_csc = USB_PORTSC_CCS | USB_PORTSC_CSC;
     if ((status & ccs_csc) == ccs_csc) {
-        WRITE_PHYSICAL_UINT32(portsc, (status & 0x0e00c3e0) | USB_PORTSC_CSC | USB_PORTSC_PR);
+        atomic_store(portsc, (status & 0x0e00c3e0) | USB_PORTSC_CSC | USB_PORTSC_PR);
         wait_cnr(self, 0);
-        while (READ_PHYSICAL_UINT32(portsc) & USB_PORTSC_PR) {
+        while (atomic_load(portsc) & USB_PORTSC_PR) {
             moe_usleep(10000);
         }
     }
-    return READ_PHYSICAL_UINT32(portsc);
+    return atomic_load(portsc);
 }
 
 
@@ -496,9 +498,23 @@ xhci_trb_t *xhci_write_transfer(xhci_t *self, usb_request_block_t *urb, int slot
 }
 
 
+usb_request_block_t *urb_allocate(xhci_t *self) {
+    for (int i = 0; i < MAX_URB; i++) {
+        usb_request_block_t *urb = &self->urbs[i];
+        if (moe_measure_until(urb->reuse_delay)) continue;
+        urb_state_t expected = atomic_load(&urb->state);
+        if (expected != urb_state_none) continue;
+        if (atomic_compare_exchange_weak(&urb->state, &expected, urb_state_acquired)) {
+            return urb;
+        }
+    }
+    return NULL;
+}
+
 usb_request_block_t *xhci_find_urb_by_trb(xhci_t *self, xhci_trb_t *trb, urb_state_t state) {
     for (int i = 0; i < MAX_URB; i++) {
         usb_request_block_t *urb = &self->urbs[i];
+        if (urb->state == urb_state_none) continue;
         if (urb->scheduled_trb == trb) {
             if (state == urb_state_any || urb->state == state) {
                 return urb;
@@ -516,18 +532,7 @@ void urb_dispose(usb_request_block_t *urb) {
 
 
 usb_request_block_t *xhci_schedule_command(xhci_t *self, xhci_trb_t *trb) {
-    usb_request_block_t *result = NULL;
-    for (int i = 0; i < MAX_URB; i++) {
-        usb_request_block_t *urb = &self->urbs[i];
-        if (moe_measure_until(urb->reuse_delay)) continue;
-        urb_state_t expected = atomic_load(&urb->state);
-        if (expected != urb_state_none) continue;
-        urb_state_t desired = urb_state_acquired;
-        if (atomic_compare_exchange_weak(&urb->state, &expected, desired)) {
-            result = urb;
-            break;
-        }
-    }
+    usb_request_block_t *result = urb_allocate(self);
     if (result) {
         xhci_write_transfer(self, result, 0, 0, trb, 1);
     }
@@ -715,6 +720,8 @@ static int on_command_complete(xhci_t *self, xhci_trb_t *trb) {
 
     xhci_trb_t *command = MOE_PA2VA(trb->cce.ptr);
     uint8_t cc = trb->cce.completion;
+    int slot_id = trb->cce.slot_id;
+    printf("CCE(%d %d %d)", slot_id, command->common.type, cc);
 
     usb_request_block_t *urb = xhci_find_urb_by_trb(self, command, urb_state_scheduled);
     if (urb) {
@@ -724,29 +731,31 @@ static int on_command_complete(xhci_t *self, xhci_trb_t *trb) {
         moe_sem_signal(self->sem_urb);
         return 0;
     }
-    int slot_id = trb->cce.slot_id;
-    printf("CCE(%d %d %d)", slot_id, command->common.type, cc);
     return 0;
 }
 
 
 void process_event(xhci_t *self) {
-    wait_cnr(self, 0);
-    uint64_t ERDP = READ_PHYSICAL_UINT64(self->base_rts + 0x38);
-    xhci_trb_t *er = MOE_PA2VA(ERDP & ~0x1F);
-    xhci_trb_t *er_base = (xhci_trb_t*)((uintptr_t)er & ~0xFFF);
-    uintptr_t index = er - er_base;
-    int cycle = self->event_cycle;
 
+    int cycle = self->event_cycle;
     for (;;) {
-        xhci_trb_t *trb = er_base + index;
+        _Atomic MOE_PHYSICAL_ADDRESS *ERDP = MOE_PA2VA(self->base_rts + 0x38);
+        wait_cnr(self, 0);
+        MOE_PHYSICAL_ADDRESS er = atomic_load(ERDP);
+        xhci_trb_t *trb = MOE_PA2VA(er & ~15);
         if (trb->common.C != self->event_cycle) break;
         int trb_type = trb->common.type;
+        printf("\n<TRB %08x %d>", ((uintptr_t)trb) & 0xFFFFFFFF, trb_type);
         switch (trb_type) {
             case TRB_PORT_STATUS_CHANGE_EVENT:
-                // atomic_bit_test_and_set(&self->port_change_request, trb->psc.port_id);
-                moe_queue_write(self->port_change_queue, trb->psc.port_id);
+            {
+                int port_id = trb->psc.port_id;
+                int cc = trb->psc.completion;
+                _Atomic uint32_t *portsc = MOE_PA2VA(get_portsc(self, port_id));
+                printf("PSC(%d %d %08x)", port_id, cc, atomic_load(portsc));
+                moe_queue_write(self->port_change_queue, port_id);
                 moe_sem_signal(self->sem_request);
+            }
                 break;
 
             case TRB_COMMAND_COMPLETION_EVENT:
@@ -767,16 +776,17 @@ void process_event(xhci_t *self) {
 #endif
                 break;
         }
+        MOE_PHYSICAL_ADDRESS er_base = er & ~0xFFF;
+        int index = (er - er_base) / sizeof(xhci_trb_t);
         index++;
         if (index == SIZE_EVENT_RING) {
             index = 0;
             cycle ^= 1;
             self->event_cycle = cycle;
         }
+        wait_cnr(self, 0);
+        atomic_store(ERDP, (er & ~0xFF7) | (index * sizeof(xhci_trb_t)) | 8);
     }
-    ERDP = (ERDP & ~0xFF3) | (index * sizeof(xhci_trb_t)) | 8;
-    wait_cnr(self, 0);
-    WRITE_PHYSICAL_UINT64(self->base_rts + 0x38, ERDP);
 }
 
 
@@ -801,98 +811,98 @@ _Noreturn void xhci_event_thread(void *args) {
 #endif
 
     for (;;) {
-        intptr_t value;
-        if (moe_queue_wait(self->event_queue, &value, MOE_FOREVER)) {
+        if (!moe_sem_wait(self->sem_event, MOE_FOREVER)) {
             process_event(self);
         }
     }
 }
 
 
-static int atomic_bit_scan(_Atomic uint64_t *p) {
-    uint64_t word = atomic_load(p);
-    if (word == 0) return -1;
-    return __builtin_ctz(word);
-}
-
-
 static void on_port_status_change(xhci_t *self, int port_id) {
-    const int64_t timeout = 500000;
+    const int64_t timeout = 3000000;
+    const uint32_t magic_word = 0x0e00c3e0;
 
-    uintptr_t portsc = get_portsc(self, port_id);
+    // uint32_t port_status = xhci_reset_port(self, port_id);
+    _Atomic uint32_t *portsc = MOE_PA2VA(get_portsc(self, port_id));
     wait_cnr(self, 0);
-    uint32_t status = READ_PHYSICAL_UINT32(portsc);
-
-    if (status & USB_PORTSC_CSC) {
+    uint32_t port_status = atomic_load(portsc);
+    if (port_status & USB_PORTSC_CSC) {
+        int attached = port_status & USB_PORTSC_CCS;
 #ifdef DEBUG
-        printf("PSC(%d %d)", port_id, status & USB_PORTSC_CCS);
+        // printf("PSC(%d %d %08x)", port_id, attached, port_status);
 #endif
-        WRITE_PHYSICAL_UINT32(portsc, (status & 0x0e00c3e0) | USB_PORTSC_CSC | USB_PORTSC_PR);
-        if (status & USB_PORTSC_CCS) {
-            while (READ_PHYSICAL_UINT32(portsc) & USB_PORTSC_PR) {
-                moe_usleep(10000);
+        atomic_store(portsc, (port_status & magic_word) | USB_PORTSC_CSC | USB_PORTSC_PR);
+        // while (atomic_load(portsc) & USB_PORTSC_PR) {
+        //     moe_usleep(10000);
+        // }
+    }
+
+    port_status = atomic_load(portsc);
+    if (port_status & USB_PORTSC_PRC) {
+#ifdef DEBUG
+        // printf("PRC(%d)", port_id);
+#endif
+        atomic_store(portsc, USB_PORTSC_PRC | (port_status & magic_word));
+
+        port_status = atomic_load(portsc);
+        int attached = port_status & USB_PORTSC_CCS;
+
+        // printf("[PORT %d %08x]", port_id, port_status);
+        if (attached) {
+            xhci_trb_t cmd = trb_create(TRB_ENABLE_SLOT_COMMAND);
+            xhci_trb_t result;
+            int status = execute_command(self, &cmd, &result, timeout);
+            if (status) {
+                // printf("\n[ENABLE SLOT PORT %d TIMED_OUT]", port_id);
+                return;
             }
-            status = READ_PHYSICAL_UINT32(portsc);
-            // status = READ_PHYSICAL_UINT32(portsc);
-            // status = 0;
-            if (status & USB_PORTSC_PED) {
-                atomic_bit_test_and_set(&self->wait_for_allocate_port, port_id);
-                xhci_trb_t cmd = trb_create(TRB_ENABLE_SLOT_COMMAND);
-                xhci_trb_t result;
-                if (!execute_command(self, &cmd, &result, timeout)) {
-                    int slot_id = result.cce.slot_id;
+            int slot_id = result.cce.slot_id;
+            // printf("\n[ENABLE SLOT %d PORT %d CC %d]", slot_id, port_id, result.cce.completion);
 
-                    printf("\n[ENABLE SLOT %d PORT %d CC %d]", slot_id, port_id, result.cce.completion);
+            self->port2slot[port_id] = slot_id;
+            // return;
+            usb_device_context *usb_device = &self->usb_devices[slot_id];
 
-                    self->port2slot[port_id] = slot_id;
-                    usb_device_context *usb_device = &self->usb_devices[slot_id];
+            uint64_t device_context = moe_alloc_physical_page(1);
+            memset(MOE_PA2VA(device_context), 0, 4096);
+            self->DCBAA[slot_id] = device_context;
 
-                    uint64_t device_context = moe_alloc_physical_page(1);
-                    memset(MOE_PA2VA(device_context), 0, 4096);
-                    self->DCBAA[slot_id] = device_context;
+            uint64_t input_context = moe_alloc_physical_page(1);
+            usb_device->input_context = input_context;
+            xhci_input_control_ctx_t *icc = MOE_PA2VA(input_context);
+            memset(icc, 0, self->context_size * 33);
 
-                    uint64_t input_context = moe_alloc_physical_page(1);
-                    usb_device->input_context = input_context;
-                    xhci_input_control_ctx_t *icc = MOE_PA2VA(input_context);
-                    memset(icc, 0, self->context_size * 33);
+            xhci_slot_ctx_data_t *slot = MOE_PA2VA(input_context + self->context_size);
+            uintptr_t portsc = get_portsc(self, port_id);
+            slot->root_hub_port_no = port_id;
+            slot->speed = READ_PHYSICAL_UINT32(portsc) >> 10;
+            slot->context_entries = 1;
 
-                    xhci_slot_ctx_data_t *slot = MOE_PA2VA(input_context + self->context_size);
-                    uintptr_t portsc = get_portsc(self, port_id);
-                    slot->root_hub_port_no = port_id;
-                    slot->speed = READ_PHYSICAL_UINT32(portsc) >> 10;
-                    slot->context_entries = 1;
+            configure_endpoint(self, slot_id, 1, 4, 0, 0, 0);
 
-                    configure_endpoint(self, slot_id, 1, 4, 0, 0, 0);
+            xhci_trb_t adc = trb_create(TRB_ADDRESS_DEVICE_COMMAND);
+            adc.address_device_command.ptr = input_context;
+            adc.address_device_command.slot_id = slot_id;
+            status = execute_command(self, &adc, &result, timeout);
+            // if (status) {
+            //     printf("\n[ADDRESS DEVICE SLOT %d PORT %d TIMED_OUT]", slot_id, port_id);
+            // } else {
+            //     printf("\n[ADDRESS DEVICE SLOT %d PORT %d CC %d]", slot_id, port_id, result.cce.completion);
+            // }
 
-                    xhci_trb_t adc = trb_create(TRB_ADDRESS_DEVICE_COMMAND);
-                    adc.address_device_command.ptr = input_context;
-                    adc.address_device_command.slot_id = slot_id;
-                    if (!execute_command(self, &adc, &result, timeout)) {
-                        printf("\n[ADDRESS DEVICE SLOT %d PORT %d CC %d]", slot_id, port_id, result.cce.completion);
-                    }
-                }
-            }
         } else {
-//     if (status & USB_PORTSC_PRC) {
-// #ifdef DEBUG
-//         printf("PRC(%d)", port_id);
-// #endif
-//         WRITE_PHYSICAL_UINT32(portsc, USB_PORTSC_PRC | (status & 0x0e00c3e0));
-//     }
-            status = READ_PHYSICAL_UINT32(portsc);
             xhci_trb_t cmd = trb_create(TRB_DISABLE_SLOT_COMMAND);
             xhci_trb_t result;
             cmd.enable_slot_command.slot_id = self->port2slot[port_id];
-            execute_command(self, &cmd, &result, timeout);
-            printf("\n[DISABLE SLOT %d PORT %d CC %d]", cmd.enable_slot_command.slot_id, port_id, result.cce.completion);
+            int status = execute_command(self, &cmd, &result, timeout);
+            self->port2slot[port_id] = 0;
+            // if (status) {
+            //     printf("\n[DISABLE SLOT PORT %d TIMED_OUT]", port_id);
+            //     return;
+            // } else {
+            //     printf("\n[DISABLE SLOT %d PORT %d CC %d]", cmd.enable_slot_command.slot_id, port_id, result.cce.completion);
+            // }
         }
-    }
-    status = READ_PHYSICAL_UINT32(portsc);
-    if (status & USB_PORTSC_PRC) {
-#ifdef DEBUG
-        printf("PRC(%d)", port_id);
-#endif
-        WRITE_PHYSICAL_UINT32(portsc, USB_PORTSC_PRC | (status & 0x0e00c3e0));
     }
 }
 
@@ -902,13 +912,11 @@ _Noreturn void xhci_request_thread(void *args) {
     xhci_t *self = args;
 
     for (;;) {
-        moe_sem_wait(self->sem_request, MOE_FOREVER);   
+        moe_sem_wait(self->sem_request, MOE_FOREVER);
 
-        // int port_id = atomic_bit_scan(&self->port_change_request);
         int port_id = moe_queue_read(self->port_change_queue, 0);
         if (port_id > 0) {
             on_port_status_change(self, port_id);
-            // atomic_bit_test_and_clear(&self->port_change_request, port_id);
             moe_usleep(100000);
         }
 
@@ -928,7 +936,7 @@ void xhci_init() {
         void *p = pg_map_mmio(bar & ~0xF, bar_limit);
         printf("XHCI: map mmio [%012llx %08llx] => [%p]\n", bar, bar_limit, p);
 
-        xhci.event_queue = moe_queue_create(EVENT_QUEUE_SIZE);
+        xhci.sem_event = moe_sem_create(0);
         xhci.sem_request = moe_sem_create(0);
         xhci.sem_urb = moe_sem_create(0);
         xhci.port_change_queue = moe_queue_create(64);
