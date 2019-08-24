@@ -379,19 +379,21 @@ void irq_livt() {
 }
 
 moe_measure_t moe_create_measure(int64_t us) {
-    if (us >= 0) {
+    if (us == MOE_FOREVER) {
+        return MOE_FOREVER;
+    }
+    if (us > 0) {
         return lapic_timer_value + (us + 1000) / 1000;
     } else {
-        return -1;
+        return 0;
     }
 }
 
-int moe_measure_until(moe_measure_t timeout) {
-    if (timeout >= 0) {
-        return (intptr_t)(timeout - lapic_timer_value) > 0;
-    } else {
+int moe_measure_until(moe_measure_t deadline) {
+    if (deadline == MOE_FOREVER) {
         return 1;
     }
+    return (intptr_t)(deadline - lapic_timer_value) > 0;
 }
 
 int smp_send_invalidate_tlb() {

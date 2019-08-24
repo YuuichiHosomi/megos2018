@@ -52,6 +52,7 @@ _Noreturn void fiber_test_thread(void *args) {
         moe_create_fiber(&fiber_test_1, NULL, 0, name);
         putchar('.');
         moe_yield();
+        moe_usleep(10000);
     }
     for (;;) {
         moe_usleep(1);

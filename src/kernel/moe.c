@@ -151,6 +151,8 @@ static int sch_retire(moe_thread_t *thread) {
 }
 
 static moe_thread_t *sch_next() {
+    for (int i = 0; i < 2; i++) {
+
     moe_thread_t *thread;
     do {
         thread = (moe_thread_t*)moe_queue_read(moe.ready, 0);
@@ -170,6 +172,8 @@ static moe_thread_t *sch_next() {
             sch_add(p);
         }
         atomic_flag_clear(&moe.lock);
+    }
+
     }
 
     return _get_current_csd()->idle;
@@ -266,7 +270,7 @@ _Noreturn void moe_exit_thread(uint32_t exit_code) {
     moe_thread_t *current = _get_current_thread();
     current->exit_code = exit_code;
     current->zombie = 1;
-    moe_usleep(0);
+    moe_usleep(MOE_FOREVER);
     for (;;) io_hlt();
 }
 
@@ -274,10 +278,17 @@ void thread_reschedule() {
     if (!moe.csd) return;
     core_specific_data_t *csd = _get_current_csd();
     moe_thread_t *current = csd->current;
-    if (current->priority >= priority_realtime) {
+    moe_priority_level_t priority = current->priority;
+    if (priority >= priority_realtime) {
         // do nothing
-    } else {
+    } else if (priority == priority_idle) {
         _next_thread(csd, current, NULL, 0);
+    } else {
+        int quantum = atomic_fetch_add(&current->quantum_left, -1);
+        if (quantum <= 1) {
+            atomic_fetch_add(&current->quantum_left, current->quantum);
+            _next_thread(csd, current, NULL, 0);
+        }
     }
 }
 
@@ -630,6 +641,13 @@ size_t moe_queue_get_estimated_free(moe_queue_t* self) {
 
 
 /*********************************************************************/
+
+int atomic_bit_scan(_Atomic uint64_t *p) {
+    uint64_t word = atomic_load(p);
+    if (word == 0) return -1;
+    return __builtin_ctz(word);
+}
+
 
 size_t atomic_bit_scan_and_reset(_Atomic uint32_t *p, size_t limit, size_t def_val) {
     size_t words = (limit + 31) / 32;

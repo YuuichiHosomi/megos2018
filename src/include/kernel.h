@@ -10,6 +10,9 @@
 #include "acpi.h"
 
 
+int _zprintf(const char *format, ...);
+
+
 #define MAX_GATES_INDEX     8
 typedef struct {
     uint64_t master_cr3;

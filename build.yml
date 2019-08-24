@@ -35,4 +35,5 @@ targets:
       - moeasm.asm
       - page
       - shell
+      - usb
       - xhci

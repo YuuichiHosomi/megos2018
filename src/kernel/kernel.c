@@ -2,6 +2,7 @@
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
 #include "moe.h"
+#include <stdarg.h>
 #include "kernel.h"
 
 
@@ -44,6 +45,17 @@ _Noreturn void moe_reboot() {
     for (;;) io_hlt();
 }
 
+static moe_semaphore_t *sem_zpf;
+int _zprintf(const char *format, ...) {
+    va_list list;
+    va_start(list, format);
+    moe_sem_wait(sem_zpf, MOE_FOREVER);
+    int retval = vprintf(format, list);
+    moe_sem_signal(sem_zpf);
+    va_end(list);
+    return retval;
+}
+
 
 /*********************************************************************/
 
@@ -54,9 +66,9 @@ void kernel_thread(void *args) {
     printf("Minimal Operating Environment v0.6.1 (codename warbler) [%d Cores, Memory %dMB]\n",
         moe_get_number_of_active_cpus(), (int)(bootinfo.total_memory >> 8));
 
-    // xhci_init();
+    xhci_init();
     hid_init();
-    shell_init();
+    // shell_init();
     for (;;) io_hlt();
 }
 
@@ -68,6 +80,7 @@ static _Noreturn void start_kernel() {
     acpi_init((void *)bootinfo.acpi);
     arch_init(&bootinfo);
     pg_enter_strict_mode();
+    sem_zpf = moe_sem_create(1);
 
     moe_create_thread(&kernel_thread, 0, NULL, "kernel");
 

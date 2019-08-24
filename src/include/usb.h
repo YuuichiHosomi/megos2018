@@ -138,26 +138,27 @@ typedef union {
 typedef struct usb_host_controller_t usb_host_controller_t;
 
 typedef int (*UHC_CONFIGURE_EP)
-(usb_host_controller_t *self, int epno, int attributes, int max_packet_size, int interval);
+(usb_host_controller_t *uhc, int epno, int attributes, int max_packet_size, int interval, int64_t timeout);
 
 typedef int (*UHC_RESET_EP)
-(usb_host_controller_t *self, int epno);
+(usb_host_controller_t *self, int epno, int64_t timeout);
 
 typedef int (*UHC_SET_MAX_PACKET_SIZE)
-(usb_host_controller_t *self, int mask_packet_size);
+(usb_host_controller_t *self, int mask_packet_size, int64_t timeout);
 
 typedef int (*UHC_GET_MAX_PACKET_SIZE)
 (usb_host_controller_t *self);
 
 typedef int (*UHC_CONTROL)
-(usb_host_controller_t *self, int endpoint, int trt, urb_setup_data_t setup, uintptr_t buffer);
+(usb_host_controller_t *self, int endpoint, int trt, urb_setup_data_t setup, uintptr_t buffer, int64_t timeout);
 
 typedef int (*UHC_DATA_TRANSFER)
-(usb_host_controller_t *self, int endpoint, uintptr_t buffer, uint16_t length);
+(usb_host_controller_t *self, int endpoint, uintptr_t buffer, uint16_t length, int64_t timeout);
 
 // USB virtual host controller
 typedef struct usb_host_controller_t {
     void *context;
+    moe_semaphore_t *semaphore;
     int slot_id;
     UHC_CONFIGURE_EP configure_ep;
     UHC_RESET_EP reset_ep;
