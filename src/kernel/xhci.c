@@ -7,7 +7,7 @@
 #include "usb.h"
 
 
-#define DEBUG
+// #define DEBUG
 #ifdef DEBUG
 #define DEBUG_PRINT(...)    _zprintf(__VA_ARGS__)
 #else
@@ -15,7 +15,7 @@
 #endif
 
 
-void usb_new_device(usb_host_controller_t *hci, int slot_id);
+void usb_new_device(usb_host_interface_t *hci, int slot_id);
 
 
 #define MAX_SLOTS           64
@@ -367,7 +367,7 @@ typedef struct {
 
 
 typedef struct xhci_t {
-    usb_host_controller_t uhci;
+    usb_host_interface_t uhci;
 
     moe_semaphore_t *sem_event;
     moe_semaphore_t *sem_urb;
@@ -658,7 +658,7 @@ uint32_t xhci_reset_port(xhci_t *self, int port_id) {
 }
 
 
-int uhc_configure_ep(usb_host_controller_t *uhc, int epno, int attributes, int max_packet_size, int interval, int64_t timeout) {
+int uhi_configure_ep(usb_host_interface_t *uhc, int epno, int attributes, int max_packet_size, int interval, int64_t timeout) {
     xhci_trb_t response = trb_create(0);
 
     xhci_t *self = uhc->context;
@@ -675,7 +675,7 @@ int uhc_configure_ep(usb_host_controller_t *uhc, int epno, int attributes, int m
     return response.cce.completion;
 }
 
-int uhc_reset_ep(usb_host_controller_t *uhc, int epno, int64_t timeout) {
+int uhi_reset_ep(usb_host_interface_t *uhc, int epno, int64_t timeout) {
     xhci_trb_t response = trb_create(0);
 
     xhci_t *self = uhc->context;
@@ -689,7 +689,7 @@ int uhc_reset_ep(usb_host_controller_t *uhc, int epno, int64_t timeout) {
     return response.cce.completion;
 }
 
-int uhc_get_max_packet_size(usb_host_controller_t *uhc) {
+int uhi_get_max_packet_size(usb_host_interface_t *uhc) {
     xhci_t *self = uhc->context;
     int slot_id = uhc->slot_id;
 
@@ -699,7 +699,7 @@ int uhc_get_max_packet_size(usb_host_controller_t *uhc) {
     return ep->max_packet_size;
 }
 
-int uhc_set_max_packet_size(usb_host_controller_t *uhc, int max_packet_size, int64_t timeout) {
+int uhi_set_max_packet_size(usb_host_interface_t *uhc, int max_packet_size, int64_t timeout) {
     xhci_trb_t response = trb_create(0);
     xhci_t *self = uhc->context;
     int slot_id = uhc->slot_id;
@@ -727,7 +727,7 @@ int uhc_set_max_packet_size(usb_host_controller_t *uhc, int max_packet_size, int
     return response.cce.completion;
 }
 
-int uhc_control(usb_host_controller_t *uhc, int epno, int trt, urb_setup_data_t setup_data, uintptr_t buffer, int64_t timeout) {
+int uhi_control(usb_host_interface_t *uhc, int dci, int trt, urb_setup_data_t setup_data, uintptr_t buffer, int64_t timeout) {
     xhci_trb_t response = trb_create(0);
     xhci_t *self = uhc->context;
     int slot_id = uhc->slot_id;
@@ -740,7 +740,7 @@ int uhc_control(usb_host_controller_t *uhc, int epno, int trt, urb_setup_data_t 
     setup.setup.trb_xfer_len = 8;
     setup.setup.TRT = trt;
     setup.setup.IDT = 1;
-    xhci_write_transfer(self, NULL, slot_id, epno, &setup, 0);
+    xhci_write_transfer(self, NULL, slot_id, dci, &setup, 0);
 
     if (has_data) {
         xhci_trb_t data = trb_create(TRB_DATA);
@@ -750,13 +750,13 @@ int uhc_control(usb_host_controller_t *uhc, int epno, int trt, urb_setup_data_t 
         data.normal.DIR = (trt == URB_TRT_CONTROL_IN);
         // data.normal.IOC = 1;
         // data.normal.ISP = 1;
-        xhci_write_transfer(self, NULL, slot_id, epno, &data, 0);
+        xhci_write_transfer(self, NULL, slot_id, dci, &data, 0);
     }
 
     xhci_trb_t status = trb_create(TRB_STATUS);
     status.normal.DIR = (trt != URB_TRT_CONTROL_IN);
     status.normal.IOC = 1;
-    schedule_transfer(self, uhc->semaphore, slot_id, epno, &status, &response, 1, timeout);
+    schedule_transfer(self, uhc->semaphore, slot_id, dci, &status, &response, 1, timeout);
 
     // return response.cce.completion;
     switch (response.transfer_event.completion) {
@@ -769,7 +769,7 @@ int uhc_control(usb_host_controller_t *uhc, int epno, int trt, urb_setup_data_t 
     }
 }
 
-int uhc_data_transfer(usb_host_controller_t *uhc, int epno, uintptr_t buffer, uint16_t length, int64_t timeout) {
+int uhi_data_transfer(usb_host_interface_t *uhc, int dci, uintptr_t buffer, uint16_t length, int64_t timeout) {
     xhci_trb_t response = trb_create(0);
     xhci_t *self = uhc->context;
     int slot_id = uhc->slot_id;
@@ -779,7 +779,7 @@ int uhc_data_transfer(usb_host_controller_t *uhc, int epno, uintptr_t buffer, ui
     trb.normal.trb_xfer_len = length;
     trb.normal.IOC = 1;
     trb.normal.ISP = 1;
-    schedule_transfer(self, uhc->semaphore, slot_id, epno, &trb, &response, 1, timeout);
+    schedule_transfer(self, uhc->semaphore, slot_id, dci, &trb, &response, 1, timeout);
 
     switch (response.transfer_event.completion) {
         case TRB_CC_NULL:
@@ -795,12 +795,12 @@ int uhc_data_transfer(usb_host_controller_t *uhc, int epno, uintptr_t buffer, ui
 int xhci_init_dev(xhci_t *self) {
 
     self->uhci.context = self;
-    self->uhci.configure_ep = uhc_configure_ep;
-    self->uhci.reset_ep = uhc_reset_ep;
-    self->uhci.get_max_packet_size = uhc_get_max_packet_size;
-    self->uhci.set_max_packet_size = uhc_set_max_packet_size;
-    self->uhci.control = uhc_control;
-    self->uhci.data_transfer = uhc_data_transfer;
+    self->uhci.configure_ep = uhi_configure_ep;
+    self->uhci.reset_ep = uhi_reset_ep;
+    self->uhci.get_max_packet_size = uhi_get_max_packet_size;
+    self->uhci.set_max_packet_size = uhi_set_max_packet_size;
+    self->uhci.control = uhi_control;
+    self->uhci.data_transfer = uhi_data_transfer;
 
     self->cap = MOE_PA2VA(self->base_address);
     uint8_t CAP_LENGTH = self->cap->caplength & 0xFF;
