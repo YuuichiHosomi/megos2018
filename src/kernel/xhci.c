@@ -1009,7 +1009,8 @@ _Noreturn void xhci_event_thread(void *args) {
     int MAX_INT = (HCSPARAMS1 >> 8) & 0x7FF;
     uint32_t pagesize = self->opr->pagesize & 0xFFFF;
     uint32_t scrpad = HCSPARAMS2 >> 21;
-    DEBUG_PRINT("xHC v%d.%d.%d USB v%d.%d BASE %012llx IRQ# %d SLOT %d/%d INT %d PORT %d CS %d PAGE %04x SP %04x\n",
+    DEBUG_PRINT("xHC v%d.%d.%d USB v%d.%d BASE %012llx IRQ# %d SLOT %d/%d INT %d PORT %d CS %d PAGE %04x SP %04x\n"
+        "# USB DEBUG MODE\n",
         (ver >> 8), (ver >> 4) & 15, (ver & 15), (SBRN >> 4) & 15, SBRN & 15,
         self->base_address, self->irq,
         self->max_dev_slot, MAX_DEV_SLOT, MAX_INT, self->max_port, self->context_size, pagesize, scrpad);
@@ -1168,5 +1169,9 @@ void xhci_init() {
         xhci.urbs = moe_alloc_object(sizeof(usb_request_block_t), MAX_URB);
 
         moe_create_thread(&xhci_event_thread, priority_realtime, &xhci, "xhci.event");
+
+#ifdef DEBUG
+    for (;;) io_hlt();
+#endif
     }
 }
