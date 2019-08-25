@@ -177,6 +177,7 @@ enum {
     TRB_CC_USB_TRANSACTION_ERROR,
     TRB_CC_TRB_ERROR,
     TRB_CC_STALL_ERROR,
+    TRB_CC_SHORT_PACKET = 13,
 };
 
 typedef struct {
@@ -418,7 +419,7 @@ static xhci_trb_t trb_create(int type) {
 
 static void wait_cnr(xhci_t *self, int us) {
     while (self->opr->usbsts & USB_STS_CNR) {
-        io_pause();
+        cpu_relax();
     }
 }
 
@@ -651,20 +652,23 @@ uint32_t xhci_reset_port(xhci_t *self, int port_id) {
         atomic_store(portsc, (status & PORTSC_MAGIC_WORD) | USB_PORTSC_CSC | USB_PORTSC_PR);
         wait_cnr(self, 0);
         while (atomic_load(portsc) & USB_PORTSC_PR) {
-            io_pause();
+            cpu_relax();
         }
     }
     return atomic_load(portsc);
 }
 
 
-int uhi_configure_ep(usb_host_interface_t *uhc, int epno, int attributes, int max_packet_size, int interval, int64_t timeout) {
+int uhi_configure_ep(usb_host_interface_t *uhc, usb_endpoint_descriptor_t *endpoint, int64_t timeout) {
     xhci_trb_t response = trb_create(0);
 
     xhci_t *self = uhc->context;
     int slot_id = uhc->slot_id;
+    uint32_t max_packet_size = ((endpoint->wMaxPacketSize[1] << 8) | endpoint->wMaxPacketSize[0]);
+    int epno = endpoint->bEndpointAddress;
     uint32_t dci = ((epno & 15) << 1) | ((epno & 0x80) ? 1 : 0);
-    uint32_t ep_type = (attributes & 3) | ((epno & 0x80) ? 4 : 0);
+    uint32_t ep_type = (endpoint->bmAttributes & 3) | ((epno & 0x80) ? 4 : 0);
+    uint32_t interval = endpoint->bInterval;
     uint64_t input_context = configure_endpoint(self, slot_id, dci, ep_type, max_packet_size, interval, 1);
 
     xhci_trb_t trb = trb_create(TRB_CONFIGURE_ENDPOINT_COMMAND);
@@ -672,7 +676,14 @@ int uhi_configure_ep(usb_host_interface_t *uhc, int epno, int attributes, int ma
     trb.address_device_command.slot_id = slot_id;
     execute_command(self, uhc->semaphore, &trb, &response, timeout);
 
-    return response.cce.completion;
+    switch (response.cce.completion) {
+        case TRB_CC_NULL:
+            return -1;
+        case TRB_CC_SUCCESS:
+            return dci;
+        default:
+            return -response.transfer_event.completion;
+    }
 }
 
 int uhi_reset_ep(usb_host_interface_t *uhc, int epno, int64_t timeout) {
@@ -785,6 +796,7 @@ int uhi_data_transfer(usb_host_interface_t *uhc, int dci, uintptr_t buffer, uint
         case TRB_CC_NULL:
             return -1;
         case TRB_CC_SUCCESS:
+        case TRB_CC_SHORT_PACKET:
             return length - response.transfer_event.length;
         default:
             return -response.transfer_event.completion;
@@ -937,8 +949,8 @@ void process_event(xhci_t *self) {
             case TRB_PORT_STATUS_CHANGE_EVENT:
             {
                 int port_id = trb->psc.port_id;
-                // _Atomic uint32_t *portsc = MOE_PA2VA(get_portsc(self, port_id));
-                // DEBUG_PRINT("PSC(%d %d %08x)", port_id, trb->psc.completion, atomic_load(portsc));
+                _Atomic uint32_t *portsc = MOE_PA2VA(get_portsc(self, port_id));
+                DEBUG_PRINT("PSC(%d %d %08x)", port_id, trb->psc.completion, atomic_load(portsc));
 
                 moe_queue_write(self->port_change_queue, port_id);
                 moe_sem_signal(self->sem_request);
@@ -949,7 +961,7 @@ void process_event(xhci_t *self) {
             {
                 uint8_t cc = trb->cce.completion;
                 xhci_trb_t *command = MOE_PA2VA(trb->cce.ptr);
-                // DEBUG_PRINT("CCE(%d %d %d)", trb->cce.slot_id, command->common.type, cc);
+                DEBUG_PRINT("CCE(%d %d %d)", trb->cce.slot_id, command->common.type, cc);
 
                 usb_request_block_t *urb = xhci_find_urb_by_trb(self, command, urb_state_scheduled);
                 if (urb) {
@@ -1004,16 +1016,16 @@ _Noreturn void xhci_event_thread(void *args) {
     uint8_t SBRN = pci_read_config(self->pci_base + 0x60);
     uint16_t ver = self->cap->caplength >> 16;
     uint32_t HCSPARAMS1 = self->cap->hcsparams1;
-    uint32_t HCSPARAMS2 = self->cap->hcsparams2;
+    // uint32_t HCSPARAMS2 = self->cap->hcsparams2;
     int MAX_DEV_SLOT = HCSPARAMS1 & 255;
     int MAX_INT = (HCSPARAMS1 >> 8) & 0x7FF;
-    uint32_t pagesize = self->opr->pagesize & 0xFFFF;
-    uint32_t scrpad = HCSPARAMS2 >> 21;
-    DEBUG_PRINT("xHC v%d.%d.%d USB v%d.%d BASE %012llx IRQ# %d SLOT %d/%d INT %d PORT %d CS %d PAGE %04x SP %04x\n"
+    // uint32_t pagesize = self->opr->pagesize & 0xFFFF;
+    // uint32_t scrpad = HCSPARAMS2 >> 21;
+    DEBUG_PRINT("xHC v%d.%d.%d USB v%d.%d BASE %012llx IRQ# %d SLOT %d/%d INT %d PORT %d\n"
         "# USB DEBUG MODE\n",
         (ver >> 8), (ver >> 4) & 15, (ver & 15), (SBRN >> 4) & 15, SBRN & 15,
         self->base_address, self->irq,
-        self->max_dev_slot, MAX_DEV_SLOT, MAX_INT, self->max_port, self->context_size, pagesize, scrpad);
+        self->max_dev_slot, MAX_DEV_SLOT, MAX_INT, self->max_port);
 #endif
 
     moe_create_thread(&xhci_request_thread, priority_normal, &xhci, "xhci.request");
@@ -1040,7 +1052,7 @@ static int port_initialize(xhci_t *self, int port_id) {
             atomic_store(portsc, (port_status & PORTSC_MAGIC_WORD) | USB_PORTSC_CSC | USB_PORTSC_PR);
             moe_measure_t deadline = moe_create_measure(csc_timeout);
             while (moe_measure_until(deadline) && (atomic_load(portsc) & USB_PORTSC_PED) == 0) {
-                io_pause();
+                cpu_relax();
             }
             port_status = atomic_load(portsc);
             if (port_status & USB_PORTSC_PRC) {

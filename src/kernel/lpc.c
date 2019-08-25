@@ -85,7 +85,7 @@ int ps2_wait_for_write(uint64_t timeout) {
         if ((ps2_in8(PS2_STATUS_PORT) & 0x02) == 0x00) {
             return 0;
         } else {
-            io_pause();
+            cpu_relax();
         }
     }
     return -1;

@@ -340,7 +340,7 @@ int moe_install_msi(MOE_IRQ_HANDLER handler) {
             irq_handler[irq] = handler;
             return irq - MAX_IRQ;
         } else {
-            io_pause();
+            cpu_relax();
         }
     }
     return 0;
@@ -606,10 +606,10 @@ static void apic_init() {
         uint32_t acpi_tmr_base = acpi_read_pm_timer();
         uint32_t acpi_tmr_val = acpi_read_pm_timer();
         do {
-            io_pause();
+            cpu_relax();
         } while (acpi_tmr_val == acpi_read_pm_timer());
         do {
-            io_pause();
+            cpu_relax();
             acpi_tmr_val = acpi_read_pm_timer();
         } while (timer_val > ((acpi_tmr_val - acpi_tmr_base) & 0xFFFFFF));
         uint32_t count = apic_read_lapic(0x390);

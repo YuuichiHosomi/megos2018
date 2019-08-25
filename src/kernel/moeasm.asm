@@ -37,6 +37,7 @@
     extern ipi_sche_main
     extern thread_on_start
     extern fiber_on_start
+    extern moe_exit_thread
 
 
 ;; int gdt_init();
@@ -198,6 +199,8 @@ _new_thread:
     pop rax
     pop rcx
     call rax
+    mov rcx, rax
+    call moe_exit_thread
     ud2
 
 
