@@ -15,12 +15,21 @@ static uintptr_t ceil_pagesize(size_t n) {
     return (((n) + 0xFFF) & ~0xFFF);
 }
 
+
+int atomic_btr(_Atomic uint32_t *p, uint32_t bit) {
+    int result;
+    __asm__ volatile (
+        "lock btr %[bit], %[ptr];\n"
+        "sbb %0, %0;\n"
+    :"=r"(result)
+    :[ptr]"m"(*p), [bit]"Ir"(bit));
+    return result;
+}
+
 uintptr_t moe_alloc_gates_memory() {
-    for (int i = 1; i < 255; i++) {
-        uintptr_t offset = i / 32;
-        uintptr_t position = i % 32;
-        if (atomic_bit_test_and_clear(gates_memory_bitmap + offset, position)) {
-            return i << 10;
+    for (uintptr_t i = 1; i < 160; i++) {
+        if (atomic_btr(gates_memory_bitmap, i)) {
+            return i << 12;
         }
     }
     return 0;

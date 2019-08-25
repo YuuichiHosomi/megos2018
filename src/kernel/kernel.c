@@ -2,6 +2,7 @@
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
 #include "moe.h"
+#include <stdarg.h>
 #include "kernel.h"
 
 
@@ -10,13 +11,20 @@ extern void arch_init(moe_bootinfo_t* info);
 extern void gs_init(moe_bootinfo_t *bootinfo);
 extern void mm_init(moe_bootinfo_t *bootinfo);
 extern void page_init(moe_bootinfo_t *bootinfo);
+extern void xhci_init();
 extern void pg_enter_strict_mode();
+extern void hid_init();
+extern void shell_init();
 
 extern char *strchr(const char *s, int c);
 extern int vprintf(const char *format, va_list args);
 extern int putchar(int);
 
-void moe_assert(const char* file, uintptr_t line, ...) {
+
+/*********************************************************************/
+
+
+_Noreturn void _panic(const char* file, uintptr_t line, ...) {
     va_list list;
     va_start(list, line);
 
@@ -32,70 +40,58 @@ void moe_assert(const char* file, uintptr_t line, ...) {
     for (;;) io_hlt();
 }
 
-// _Noreturn void moe_bsod(const char *message) {
-//     for (const char *p = message; *p; p++) {
-//         putchar(*p);
-//     }
-//     for (;;) io_hlt();
-// }
+_Noreturn void moe_reboot() {
+    acpi_reset();
+    for (;;) io_hlt();
+}
+
+static moe_semaphore_t *sem_zpf;
+int _zprintf(const char *format, ...) {
+    va_list list;
+    va_start(list, format);
+    moe_sem_wait(sem_zpf, MOE_FOREVER);
+    int retval = vprintf(format, list);
+    moe_sem_signal(sem_zpf);
+    va_end(list);
+    return retval;
+}
 
 
 /*********************************************************************/
 
 moe_bootinfo_t bootinfo;
 
-_Noreturn void thread_2(void *args) {
-    int k = moe_get_current_thread_id();
-    int padding = 2;
-    int w = 10;
-    moe_rect_t rect = {{k * w, padding}, {w - padding, w - padding}};
-    uint32_t color = k * 0x010101;
-    for (;;) {
-        moe_fill_rect(NULL, &rect, color);
-        color += k;
-        moe_usleep(k);
-    }
-}
+void kernel_thread(void *args) {
 
-_Noreturn void kernel_thread(void *args) {
-    printf("Minimal Operating Environment v0.6.0 (codename warbler) [%d Active Cores, Memory %dMB]\n",
+    printf("Minimal Operating Environment v0.6.1 (codename warbler) [%d Cores, Memory %dMB]\n",
         moe_get_number_of_active_cpus(), (int)(bootinfo.total_memory >> 8));
 
-    printf("\n");
-    printf("Hello, world!\n");
-    printf("\n");
-
-    for (int i = 0; i < 20; i++) {
-        moe_create_thread(&thread_2, 0, NULL, "test");
-    }
-
-    for (int i = 0; i < 10; i++) {
-        putchar('.');
-        moe_usleep(1000000);
-    }
-
-    moe_exit_thread(0);
+    xhci_init();
+    hid_init();
+    shell_init();
+    for (;;) io_hlt();
 }
 
-_Noreturn void start_kernel() {
+static _Noreturn void start_kernel() {
 
     mm_init(&bootinfo);
     page_init(&bootinfo);
     gs_init(&bootinfo);
     acpi_init((void *)bootinfo.acpi);
     arch_init(&bootinfo);
-
     pg_enter_strict_mode();
+    sem_zpf = moe_sem_create(1);
 
     moe_create_thread(&kernel_thread, 0, NULL, "kernel");
 
+    // Idle thread
     for (;;) io_hlt();
 }
 
 /*********************************************************************/
 
 _Noreturn void efi_main(moe_bootinfo_t *info) {
-    // TODO: UEFI stub is no longer supported
+    // UEFI stub is no longer supported
     bootinfo = *info;
     start_kernel();
 }

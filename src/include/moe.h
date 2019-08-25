@@ -13,22 +13,17 @@
 #define MIN(a, b)   ((a) < (b) ? (a) : (b))
 
 int printf(const char *format, ...);
+int snprintf(char* buffer, size_t n, const char* format, ...);
+char *strncpy(char *s1, const char *s2, size_t n);
 void *memcpy(void *p, const void *q, size_t n);
 void *memset(void *p, int v, size_t n);
 void memset32(uint32_t *p, uint32_t v, size_t n);
-char *strncpy(char *s1, const char *s2, size_t n);
-int snprintf(char* buffer, size_t n, const char* format, ...);
-int atomic_bit_test_and_set(void *p, uintptr_t bit);
-int atomic_bit_test_and_clear(void *p, uintptr_t bit);
-int atomic_bit_test(void *p, uintptr_t bit);
 
-
-const char *moe_kname();
-
-void moe_assert(const char *file, uintptr_t line, ...);
-#define MOE_ASSERT(cond, ...) if (!(cond)) { moe_assert(__FILE__, __LINE__, __VA_ARGS__); }
-void moe_reboot();
-void moe_shutdown_system();
+_Noreturn void _panic(const char *file, uintptr_t line, ...);
+#define moe_assert(cond, ...) if (!(cond)) { _panic(__FILE__, __LINE__, __VA_ARGS__); }
+#define moe_panic(...) _panic(__FILE__, __LINE__, __VA_ARGS__)
+_Noreturn void moe_reboot();
+_Noreturn void moe_shutdown_system();
 
 
 //  Minimal Graphics Subsystem
@@ -55,34 +50,19 @@ typedef struct moe_bitmap_t {
     uint32_t flags, delta, color_key;
 } moe_bitmap_t;
 
-typedef struct moe_console_context_t moe_console_context_t;
-typedef struct moe_font_t moe_font_t;
-typedef struct moe_hid_kbd_report_t moe_hid_kbd_report_t;
-
 #define MOE_BMP_ALPHA       0x0001
 #define MOE_BMP_ROTATE      0x0002
 
-extern const moe_point_t *moe_point_zero;
-extern const moe_size_t *moe_size_zero;
-extern const moe_rect_t *moe_rect_zero;
-extern const moe_edge_insets_t *moe_edge_insets_zero;
+// extern const moe_point_t *moe_point_zero;
+// extern const moe_size_t *moe_size_zero;
+// extern const moe_rect_t *moe_rect_zero;
+// extern const moe_edge_insets_t *moe_edge_insets_zero;
 
 #define MOE_COLOR_TRANSPARENT   0x00000000
 
-moe_bitmap_t *moe_create_dib(moe_size_t *size, uint32_t flags, uint32_t color);
+moe_bitmap_t *moe_create_bitmap(moe_size_t *size, uint32_t flags, uint32_t color);
 void moe_blt(moe_bitmap_t *dest, moe_bitmap_t *src, moe_point_t *origin, moe_rect_t *rect, uint32_t options);
 void moe_fill_rect(moe_bitmap_t *dest, moe_rect_t *rect, uint32_t color);
-void moe_blend_rect(moe_bitmap_t *dest, moe_rect_t *rect, uint32_t color);
-void moe_fill_round_rect(moe_bitmap_t *dest, moe_rect_t *rect, intptr_t radius, uint32_t color);
-void moe_draw_round_rect(moe_bitmap_t *dest, moe_rect_t *rect, intptr_t radius, uint32_t color);
-void moe_draw_pixel(moe_bitmap_t *dest, intptr_t x, intptr_t y, uint32_t color);
-void moe_draw_multi_pixels(moe_bitmap_t *dest, size_t count, moe_point_t *points, uint32_t color);
-moe_rect_t moe_edge_insets_inset_rect(moe_rect_t *rect, moe_edge_insets_t *insets);
-moe_point_t moe_draw_string(moe_bitmap_t *dib, moe_font_t *font, moe_point_t *cursor, moe_rect_t *rect, const char *s, uint32_t color);
-moe_font_t *moe_get_system_font(int type);
-
-void moe_set_console_attributes(moe_console_context_t *self, uint32_t attributes);
-int moe_set_console_cursor_visible(moe_console_context_t *self, int visible);
 
 
 //  Minimal Memory Subsystem
@@ -96,6 +76,7 @@ void *moe_alloc_object(size_t size, size_t count);
 
 //  Threading Service
 typedef struct moe_thread_t moe_thread_t;
+typedef struct moe_fiber_t moe_fiber_t;
 typedef enum {
     priority_idle = 0,
     priority_low,
@@ -110,13 +91,21 @@ int moe_create_thread(moe_thread_start start, moe_priority_level_t priority, voi
 int moe_usleep(int64_t us);
 int moe_get_current_thread_id();
 const char *moe_get_current_thread_name();
-// int moe_get_usage();
 _Noreturn void moe_exit_thread(uint32_t exit_code);
 int moe_get_number_of_active_cpus();
 
+moe_fiber_t *moe_create_fiber(moe_thread_start start, void *args, size_t stack_size, const char *name);
+moe_fiber_t *moe_get_primary_fiber();
+moe_fiber_t *moe_get_current_fiber();
+_Noreturn void moe_exit_fiber(uint32_t exit_code);
+int moe_get_current_fiber_id();
+const char *moe_get_current_fiber_name();
+void moe_yield();
+
+
 typedef _Atomic uintptr_t moe_spinlock_t;
 int moe_spinlock_try(moe_spinlock_t *lock);
-int moe_spinlock_acquire(moe_spinlock_t *lock, uintptr_t ms);
+int moe_spinlock_acquire(moe_spinlock_t *lock);
 void moe_spinlock_release(moe_spinlock_t *lock);
 
 typedef struct moe_semaphore_t moe_semaphore_t;
@@ -127,6 +116,7 @@ int moe_sem_wait(moe_semaphore_t *self, int64_t us);
 void moe_sem_signal(moe_semaphore_t *self);
 intptr_t moe_sem_getvalue(moe_semaphore_t *self);
 
+#define MOE_FOREVER INT64_MAX
 typedef uint64_t moe_measure_t;
 moe_measure_t moe_create_measure(int64_t);
 int moe_measure_until(moe_measure_t);

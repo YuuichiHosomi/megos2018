@@ -256,23 +256,35 @@ void draw_pattern(moe_bitmap_t *dest, moe_rect_t* rect, const uint8_t* pattern, 
 }
 
 
+const int console_padding_h = 16, console_padding_v = 16;
+const int font_w = MEGH0816_width, font_h = MEGH0816_height;
 uint32_t main_console_bgcolor = 0x000000;
 uint32_t main_console_fgcolor = 0xCCCCCC;
 int main_console_cursor_x = 0;
 int main_console_cursor_y = 0;
+int main_console_cols = 0;
 
 int putchar(int _c) {
+    // static moe_spinlock_t lock;
+    // moe_spinlock_acquire(&lock);
     moe_bitmap_t *dest = &main_screen;
     int c = _c & 0xFF;
-    const int font_w = MEGH0816_width, font_h = MEGH0816_height;
-    const int console_padding_h = 16, console_padding_v = 16;
     switch (c) {
         case '\n':
             main_console_cursor_x = 0;
             main_console_cursor_y ++;
             break;
+        case '\b':
+            if (main_console_cursor_x > 0) {
+                main_console_cursor_x--;
+            }
+            break;
         default:
         {
+            if (main_console_cursor_x >= main_console_cols) {
+                main_console_cursor_x = 0;
+                main_console_cursor_y ++;
+            }
             moe_rect_t rect = {{console_padding_h + main_console_cursor_x * font_w, console_padding_v + main_console_cursor_y * font_h}, {font_w, font_h}};
             moe_blt(dest, &back_buffer, &rect.origin, &rect, 0);
             // moe_fill_rect(&main_screen, &rect, main_console_bgcolor);
@@ -288,6 +300,7 @@ int putchar(int _c) {
             main_console_cursor_x ++;
         }
     }
+    // moe_spinlock_release(&lock);
     return 1;
 }
 
@@ -326,6 +339,8 @@ void gs_init(moe_bootinfo_t* info) {
         main_screen.height = temp;
         main_screen.flags |= MOE_BMP_ROTATE;
     }
+
+    main_console_cols = (main_screen.width - console_padding_h * 2) / font_w;
 
     // if (main_console_bgcolor) {
     //     moe_fill_rect(&main_screen, NULL, main_console_bgcolor);

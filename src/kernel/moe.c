@@ -12,15 +12,22 @@
 #define CLEANUP_LOAD_TIME   1000
 #define DEFAULT_SCHEDULE_SIZE   256
 #define MAX_THREADS         256
+#define CONTEXT_SAVE_AREA_SIZE  1024
 
 typedef uint32_t moe_affinity_t;
-typedef int thid_t;
+typedef int context_id;
+
+
+typedef union {
+    uint8_t context_save_area[CONTEXT_SAVE_AREA_SIZE];
+} cpu_context_t;
 
 typedef struct moe_thread_t {
-    union {
-        uint8_t context_save_area[1024];
-    };
+    cpu_context_t context;
+    char name[THREAD_NAME_SIZE];
 
+    moe_fiber_t *current_fiber;
+    moe_fiber_t *primary_fiber, *last_fiber;
     union {
         uintptr_t flags;
         struct {
@@ -28,8 +35,9 @@ typedef struct moe_thread_t {
             unsigned running:1;
         };
     };
-    thid_t thid;
+    context_id thid;
     int exit_code;
+
     moe_priority_level_t priority;
     moe_affinity_t soft_affinity, hard_affinity;
     _Atomic uint8_t quantum_left;
@@ -38,8 +46,27 @@ typedef struct moe_thread_t {
     _Atomic (moe_thread_t *) *signal_object;
     moe_measure_t deadline;
 
-    char name[THREAD_NAME_SIZE];
 } moe_thread_t;
+
+
+typedef struct moe_fiber_t {
+    cpu_context_t context;
+    char name[THREAD_NAME_SIZE];
+
+    moe_thread_t *parent_thread;
+    moe_fiber_t *next_sibling, *prev_sibling;
+    union {
+        uintptr_t flags;
+        struct {
+            unsigned zombie:1;
+            unsigned running:1;
+        };
+    };
+    context_id fiber_id;
+    int exit_code;
+
+} moe_fiber_t;
+
 
 typedef enum {
     moe_irql_passive,
@@ -61,14 +88,17 @@ static struct {
     core_specific_data_t *csd;
     moe_queue_t *ready;
     moe_queue_t *retired;
-    _Atomic thid_t next_thid;
+    _Atomic context_id next_thid;
+    _Atomic context_id next_fibid;
     moe_affinity_t system_affinity;
     int ncpu;
+    _Atomic int n_active_cpu;
     atomic_flag lock;
 } moe;
 
-extern moe_thread_t *io_do_context_switch(moe_thread_t *from, moe_thread_t *to);
+extern moe_thread_t *_do_switch_context(cpu_context_t *from, cpu_context_t *to);
 extern void io_setup_new_thread(moe_thread_t *thread, uintptr_t* new_sp);
+extern void io_setup_new_fiber(moe_fiber_t *fiber, uintptr_t* new_sp);
 extern int smp_get_current_cpuid();
 
 
@@ -90,12 +120,11 @@ static moe_thread_t *_get_current_thread() {
     uintptr_t flags = io_lock_irq();
     core_specific_data_t *csd = _get_current_csd();
     moe_thread_t *current = csd->current;
-    io_unlock_irq(flags);
+    io_restore_irq(flags);
     return current;
 }
 
 static int sch_add(moe_thread_t *thread) {
-    // MOE_ASSERT(thread->running == 0, "Thread %d is still running", thread->thid);
     if (thread->priority) {
         return moe_queue_write(moe.ready, (uintptr_t)thread);
     } else {
@@ -109,7 +138,6 @@ static int sch_retire(moe_thread_t *thread) {
         // TODO: remove thread
         return 0;
     }
-    // MOE_ASSERT(thread->running == 0, "Thread %d is still running", thread->thid);
     if (thread->priority) {
         while (atomic_flag_test_and_set(&moe.lock)) {
             io_pause();
@@ -123,6 +151,8 @@ static int sch_retire(moe_thread_t *thread) {
 }
 
 static moe_thread_t *sch_next() {
+    for (int i = 0; i < 2; i++) {
+
     moe_thread_t *thread;
     do {
         thread = (moe_thread_t*)moe_queue_read(moe.ready, 0);
@@ -144,6 +174,8 @@ static moe_thread_t *sch_next() {
         atomic_flag_clear(&moe.lock);
     }
 
+    }
+
     return _get_current_csd()->idle;
 }
 
@@ -158,7 +190,7 @@ static void _next_thread(core_specific_data_t *csd, moe_thread_t *current, _Atom
         csd->current = next;
         next->running = 1;
         csd->retired = current;
-        io_do_context_switch(current, next);
+        _do_switch_context(&current->context, &next->context);
         csd = _get_current_csd();
         sch_retire(atomic_exchange(&csd->retired, NULL));
     }
@@ -166,8 +198,8 @@ static void _next_thread(core_specific_data_t *csd, moe_thread_t *current, _Atom
 
 void thread_on_start() {
     core_specific_data_t *csd = _get_current_csd();
-    moe_thread_t *current = csd->current;
-    current->running = 1;
+    // moe_thread_t *current = csd->current;
+    // current->running = 1;
     sch_retire(atomic_exchange(&csd->retired, NULL));
 }
 
@@ -181,14 +213,15 @@ int moe_wait_for_object(_Atomic (moe_thread_t *) *obj, int64_t us) {
     }
     moe_measure_t deadline = moe_create_measure(us);
     _next_thread(csd, current, obj, deadline);
-    io_unlock_irq(flags);
+    io_restore_irq(flags);
     return 0;
 }
 
 
-int moe_signal_object(moe_thread_t **obj) {
+int moe_signal_object(_Atomic (moe_thread_t *) *obj) {
     moe_thread_t *thread = *obj;
-    if (atomic_compare_exchange_strong(thread->signal_object, &thread, NULL)) {
+    _Atomic (moe_thread_t *) *signal_object = thread->signal_object;
+    if (signal_object && atomic_compare_exchange_strong(thread->signal_object, &thread, NULL)) {
         thread->deadline = 0;
         return 0;
     } else {
@@ -198,7 +231,7 @@ int moe_signal_object(moe_thread_t **obj) {
 
 
 static moe_thread_t *_create_thread(moe_thread_start start, moe_priority_level_t priority, void *args, const char *name) {
-    moe_thread_t* new_thread = moe_alloc_object(sizeof(moe_thread_t), 1);
+    moe_thread_t *new_thread = moe_alloc_object(sizeof(moe_thread_t), 1);
     new_thread->thid = atomic_fetch_add(&moe.next_thid, 1);
     new_thread->priority = priority;
     if (priority) {
@@ -237,7 +270,7 @@ _Noreturn void moe_exit_thread(uint32_t exit_code) {
     moe_thread_t *current = _get_current_thread();
     current->exit_code = exit_code;
     current->zombie = 1;
-    moe_usleep(0);
+    moe_usleep(MOE_FOREVER);
     for (;;) io_hlt();
 }
 
@@ -245,13 +278,19 @@ void thread_reschedule() {
     if (!moe.csd) return;
     core_specific_data_t *csd = _get_current_csd();
     moe_thread_t *current = csd->current;
-    if (current->priority >= priority_realtime) {
+    moe_priority_level_t priority = current->priority;
+    if (priority >= priority_realtime) {
         // do nothing
-    } else {
+    } else if (priority == priority_idle) {
         _next_thread(csd, current, NULL, 0);
+    } else {
+        int quantum = atomic_fetch_add(&current->quantum_left, -1);
+        if (quantum <= 1) {
+            atomic_fetch_add(&current->quantum_left, current->quantum);
+            _next_thread(csd, current, NULL, 0);
+        }
     }
 }
-
 
 
 int moe_create_thread(moe_thread_start start, moe_priority_level_t priority, void *args, const char *name) {
@@ -284,8 +323,105 @@ int moe_usleep(int64_t us) {
 }
 
 
+moe_fiber_t *_create_fiber(moe_thread_start start, void *args, size_t stack_size, const char *name) {
+    moe_thread_t *current_thread = _get_current_thread();
+    moe_fiber_t *new_fiber = moe_alloc_object(sizeof(moe_fiber_t), 1);
+    new_fiber->parent_thread = current_thread;
+    new_fiber->fiber_id = atomic_fetch_add(&moe.next_fibid, 1);
+    if (name) {
+        strncpy(&new_fiber->name[0], name, THREAD_NAME_SIZE - 1);
+    }
+    if (start) {
+        stack_size = stack_size ? stack_size : 0x10000;
+        uintptr_t stack_count = stack_size / sizeof(uintptr_t);
+        uintptr_t* stack = moe_alloc_object(stack_size, 1);
+        uintptr_t* sp = stack + stack_count;
+        *--sp = 0;
+        *--sp = 0x00007fffdeadbeef;
+        *--sp = (uintptr_t)args;
+        *--sp = (uintptr_t)start;
+        io_setup_new_fiber(new_fiber, sp);
+    }
+    return new_fiber;
+}
+
+
+moe_fiber_t *moe_get_primary_fiber() {
+    moe_thread_t *current_thread = _get_current_thread();
+    if (current_thread->primary_fiber == 0) {
+        moe_fiber_t *new_fiber = _create_fiber(NULL, NULL, 0, current_thread->name);
+        current_thread->primary_fiber = new_fiber;
+        current_thread->last_fiber = new_fiber;
+        current_thread->current_fiber = new_fiber;
+    }
+    return current_thread->primary_fiber;
+}
+
+moe_fiber_t *moe_create_fiber(moe_thread_start start, void *args, size_t stack_size, const char *name) {
+    moe_thread_t *current_thread = _get_current_thread();
+    // moe_fiber_t *primary_fiber = 
+    moe_get_primary_fiber();
+    moe_fiber_t *new_fiber =_create_fiber(start, args, stack_size, name);
+
+    moe_fiber_t *last_fiber = current_thread->last_fiber;
+    last_fiber->next_sibling = new_fiber;
+    new_fiber->prev_sibling = last_fiber;
+    current_thread->last_fiber = new_fiber;
+
+    return new_fiber;
+}
+
+void fiber_on_start() {
+    // __asm__ volatile ("int3");
+    // moe_fiber_t *current = moe_get_current_fiber();
+    // current->running = 1;
+}
+
+
+moe_fiber_t *moe_get_current_fiber() {
+    return _get_current_thread()->current_fiber;
+}
+
+int moe_get_current_fiber_id() {
+    moe_fiber_t *current = moe_get_current_fiber();
+    return current ? current->fiber_id : 0;
+}
+
+const char *moe_get_current_fiber_name() {
+    moe_fiber_t *current = moe_get_current_fiber();
+    return current ? current->name : NULL;
+}
+
+void moe_yield() {
+    if (!moe.csd) return;
+    moe_thread_t *current_thread = _get_current_thread();
+    moe_fiber_t *current = current_thread->current_fiber;
+    if (!current) return;
+    moe_fiber_t *next = current->next_sibling;
+    if (!next) {
+        next = current->parent_thread->primary_fiber;
+    }
+    if (current != next) {
+        current->running = 0;
+        next->running = 1;
+        current_thread->current_fiber = next;
+        _do_switch_context(&current->context, &next->context);
+    }
+}
+
+_Noreturn void moe_exit_fiber(uint32_t exit_code) {
+    moe_fiber_t *current = moe_get_current_fiber();
+    current->zombie = 1;
+    current->exit_code = exit_code;
+    // TODO: everything
+    moe_yield();
+    for (;;) io_hlt();
+}
+
+
 _Noreturn void scheduler_thread(void *args) {
     for (;;) {
+        // TODO: everything
         moe_usleep(10000000);
     }
 }
@@ -299,6 +435,7 @@ void thread_init(int ncpu) {
     moe.thread_list = moe_alloc_object(sizeof(void *), MAX_THREADS);
     moe.ready = moe_queue_create(DEFAULT_SCHEDULE_SIZE);
     moe.retired = moe_queue_create(DEFAULT_SCHEDULE_SIZE);
+    moe.next_fibid = 1;
 
     core_specific_data_t *_csd = moe_alloc_object(sizeof(core_specific_data_t), ncpu);
     for (int i = 0; i < ncpu; i++) {
@@ -319,7 +456,6 @@ int moe_get_number_of_active_cpus() {
 }
 
 
-
 /*********************************************************************/
 // Spinlock
 
@@ -330,7 +466,7 @@ int moe_spinlock_try(moe_spinlock_t *lock) {
     return atomic_compare_exchange_weak(lock, &expected, desired);
 }
 
-int moe_spinlock_acquire(moe_spinlock_t *lock, uintptr_t ms) {
+int moe_spinlock_acquire(moe_spinlock_t *lock) {
     for (;;) {
         if (moe_spinlock_try(lock)) {
             return 0;
@@ -374,29 +510,65 @@ int moe_sem_trywait(moe_semaphore_t *self) {
     intptr_t value = atomic_load(&self->value);
     while (value > 0) {
         if (atomic_compare_exchange_weak(&self->value, &value, value - 1)) {
-            return 1;
+            return 0;
         } else {
             io_pause();
         }
     }
-    return 0;
+    return -1;
 }
 
 int moe_sem_wait(moe_semaphore_t *self, int64_t us) {
-    if (moe_sem_trywait(self)) {
-        return 1;
+
+    if (!moe_sem_trywait(self)) {
+        return 0;
     }
-    MOE_ASSERT(false, "not implemented moe_sem_wait");
-    return 0;
+
+    // if (atomic_load(&self->thread) != NULL) {
+    //     int64_t timeout_us = MIN(us, 1000);
+    //     moe_measure_t deadline1 = moe_create_measure(timeout_us);
+    //     do {
+    //         if (!moe_sem_trywait(self)) {
+    //             return 0;
+    //         } else {
+    //             io_pause();
+    //         }
+    //     } while (moe_measure_until(deadline1));
+    // }
+
+    moe_measure_t deadline2 = moe_create_measure(us);
+    const int64_t timeout_min = 1000;
+    const int64_t timeout_max = 100000;
+    int64_t timeout = timeout_min;
+    moe_thread_t *current = _get_current_thread();
+    do {
+        moe_thread_t *expected = NULL;
+        if (atomic_compare_exchange_weak(&self->thread, &expected, current)) {
+            moe_wait_for_object(&self->thread, timeout);
+            if (!moe_sem_trywait(self)) {
+                return 0;
+            }
+            timeout = timeout_min;
+        }
+        moe_usleep(timeout);
+        timeout = MIN(timeout_max, timeout * 2);
+    } while (moe_measure_until(deadline2));
+
+    return -1;
 }
 
 void moe_sem_signal(moe_semaphore_t *self) {
+    moe_thread_t *thread = atomic_load(&self->thread);
     atomic_fetch_add(&self->value, 1);
+    if (thread) {
+        moe_signal_object(&self->thread);
+        atomic_compare_exchange_weak(&self->thread, &thread, NULL);
+    }
 }
 
 
 /*********************************************************************/
-// Concurrent Queue
+// Queue
 
 typedef struct moe_queue_t {
     moe_semaphore_t read_sem;
@@ -419,7 +591,7 @@ static _Atomic intptr_t *_queue_get_data_ptr(moe_queue_t *self) {
     return (void *)((intptr_t)self + sizeof(moe_queue_t));
 }
 
-intptr_t fifo_read_main(moe_queue_t* self) {
+static intptr_t queue_read_main(moe_queue_t* self) {
     uintptr_t read_ptr = atomic_fetch_add(&self->read, 1);
     intptr_t retval = atomic_load(_queue_get_data_ptr(self) + (read_ptr & self->mask));
     atomic_fetch_add(&self->free, 1);
@@ -427,16 +599,16 @@ intptr_t fifo_read_main(moe_queue_t* self) {
 }
 
 intptr_t moe_queue_read(moe_queue_t* self, intptr_t default_val) {
-    if (moe_sem_trywait(&self->read_sem)) {
-        return fifo_read_main(self);
+    if (!moe_sem_trywait(&self->read_sem)) {
+        return queue_read_main(self);
     } else {
         return default_val;
     }
 }
 
 int moe_queue_wait(moe_queue_t* self, intptr_t* result, uint64_t us) {
-    if (moe_sem_wait(&self->read_sem, us)) {
-        *result = fifo_read_main(self);
+    if (!moe_sem_wait(&self->read_sem, us)) {
+        *result = queue_read_main(self);
         return 1;
     } else {
         return 0;
@@ -466,5 +638,32 @@ size_t moe_queue_get_estimated_count(moe_queue_t* self) {
 size_t moe_queue_get_estimated_free(moe_queue_t* self) {
     return atomic_load(&self->free);
 }
+
+
+/*********************************************************************/
+
+int atomic_bit_scan(_Atomic uint64_t *p) {
+    uint64_t word = atomic_load(p);
+    if (word == 0) return -1;
+    return __builtin_ctz(word);
+}
+
+
+size_t atomic_bit_scan_and_reset(_Atomic uint32_t *p, size_t limit, size_t def_val) {
+    size_t words = (limit + 31) / 32;
+    for (size_t i = 0; i < words; i++) {
+        uint32_t word = p[i];
+        while (word != 0) {
+            size_t position = __builtin_ctz(word);
+            uint32_t mask = 1 << position;
+            uint32_t desired = word & ~mask;
+            if (atomic_compare_exchange_weak(&p[i], &word, desired)) {
+                return i * 32 + position;
+            }
+        }
+    }
+    return def_val;
+}
+
 
 /*********************************************************************/

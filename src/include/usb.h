@@ -22,9 +22,7 @@ enum {
     URB_HID_GET_REPORT = 1,
     URB_HID_SET_REPORT = 9,
     URB_HID_SET_PROTOCOL = 11,
-};
 
-enum {
     USB_DEVICE_DESCRIPTOR = 1,
     USB_CONFIGURATION_DESCRIPTOR,
     USB_STRING_DESCRIPTOR,
@@ -33,9 +31,7 @@ enum {
     USB_DEVICE_QUALIFIER,
     USB_HID_CLASS_DESCRIPTOR = 0x21,
     USB_HID_REPORT_DESCRIPTOR,
-};
 
-enum {
     URB_TRT_NO_DATA = 0,
     URB_TRT_CONTROL_OUT = 2,
     URB_TRT_CONTROL_IN = 3,
@@ -139,34 +135,35 @@ typedef union {
 } urb_setup_data_t;
 
 
-typedef struct usb_host_controller_t usb_host_controller_t;
+typedef struct usb_host_interface_t usb_host_interface_t;
 
-typedef int (*UHC_CONFIGURE_EP)
-(usb_host_controller_t *self, int epno, int attributes, int max_packet_size, int interval);
+typedef int (*UHI_CONFIGURE_EP)
+(usb_host_interface_t *uhc, int epno, int attributes, int max_packet_size, int interval, int64_t timeout);
 
-typedef int (*UHC_RESET_EP)
-(usb_host_controller_t *self, int epno);
+typedef int (*UHI_RESET_EP)
+(usb_host_interface_t *self, int epno, int64_t timeout);
 
-typedef int (*UHC_SET_MAX_PACKET_SIZE)
-(usb_host_controller_t *self, int mask_packet_size);
+typedef int (*UHI_SET_MAX_PACKET_SIZE)
+(usb_host_interface_t *self, int mask_packet_size, int64_t timeout);
 
-typedef int (*UHC_GET_MAX_PACKET_SIZE)
-(usb_host_controller_t *self);
+typedef int (*UHI_GET_MAX_PACKET_SIZE)
+(usb_host_interface_t *self);
 
-typedef int (*UHC_CONTROL)
-(usb_host_controller_t *self, int endpoint, int trt, urb_setup_data_t setup, uintptr_t buffer);
+typedef int (*UHI_CONTROL)
+(usb_host_interface_t *self, int dci, int trt, urb_setup_data_t setup, uintptr_t buffer, int64_t timeout);
 
-typedef int (*UHC_DATA_TRANSFER)
-(usb_host_controller_t *self, int endpoint, uintptr_t buffer, uint16_t length);
+typedef int (*UHI_DATA_TRANSFER)
+(usb_host_interface_t *self, int dci, uintptr_t buffer, uint16_t length, int64_t timeout);
 
-// USB virtual host controller
-typedef struct usb_host_controller_t {
+// USB virtual host controller interface
+typedef struct usb_host_interface_t {
     void *context;
+    moe_semaphore_t *semaphore;
     int slot_id;
-    UHC_CONFIGURE_EP configure_ep;
-    UHC_RESET_EP reset_ep;
-    UHC_GET_MAX_PACKET_SIZE get_max_packet_size;
-    UHC_SET_MAX_PACKET_SIZE set_max_packet_size;
-    UHC_CONTROL control;
-    UHC_DATA_TRANSFER data_transfer;
-} usb_host_controller_t;
+    UHI_CONFIGURE_EP configure_ep;
+    UHI_RESET_EP reset_ep;
+    UHI_GET_MAX_PACKET_SIZE get_max_packet_size;
+    UHI_SET_MAX_PACKET_SIZE set_max_packet_size;
+    UHI_CONTROL control;
+    UHI_DATA_TRANSFER data_transfer;
+} usb_host_interface_t;

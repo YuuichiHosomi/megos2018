@@ -25,6 +25,8 @@
 %define IA32_APIC_BASE_MSR_ENABLE   0x00000800
 %define IA32_MISC_MSR       0x000001A0
 %define IA32_EFER_MSR       0xC0000080
+%define IA32_TSC_AUX_MSR    0xC0000103
+
 
 [BITS 64]
 [section .text]
@@ -34,6 +36,7 @@
     extern smp_init_ap
     extern ipi_sche_main
     extern thread_on_start
+    extern fiber_on_start
 
 
 ;; int gdt_init();
@@ -134,35 +137,8 @@ io_get_tss:
     ret
 
 
-;; int atomic_bit_test(void *p, uintptr_t bit);
-    global atomic_bit_test
-atomic_bit_test:
-    bt [rcx + rax], edx
-    sbb eax, eax
-    neg eax
-    ret
-
-
-;; int atomic_bit_test_and_set(void *p, uintptr_t bit);
-    global atomic_bit_test_and_set
-atomic_bit_test_and_set:
-    lock bts [rcx], edx
-    sbb eax, eax
-    neg eax
-    ret
-
-
-;; int atomic_bit_test_and_clear(void *p, uintptr_t bit);
-    global atomic_bit_test_and_clear
-atomic_bit_test_and_clear:
-    lock btr [rcx], edx
-    sbb eax, eax
-    neg eax
-    ret
-
-
-; moe_thread_t *io_do_context_switch(moe_thread_t *from, moe_thread_t *to);
-%define CTX_IP  0x00
+; moe_thread_t *_do_switch_context(cpu_context_t *from, cpu_context_t *to);
+; %define CTX_IP  0x00
 %define CTX_SP  0x08
 %define CTX_BP  0x10
 %define CTX_BX  0x18
@@ -172,8 +148,8 @@ atomic_bit_test_and_clear:
 %define CTX_R13 0x38
 %define CTX_R14 0x40
 %define CTX_R15 0x48
-    global io_do_context_switch
-io_do_context_switch:
+    global _do_switch_context
+_do_switch_context:
     call io_set_lazy_fpu_restore
 
     mov [rcx + CTX_SP], rsp
@@ -225,6 +201,24 @@ _new_thread:
     ud2
 
 
+; void io_setup_new_fiber(moe_fiber_t *fiber, uintptr_t* new_sp);
+    global io_setup_new_fiber
+io_setup_new_fiber:
+    lea rax, [rel _new_fiber]
+    sub rdx, BYTE 8
+    mov [rdx], rax
+    mov [rcx + CTX_SP], rdx
+    ret
+
+_new_fiber:
+    call fiber_on_start
+    sti
+    pop rax
+    pop rcx
+    call rax
+    ud2
+
+
 ; void io_set_lazy_fpu_restore();
     global io_set_lazy_fpu_restore
 io_set_lazy_fpu_restore:
@@ -244,14 +238,31 @@ io_lock_irq:
     ret
 
 
-;; void io_unlock_irq(uint32_t);
-    global io_unlock_irq
-io_unlock_irq:
+;; void io_restore_irq(uint32_t);
+    global io_restore_irq
+io_restore_irq:
     and ecx, EFLAGS_IF
     jz .nosti
     sti
 .nosti:
     ret
+
+
+; int atomic_bit_test_and_set(void *p, size_t bit);
+    global atomic_bit_test_and_set
+atomic_bit_test_and_set:
+    lock bts [rcx], edx
+    sbb eax, eax
+    ret
+
+; int atomic_bit_test_and_clear(void *p, size_t bit);
+    global atomic_bit_test_and_clear
+atomic_bit_test_and_clear:
+    lock btc [rcx], edx
+    sbb eax, eax
+    ret
+
+; int atomic_bit_test(void *p, size_t bit);
 
 
     global _int00, _int03, _int06, _int08, _int0D, _int0E

@@ -10,6 +10,9 @@
 #include "acpi.h"
 
 
+int _zprintf(const char *format, ...);
+
+
 #define MAX_GATES_INDEX     8
 typedef struct {
     uint64_t master_cr3;
@@ -64,9 +67,11 @@ static inline uint32_t io_in32(uintptr_t port) {
 }
 
 static inline void io_hlt() { __asm__ volatile("hlt"); }
-static inline void io_pause() { __asm__ volatile("pause"); }
+#define io_pause __builtin_ia32_pause
+// static inline void io_pause() { __asm__ volatile("pause"); }
 
-_Noreturn void moe_bsod(const char *message);
+int atomic_bit_test_and_set(void *p, size_t bit);
+int atomic_bit_test_and_clear(void *p, size_t bit);
 
 
 typedef void (*MOE_IRQ_HANDLER)(int irq);
@@ -88,7 +93,7 @@ void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v);
 
 
 uintptr_t io_lock_irq();
-void io_unlock_irq(uintptr_t);
+void io_restore_irq(uintptr_t);
 
 
 // Low Level Memory Manager
