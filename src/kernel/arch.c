@@ -183,7 +183,7 @@ void default_int_handler(x64_context_t* regs) {
         putchar(*p);
     }
     moe_spinlock_release(&lock);
-    for (;;) { io_hlt(); }
+    moe_exit_thread(-1);
 }
 
 
@@ -807,4 +807,8 @@ void arch_init(moe_bootinfo_t* info) {
     apic_init();
 
     lpc_init();
+
+    // cpuid_t regs = {0x80000001};
+    // io_cpuid(&regs);
+    // printf("CPUID %08x %08x %08x %08x\n", regs.eax, regs.ecx, regs.edx, regs.ebx);
 }

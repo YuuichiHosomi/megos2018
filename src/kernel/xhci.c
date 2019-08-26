@@ -1,19 +1,13 @@
 // xHCI: Extensible Host Controller Interface
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
+
+// #define DEBUG
 #include "moe.h"
 #include "kernel.h"
 #include <stdatomic.h>
 #include "usb.h"
-
-
-// #define DEBUG
-#ifdef DEBUG
-#define DEBUG_PRINT(...)    _zprintf(__VA_ARGS__)
-#else
-#define DEBUG_PRINT(...)
-#endif
-
+#include "xhci.h"
 
 void usb_new_device(usb_host_interface_t *hci, int slot_id);
 
@@ -31,278 +25,12 @@ void usb_new_device(usb_host_interface_t *hci, int slot_id);
 #define MAX_URB             1024
 #define URB_DISPOSE_TIMEOUT 100000
 
-#define PORTSC_MAGIC_WORD   0x0e00c3e0
-
 
 /*********************************************************************/
 
 #define PCI_CLS_XHCI        0x0C033000
 #define PCI_CLS_INTERFACE   0xFFFFFF00
 #define PCI_CAP_MSI         0x05
-
-/*********************************************************************/
-
-#define USB_HCCP_CSZ    0x00000004
-
-#define USB_CMD_RS      0x00000001
-#define USB_CMD_HCRST   0x00000002
-#define USB_CMD_INTE    0x00000004
-
-#define USB_STS_HCH     0x00000001
-#define USB_STS_CNR     0x00000800
-
-#define USB_IMAN_IP     0x0001
-#define USB_IMAN_IE     0x0002
-
-#define USB_PORTSC_CCS  0x00000001
-#define USB_PORTSC_PED  0x00000002
-#define USB_PORTSC_PR   0x00000010
-#define USB_PORTSC_CSC  0x00020000
-#define USB_PORTSC_PEC  0x00040000
-#define USB_PORTSC_PRC  0x00200000
-
-#define USBLEGSUP_BIOS_OWNED    0x00010000
-#define USBLEGSUP_OS_OWNED      0x01000000
-
-/*********************************************************************/
-
-typedef struct {
-    uint64_t base;
-    uint16_t size;
-    uint16_t reserved[3];
-} xhci_erste_t;
-
-typedef struct {
-    uint32_t route_string:20;
-    uint32_t speed:4;
-    uint32_t :1;
-    uint32_t MTT:1;
-    uint32_t hub:1;
-    uint32_t context_entries:5;
-    uint32_t max_exit_latency:16;
-    uint32_t root_hub_port_no:8;
-    uint32_t number_of_ports:8;
-    uint32_t TT_hub_slot_id:8;
-    uint32_t TT_port_no:8;
-    uint32_t TTT:2;
-    uint32_t :4;
-    uint32_t INT:10;
-    uint32_t USB_dev_addr:8;
-    uint32_t :19;
-    uint32_t slot_state:5;
-    uint32_t _RESERVED_1[4];
-} xhci_slot_ctx_data_t;
-
-
-typedef struct {
-    uint32_t ep_state:3;
-    uint32_t :5;
-    uint32_t mult:2;
-    uint32_t max_p_streams:5;
-    uint32_t lsa:1;
-    uint32_t interval:8;
-    uint32_t max_esit_payload_hi:8;
-    uint32_t :1;
-    uint32_t error_count:2;
-    uint32_t ep_type:3;
-    uint32_t :1;
-    uint32_t hid:1;
-    uint32_t max_burst_size:8;
-    uint32_t max_packet_size:16;
-    uint64_t TRDP;
-    uint32_t average_trb_len:16;
-    uint32_t max_esit_payload_lo:16;
-    uint32_t _RESERVED_1[3];
-} xhci_endpoint_ctx_data_t;
-
-
-typedef struct {
-    uint64_t dcs:1;
-    uint64_t type:3;
-    uint64_t TRDP:60;
-    uint32_t stopped_EDTLA:24;
-    uint32_t :8;
-    uint32_t _RESERVED_1;
-} xhci_stream_ctx_data_t;
-
-
-typedef struct {
-    uint32_t drop;
-    uint32_t add;
-    uint32_t _RESERVED_1[5];
-    uint32_t config_val:8;
-    uint32_t if_no:8;
-    uint32_t alternate:8;
-    uint32_t :8;
-} xhci_input_control_ctx_t;
-
-
-// Transfer Request Block
-typedef struct {
-    uint32_t u32[3];
-    uint32_t C:1;
-    uint32_t :9;
-    uint32_t type:6;
-    uint32_t :16;
-} xhci_trb_common_t;
-
-enum {
-    TRB_RESERVED = 0,
-    TRB_NORMAL,
-    TRB_SETUP,
-    TRB_DATA,
-    TRB_STATUS,
-    TRB_ISOCH,
-    TRB_LINK,
-    TRB_EVENT_DATA,
-    TRB_NOP,
-    TRB_ENABLE_SLOT_COMMAND,
-    TRB_DISABLE_SLOT_COMMAND,
-    TRB_ADDRESS_DEVICE_COMMAND,
-    TRB_CONFIGURE_ENDPOINT_COMMAND,
-    TRB_EVALUATE_CONTEXT_COMMAND,
-    TRB_RESET_ENDPOINT_COMMAND,
-
-    TRB_NOP_COMMAND = 23,
-
-    TRB_TRANSFER_EVENT = 32,
-    TRB_COMMAND_COMPLETION_EVENT = 33,
-    TRB_PORT_STATUS_CHANGE_EVENT = 34,
-    TRB_HOST_CONTROLLER_EVENT = 37,
-
-    TRB_CC_NULL = 0,
-    TRB_CC_SUCCESS = 1,
-    TRB_CC_DATA_BUFFER_ERROR,
-    TRB_CC_BABBLE_ERROR,
-    TRB_CC_USB_TRANSACTION_ERROR,
-    TRB_CC_TRB_ERROR,
-    TRB_CC_STALL_ERROR,
-    TRB_CC_SHORT_PACKET = 13,
-};
-
-typedef struct {
-    uint64_t ptr;
-    uint32_t trb_xfer_len:17;
-    uint32_t td_size:5;
-    uint32_t interrupter_target:10;
-    uint32_t C:1;
-    uint32_t ENT:1;
-    uint32_t ISP:1;
-    uint32_t NS:1;
-    uint32_t chain:1;
-    uint32_t IOC:1;
-    uint32_t IDT:1;
-    uint32_t :2;
-    uint32_t BEI:1;
-    uint32_t type:6;
-    uint32_t DIR:1;
-    uint32_t :15;
-} xhci_trb_normal_t;
-
-typedef struct {
-    uint32_t bmRequestType:8;
-    uint32_t bRequest:8;
-    uint32_t wValue:16;
-    uint32_t wIndex:16;
-    uint32_t wLength:16;
-    uint32_t trb_xfer_len:17;
-    uint32_t :5;
-    uint32_t interrupter_target:10;
-    uint32_t C:1;
-    uint32_t :4;
-    uint32_t IOC:1;
-    uint32_t IDT:1;
-    uint32_t :3;
-    uint32_t type:6;
-    uint32_t TRT:2;
-    uint32_t :14;
-} xhci_trb_setup_stage_t;
-
-typedef struct {
-    uint64_t ptr;
-    uint32_t :24;
-    uint32_t INT:8;
-    uint32_t C:1;
-    uint32_t toggle_cycle:1;
-    uint32_t :2;
-    uint32_t chain:1;
-    uint32_t IOC:1;
-    uint32_t :2;
-    uint32_t type:6;
-    uint32_t :16;
-} xhci_trb_link_t;
-
-typedef struct {
-    uint32_t _RESERVED_1[3];
-    uint32_t C:1;
-    uint32_t :9;
-    uint32_t type:6;
-    uint32_t slot_type:5;
-    uint32_t :3;
-    uint32_t slot_id:8;
-} xhci_trb_esc_t;
-
-typedef struct {
-    uint64_t ptr;
-    uint32_t _RESERVED_1;
-    uint32_t C:1;
-    uint32_t :8;
-    uint32_t bsr:1;
-    uint32_t type:6;
-    uint32_t :8;
-    uint32_t slot_id:8;
-} xhci_trb_adc_t;
-
-typedef struct {
-    uint64_t ptr;
-    uint32_t parameter:24;
-    uint32_t completion:8;
-    uint32_t C:1;
-    uint32_t :9;
-    uint32_t type:6;
-    uint32_t VFID:8;
-    uint32_t slot_id:8;
-} xhci_trb_cce_t;
-
-typedef struct {
-    uint32_t :24;
-    uint32_t port_id:8;
-    uint32_t :32;
-    uint32_t :24;
-    uint32_t completion:8;
-    uint32_t C:1;
-    uint32_t :9;
-    uint32_t type:6;
-    uint32_t :16;
-} xhci_trb_psc_t;
-
-typedef struct {
-    uint64_t ptr;
-    uint32_t length:24;
-    uint32_t completion:8;
-    uint32_t C:1;
-    uint32_t :1;
-    uint32_t ED:1;
-    uint32_t :7;
-    uint32_t type:6;
-    uint32_t endpoint_id:5;
-    uint32_t :3;
-    uint32_t slot_id:8;
-} xhci_trb_te_t;
-
-typedef union {
-    xhci_trb_common_t common;
-    xhci_trb_normal_t normal;
-    xhci_trb_setup_stage_t setup;
-    xhci_trb_link_t link;
-    xhci_trb_esc_t enable_slot_command;
-    xhci_trb_adc_t address_device_command;
-    xhci_trb_te_t transfer_event;
-    xhci_trb_cce_t cce;
-    xhci_trb_psc_t psc;
-    uint32_t u32[4];
-} xhci_trb_t;
-
 
 /*********************************************************************/
 
@@ -316,9 +44,6 @@ typedef struct {
 typedef struct {
     uint64_t input_context;
 } usb_device_context;
-
-
-/*********************************************************************/
 
 
 typedef enum {
@@ -340,33 +65,6 @@ typedef struct {
 } usb_request_block_t;
 
 
-/*********************************************************************/
-
-
-typedef struct {
-    _Atomic uint32_t caplength;
-    _Atomic uint32_t hcsparams1;
-    _Atomic uint32_t hcsparams2;
-    _Atomic uint32_t hcsparams3;
-    _Atomic uint32_t hccparams1;
-    _Atomic uint32_t dboff;
-    _Atomic uint32_t rtsoff;
-    _Atomic uint32_t hccparams2;
-} xhci_cap_t;
-
-typedef struct {
-    _Atomic uint32_t usbcmd;
-    _Atomic uint32_t usbsts;
-    _Atomic uint32_t const pagesize;
-    uint32_t _rsrv1[2];
-    _Atomic uint32_t dnctrl;
-    _Atomic uint64_t crcr;
-    uint32_t _rsrv2[4];
-    _Atomic uint64_t dcbaap;
-    _Atomic uint32_t config;
-} xhci_opr_t;
-
-
 typedef struct xhci_t {
     usb_host_interface_t uhci;
 
@@ -376,9 +74,10 @@ typedef struct xhci_t {
 
     ring_context tr_ctx[MAX_TR];
 
-    MOE_PHYSICAL_ADDRESS base_address, base_rts, base_portsc;
+    MOE_PHYSICAL_ADDRESS base_address, base_portsc;
     xhci_cap_t *cap;
     xhci_opr_t *opr;
+    xhci_rts_t *rts;
     size_t min_pagesize;
 
     uint8_t port2slot[256];
@@ -399,6 +98,7 @@ typedef struct xhci_t {
 } xhci_t;
 
 xhci_t xhci;
+
 
 _Noreturn void xhci_request_thread(void *args);
 _Noreturn void xhci_event_thread(void *args);
@@ -425,7 +125,7 @@ static void wait_cnr(xhci_t *self, int us) {
 
 
 static uintptr_t get_portsc(xhci_t *self, int port_id) {
-    moe_assert(port_id, "PORT ID IS NOT BE NULL");
+    moe_assert(port_id, "PORT_ID MUST NOT BE NULL");
     uintptr_t portsc = self->base_portsc + (port_id - 1) * 16;
     return portsc;
 }
@@ -819,8 +519,8 @@ int xhci_init_dev(xhci_t *self) {
     MOE_PHYSICAL_ADDRESS base_opr = self->base_address + CAP_LENGTH;
     self->opr = MOE_PA2VA(base_opr);
     self->base_portsc = base_opr + 0x400;
+    self->rts = MOE_PA2VA(self->base_address + (self->cap->rtsoff & ~31));
     self->DB = MOE_PA2VA(self->base_address + (self->cap->dboff & ~3));
-    self->base_rts = self->base_address + (self->cap->rtsoff & ~31);
 
     uint32_t pagesize_bitmap = self->opr->pagesize & 0xFFFF;
     self->min_pagesize = 1 << (12 + __builtin_ctz(pagesize_bitmap));
@@ -893,15 +593,15 @@ int xhci_init_dev(xhci_t *self) {
     xhci_erste_t *erst = MOE_PA2VA(ERST_PA);
     xhci_erste_t erst0 = { ERS_PA, SIZE_EVENT_RING };
     erst[0] = erst0;
-    WRITE_PHYSICAL_UINT32(self->base_rts + 0x28, SIZE_ERST);
-    WRITE_PHYSICAL_UINT64(self->base_rts + 0x38, ERS_PA);
-    WRITE_PHYSICAL_UINT64(self->base_rts + 0x30, ERST_PA);
+    self->rts->irs[0].erstsz = SIZE_ERST;
+    self->rts->irs[0].erdp = ERS_PA;
+    self->rts->irs[0].erstba = ERST_PA;
 
     // interrupt
     uint32_t msi_cap = pci_find_capability(self->pci_base, PCI_CAP_MSI);
     if (msi_cap) {
-        WRITE_PHYSICAL_UINT32(self->base_rts + 0x24, 4000);
-        WRITE_PHYSICAL_UINT32(self->base_rts + 0x20, USB_IMAN_IP | USB_IMAN_IE);
+        // self->rts->irs[0].imod = 4000;
+        self->rts->irs[0].iman = USB_IMAN_IP | USB_IMAN_IE;
         _set_usbcmd(self, USB_CMD_INTE);
 
         uint32_t pci_msi = self->pci_base + msi_cap;
@@ -939,7 +639,7 @@ void process_event(xhci_t *self) {
 
     int cycle = self->event_cycle;
     for (;;) {
-        _Atomic MOE_PHYSICAL_ADDRESS *ERDP = MOE_PA2VA(self->base_rts + 0x38);
+        _Atomic MOE_PHYSICAL_ADDRESS *ERDP = &self->rts->irs[0].erdp;
         MOE_PHYSICAL_ADDRESS er = atomic_load(ERDP);
         xhci_trb_t *trb = MOE_PA2VA(er & ~15);
         if (trb->common.C != self->event_cycle) break;
@@ -949,9 +649,10 @@ void process_event(xhci_t *self) {
             case TRB_PORT_STATUS_CHANGE_EVENT:
             {
                 int port_id = trb->psc.port_id;
-                _Atomic uint32_t *portsc = MOE_PA2VA(get_portsc(self, port_id));
-                DEBUG_PRINT("PSC(%d %d %08x)", port_id, trb->psc.completion, atomic_load(portsc));
-
+#ifdef DEBUG
+                // _Atomic uint32_t *portsc = MOE_PA2VA(get_portsc(self, port_id));
+                // DEBUG_PRINT("PSC(%d %d %08x)", port_id, trb->psc.completion, atomic_load(portsc));
+#endif
                 moe_queue_write(self->port_change_queue, port_id);
                 moe_sem_signal(self->sem_request);
             }
@@ -961,7 +662,7 @@ void process_event(xhci_t *self) {
             {
                 uint8_t cc = trb->cce.completion;
                 xhci_trb_t *command = MOE_PA2VA(trb->cce.ptr);
-                DEBUG_PRINT("CCE(%d %d %d)", trb->cce.slot_id, command->common.type, cc);
+                // DEBUG_PRINT("CCE(%d %d %d)", trb->cce.slot_id, command->common.type, cc);
 
                 usb_request_block_t *urb = xhci_find_urb_by_trb(self, command, urb_state_scheduled);
                 if (urb) {
@@ -1016,19 +717,14 @@ _Noreturn void xhci_event_thread(void *args) {
     uint8_t SBRN = pci_read_config(self->pci_base + 0x60);
     uint16_t ver = self->cap->caplength >> 16;
     uint32_t HCSPARAMS1 = self->cap->hcsparams1;
-    // uint32_t HCSPARAMS2 = self->cap->hcsparams2;
     int MAX_DEV_SLOT = HCSPARAMS1 & 255;
     int MAX_INT = (HCSPARAMS1 >> 8) & 0x7FF;
-    // uint32_t pagesize = self->opr->pagesize & 0xFFFF;
-    // uint32_t scrpad = HCSPARAMS2 >> 21;
     DEBUG_PRINT("xHC v%d.%d.%d USB v%d.%d BASE %012llx IRQ# %d SLOT %d/%d INT %d PORT %d\n"
         "# USB DEBUG MODE\n",
         (ver >> 8), (ver >> 4) & 15, (ver & 15), (SBRN >> 4) & 15, SBRN & 15,
         self->base_address, self->irq,
         self->max_dev_slot, MAX_DEV_SLOT, MAX_INT, self->max_port);
 #endif
-
-    moe_create_thread(&xhci_request_thread, priority_normal, &xhci, "xhci.request");
 
     for (;;) {
         if (!moe_sem_wait(self->sem_event, MOE_FOREVER)) {
@@ -1067,7 +763,6 @@ static int port_initialize(xhci_t *self, int port_id) {
                 return 0;
             }
 
-            // moe_usleep(20000);
             xhci_trb_t cmd = trb_create(TRB_ENABLE_SLOT_COMMAND);
             xhci_trb_t result;
             int status = execute_command(self, self->sem_urb, &cmd, &result, timeout);
@@ -1099,7 +794,6 @@ static int port_initialize(xhci_t *self, int port_id) {
 
             configure_endpoint(self, slot_id, 1, 4, 0, 0, 0);
 
-            // moe_usleep(20000);
             xhci_trb_t adc = trb_create(TRB_ADDRESS_DEVICE_COMMAND);
             adc.address_device_command.ptr = input_context;
             adc.address_device_command.slot_id = slot_id;
@@ -1141,9 +835,8 @@ static int port_initialize(xhci_t *self, int port_id) {
 _Noreturn void xhci_request_thread(void *args) {
     xhci_t *self = args;
 
-    const int64_t timeout = 1000000;
     for (;;) {
-        moe_sem_wait(self->sem_request, timeout);
+        moe_sem_wait(self->sem_request, MOE_FOREVER);
 
         int port_id;
         do {
@@ -1181,9 +874,10 @@ void xhci_init() {
         xhci.urbs = moe_alloc_object(sizeof(usb_request_block_t), MAX_URB);
 
         moe_create_thread(&xhci_event_thread, priority_realtime, &xhci, "xhci.event");
+        moe_create_thread(&xhci_request_thread, priority_normal, &xhci, "xhci.request");
 
 #ifdef DEBUG
-    for (;;) io_hlt();
+    for (;;) moe_usleep(MOE_FOREVER);
 #endif
     }
 }

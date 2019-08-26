@@ -276,7 +276,7 @@ _Noreturn void moe_exit_thread(uint32_t exit_code) {
     current->exit_code = exit_code;
     current->zombie = 1;
     moe_usleep(MOE_FOREVER);
-    for (;;) io_hlt();
+    for (;;) moe_usleep(MOE_FOREVER);
 }
 
 void thread_reschedule() {
@@ -420,7 +420,7 @@ _Noreturn void moe_exit_fiber(uint32_t exit_code) {
     current->exit_code = exit_code;
     // TODO: everything
     moe_yield();
-    for (;;) io_hlt();
+    for (;;) moe_usleep(MOE_FOREVER);
 }
 
 

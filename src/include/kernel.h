@@ -11,6 +11,11 @@
 
 
 int _zprintf(const char *format, ...);
+#ifdef DEBUG
+#define DEBUG_PRINT(...)    _zprintf(__VA_ARGS__)
+#else
+#define DEBUG_PRINT(...)
+#endif
 
 
 #define MAX_GATES_INDEX     8

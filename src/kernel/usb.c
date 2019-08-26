@@ -1,6 +1,8 @@
 // USB: Universal Serial Bus
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
+
+// #define DEBUG
 #include "moe.h"
 #include "kernel.h"
 #include <stdatomic.h>
@@ -8,16 +10,9 @@
 #include "hid.h"
 
 
-// #define DEBUG
-#ifdef DEBUG
-#define DEBUG_PRINT(...)    _zprintf(__VA_ARGS__)
-#else
-#define DEBUG_PRINT(...)
-#endif
-
-
+#define MAX_USB_BUFFER 2048
 typedef struct {
-    uint8_t buffer[2048];
+    uint8_t buffer[MAX_USB_BUFFER];
 
     usb_host_interface_t hci;
     uintptr_t base_buffer;
@@ -26,7 +21,15 @@ typedef struct {
     uint32_t dev_class;
     uint16_t vid, pid, usb_ver;
 
+    usb_device_descriptor_t dev_desc;
+    usb_configuration_descriptor_t current_config;
 } usb_device;
+
+typedef struct {
+    usb_device *usb;
+    int if_id, n_ep;
+    uint32_t if_class;
+} usb_interface;
 
 typedef struct {
     usb_device *usb;
@@ -45,26 +48,27 @@ uint32_t usb_interface_class(usb_interface_descriptor_t *desc) {
 }
 
 
+static urb_setup_data_t setup_create(uint8_t type, uint8_t request, uint16_t value, uint16_t index, uint16_t length) {
+    urb_setup_data_t result;
+    result.setup.bmRequestType = type;
+    result.setup.bRequest = request;
+    result.setup.wValue = value;
+    result.setup.wIndex = index;
+    result.setup.wLength = length;
+    return result;
+}
+
+
 int usb_get_descriptor(usb_device *self, uint8_t desc_type, uint8_t index, size_t length) {
 
-    urb_setup_data_t setup_data;
-    setup_data.setup.bmRequestType = 0x80;
-    setup_data.setup.bRequest = URB_GET_DESCRIPTOR;
-    setup_data.setup.wValue = (desc_type << 8) | index;
-    setup_data.setup.wIndex = 0;
-    setup_data.setup.wLength = length;
+    urb_setup_data_t setup_data = setup_create(0x80, URB_GET_DESCRIPTOR, (desc_type << 8) | index, 0, length);
 
     return self->hci.control(&self->hci, 1, URB_TRT_CONTROL_IN, setup_data, self->base_buffer, USB_TIMEOUT);
 }
 
 int hid_set_protocol(usb_device *self, int ifno, int value) {
 
-    urb_setup_data_t setup_data;
-    setup_data.setup.bmRequestType = 0x21;
-    setup_data.setup.bRequest = URB_HID_SET_PROTOCOL;
-    setup_data.setup.wValue = value;
-    setup_data.setup.wIndex = ifno;
-    setup_data.setup.wLength = 0;
+    urb_setup_data_t setup_data = setup_create(0x21, URB_HID_SET_PROTOCOL, value, ifno, 0);
 
     return self->hci.control(&self->hci, 1, URB_TRT_NO_DATA, setup_data, 0, USB_TIMEOUT);
 }
@@ -72,12 +76,7 @@ int hid_set_protocol(usb_device *self, int ifno, int value) {
 
 int usb_set_configuration(usb_device *self, int value) {
 
-    urb_setup_data_t setup_data;
-    setup_data.setup.bmRequestType = 0x00;
-    setup_data.setup.bRequest = URB_SET_CONFIGURATION;
-    setup_data.setup.wValue = value;
-    setup_data.setup.wIndex = 0;
-    setup_data.setup.wLength = 0;
+    urb_setup_data_t setup_data = setup_create(0x00, URB_SET_CONFIGURATION, value, 0, 0);
 
     return self->hci.control(&self->hci, 1, URB_TRT_NO_DATA, setup_data, 0, USB_TIMEOUT);
 }
@@ -93,7 +92,7 @@ int usb_data_transfer(usb_device *self, int dci, uint16_t length, int64_t timeou
 }
 
 
-_Noreturn void usb_hid_thread(void *args) {
+void usb_hid_thread(void *args) {
     hid_device *self = args;
 
     int status;
@@ -126,7 +125,7 @@ _Noreturn void usb_hid_thread(void *args) {
         for (;;) {
             status = usb_data_transfer(self->usb, self->mos_dci, self->packet_size, MOE_FOREVER);
             if (status >= 0) {
-                uint8_t *p = buffer;
+                // uint8_t *p = buffer;
                 memcpy(&mosreport, buffer, sizeof(moe_hid_raw_mouse_report_t));
                 DEBUG_PRINT("(Mouse %x %02x %02x %02x %02x %02x %02x %02x)", p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
                 // TODO: hid_mouse_report()
@@ -183,7 +182,6 @@ hid_device *configure_hid(usb_device *self, usb_interface_descriptor_t *hid_if, 
 
 int setup_usb_device(usb_device *self) {
 
-    int slot_id = self->slot_id;
     int status;
 
     int max_packet_size = self->hci.get_max_packet_size(&self->hci);
@@ -199,11 +197,12 @@ int setup_usb_device(usb_device *self) {
     status = usb_get_descriptor(self, USB_DEVICE_DESCRIPTOR, 0, sizeof(usb_device_descriptor_t));
     if (status < 0) return -1;
     usb_device_descriptor_t *dd = MOE_PA2VA(self->base_buffer);
+    self->dev_desc = *dd;
     self->vid = (dd->idVendor[1] << 8) | (dd->idVendor[0]);
     self->pid = (dd->idProduct[1] << 8) | (dd->idProduct[0]);
-    self->usb_ver = (dd->bcdUSB[1] << 8) | (dd->bcdUSB[0]);
     self->dev_class = (dd->bDeviceClass << 16) | (dd->bDeviceSubClass << 8) | dd->bDeviceProtocol;
-    DEBUG_PRINT("\n#USB_DEVICE %d USB %d.%d LEN %d SZ %d VID %04x PID %04x CLASS %06x CONF %d\n", slot_id, self->usb_ver >> 8, (self->usb_ver >> 4) & 15, dd->bLength, dd->bMaxPacketSize0, self->vid, self->pid, self->dev_class, dd->bNumConfigurations);
+    int usb_ver = (dd->bcdUSB[1] << 8) | (dd->bcdUSB[0]);
+    DEBUG_PRINT("\n#USB_DEVICE %d USB %d.%d LEN %d SZ %d VID %04x PID %04x CLASS %06x CONF %d\n", slot_id, usb_ver >> 8, (usb_ver >> 4) & 15, dd->bLength, dd->bMaxPacketSize0, self->vid, self->pid, self->dev_class, dd->bNumConfigurations);
 
     status = usb_get_descriptor(self, USB_CONFIGURATION_DESCRIPTOR, 0, 8);
     if (status < 0) return -1;
@@ -213,7 +212,7 @@ int setup_usb_device(usb_device *self) {
     if (sz) {
         status = usb_get_descriptor(self, USB_CONFIGURATION_DESCRIPTOR, 0, sz);
 
-        uint8_t buffer[2048];
+        uint8_t buffer[MAX_USB_BUFFER];
         memcpy(buffer, MOE_PA2VA(self->base_buffer), sz);
         uint8_t *p = buffer;
 
@@ -230,6 +229,7 @@ int setup_usb_device(usb_device *self) {
                     if (!c_cnf) {
                         status = usb_set_configuration(self, config->bConfigurationValue);
                         DEBUG_PRINT("#%d SET_CONFIG %d STATUS %d\n", slot_id, config->bConfigurationValue, status);
+                        self->current_config = *config;
                         c_cnf = config;
                     }
                     break;

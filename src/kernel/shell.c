@@ -84,7 +84,11 @@ void shell_init() {
                     cont = 0;
                     break;
                 default:
-                    putchar(c);
+                    if (c < 0x7F && c >= 0x20) {
+                        putchar(c);
+                    } else {
+                        putchar('?');
+                    }
                     break;
             }
         } while (cont);

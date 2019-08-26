@@ -13,6 +13,8 @@ static acpi_dsdt_t* dsdt = NULL;
 static intptr_t n_entries_xsdt = 0;
 static uint8_t SLP_TYP5a = 0;
 static uint8_t SLP_TYP5b = 0;
+static int pm_timer_type = 0;
+static uint32_t pm_timer_mask = 0;
 
 
 // Generic Address Structure
@@ -123,24 +125,24 @@ int acpi_enable(int enabled) {
             return 1;
         }
         io_out8(SMI_CMD, ACPI_ENABLE);
-        moe_measure_t measure = moe_create_measure(3000000);
+        moe_measure_t deadline = moe_create_measure(3000000);
         do {
             ax = io_in16(PM1a_CNT);
             if ((ax & ACPI_PM1_SCI_EN) != 0) {
                 break;
             }
             moe_usleep(10000);
-        } while (moe_measure_until(measure));
+        } while (moe_measure_until(deadline));
         uint32_t PM1b_CNT = fadt->PM1b_CNT_BLK;
         if (PM1b_CNT != 0) {
-            moe_measure_t measure = moe_create_measure(3000000);
+            moe_measure_t deadline = moe_create_measure(3000000);
             do {
                 ax = io_in16(PM1b_CNT);
                 if ((ax & ACPI_PM1_SCI_EN) != 0) {
                     break;
                 }
                 moe_usleep(10000);
-            } while (moe_measure_until(measure));
+            } while (moe_measure_until(deadline));
         }
         return ((ax & ACPI_PM1_SCI_EN) != 0);
     } else {
@@ -173,14 +175,7 @@ void acpi_enter_sleep_state(int state) {
 }
 
 int acpi_get_pm_timer_type() {
-    if (fadt->X_PM_TMR_BLK.bit_width == 0 && fadt->PM_TMR_BLK == 0) {
-        return 0;
-    }
-    if (fadt->Flags & ACPI_FADT_TMR_VAL_EXT) {
-        return 32;
-    } else {
-        return 24;
-    }
+    return pm_timer_type;
 }
 
 uint32_t acpi_read_pm_timer() {
@@ -190,11 +185,7 @@ uint32_t acpi_read_pm_timer() {
     } else if (fadt->PM_TMR_BLK) {
         value = io_in32(fadt->PM_TMR_BLK);
     }
-    if (fadt->Flags & ACPI_FADT_TMR_VAL_EXT) {
-        return value;
-    } else {
-        return value & 0x00FFFFFF;
-    }
+    return value & pm_timer_mask;
 }
 
 void acpi_init(acpi_rsd_ptr_t* _rsdp) {
@@ -213,6 +204,17 @@ void acpi_init(acpi_rsd_ptr_t* _rsdp) {
         dsdt = (void*)(uintptr_t)fadt->DSDT;
     }
     moe_assert(dsdt, "DSDT NOT FOUND");
+
+    if (fadt->X_PM_TMR_BLK.bit_width != 0 || fadt->PM_TMR_BLK != 0) {
+        if (fadt->Flags & ACPI_FADT_TMR_VAL_EXT) {
+            pm_timer_type = 32;
+            pm_timer_mask = 0xFFFFFFFF;
+        } else {
+            pm_timer_type = 24;
+            pm_timer_mask = 0x00FFFFFF;
+        }
+    }
+    moe_assert(pm_timer_type, "ACPI PM TIMER NOT FOUND");
 
     // Search S5
     {
