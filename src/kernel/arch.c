@@ -88,6 +88,7 @@ extern void io_set_lazy_fpu_restore();
 extern void thread_init(int);
 extern void thread_reschedule();
 extern void lpc_init();
+extern int acpi_enable(int enabled);
 
 
 static tuple_eax_edx_t io_rdmsr(uint32_t const addr) {
@@ -805,6 +806,7 @@ void arch_init(moe_bootinfo_t* info) {
 
     pci_init();
     apic_init();
+    acpi_enable(1);
 
     lpc_init();
 

@@ -56,19 +56,45 @@ uint32_t hid_usage_to_unicode(uint8_t usage, uint8_t modifier) {
 }
 
 
-int hid_process_key_report(moe_hid_kbd_report_t *keyreport) {
-    uint64_t *q = (uint64_t *)keyreport;
+#define MOUSE_CURSOR_WIDTH  12
+#define MOUSE_CURSOR_HEIGHT  20
+static uint32_t mouse_cursor_palette[] = { 0x00FF00FF, 0xFFFFFFFF, 0x80000000 };
+static uint8_t mouse_cursor_source[MOUSE_CURSOR_HEIGHT][MOUSE_CURSOR_WIDTH] = {
+    { 1, },
+    { 1, 1, },
+    { 1, 2, 1, },
+    { 1, 2, 2, 1, },
+    { 1, 2, 2, 2, 1, },
+    { 1, 2, 2, 2, 2, 1, },
+    { 1, 2, 2, 2, 2, 2, 1, },
+    { 1, 2, 2, 2, 2, 2, 2, 1, },
+    { 1, 2, 2, 2, 2, 2, 2, 2, 1, },
+    { 1, 2, 2, 2, 2, 2, 2, 2, 2, 1, },
+    { 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, },
+    { 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, },
+    { 1, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, },
+    { 1, 2, 2, 2, 1, 2, 2, 1, },
+    { 1, 2, 2, 1, 0, 1, 2, 2, 1, },
+    { 1, 2, 1, 0, 0, 1, 2, 2, 1, },
+    { 1, 1, 0, 0, 0, 0, 1, 2, 2, 1, },
+    { 0, 0, 0, 0, 0, 0, 1, 2, 2, 1, },
+    { 0, 0, 0, 0, 0, 0, 0, 1, 1, },
+};
+moe_bitmap_t mouse_cursor;
+
+int hid_process_key_report(moe_hid_kbd_state_t *kbd) {
+    uint64_t *q = (uint64_t *)kbd;
     if (q[0] == q[1]) return 0;
 
-    moe_hid_kbd_report_t current = {0};
-    uint8_t pressed[6];
+    moe_hid_kbd_state_t state = {{0}};
+    uint8_t pressed[8] = {0};
     int next = 0;
     for (int i = 0; i < 6; i++) {
         int found = 0;
-        uint8_t u = keyreport[0].keydata[i];
+        uint8_t u = kbd->current.keydata[i];
         if (!u) break;
         for (int j = 0; j < 6; j++) {
-            uint8_t v = keyreport[1].keydata[j];
+            uint8_t v = kbd->prev.keydata[j];
             if (!v) break;
             if (v == u) {
                 found = 1;
@@ -78,28 +104,62 @@ int hid_process_key_report(moe_hid_kbd_report_t *keyreport) {
             pressed[next++] = u;
         }
     }
-    memcpy(keyreport + 1, keyreport, sizeof(moe_hid_kbd_report_t));
+    kbd->prev = kbd->current;
     if (next == 0) return 0;
-    current.modifier = keyreport[0].modifier;
+    state.current.modifier = kbd->current.modifier;
 
     for (int i = 0; i < next; i++) {
-        current.keydata[0] = pressed[i];
-        if ((current.keydata[0] == HID_USAGE_DELETE) &&
-            (current.modifier & (0x11)) != 0 && (current.modifier & (0x44)) != 0) {
+        state.current.keydata[0] = pressed[i];
+        if ((state.current.keydata[0] == HID_USAGE_DELETE) &&
+            (state.current.modifier & (0x11)) != 0 && (state.current.modifier & (0x44)) != 0) {
             moe_reboot();
         }
-        moe_send_key_event(&current);
+        moe_send_key_event(&state);
     }
 
     return 1;
 }
 
 
-int hid_report_mouse(moe_hid_mouse_report_t *mouse_report) {
+moe_hid_mos_state_t *hid_convert_mouse(moe_hid_mos_state_t *mos, hid_raw_mos_report_t *raw) {
+    uint8_t current = raw->buttons;
+    mos->x = raw->x;
+    mos->y = raw->y;
+    uint8_t changed = current ^ mos->old_buttons;
+    mos->buttons = current;
+    mos->pressed = changed & current;
+    mos->released = changed & mos->old_buttons;
+    mos->old_buttons = current;
+    return mos;
+}
+
+static moe_hid_mos_state_t global_mouse = {{{0}}};
+
+int hid_process_mouse_report(moe_hid_mos_state_t *mos) {
+    // TODO: everything
+
+    global_mouse.pressed |= mos->pressed;
+    global_mouse.released |= mos->released;
+    global_mouse.x += mos->x;
+    global_mouse.y += mos->y;
+
+    moe_point_t point = {global_mouse.x, global_mouse.y};
+    moe_blt(NULL, &mouse_cursor, &point, NULL, 0);
+
     return 0;
 }
 
 
 void hid_init() {
-
+    const size_t words = MOUSE_CURSOR_WIDTH * MOUSE_CURSOR_HEIGHT;
+    mouse_cursor.width = MOUSE_CURSOR_WIDTH;
+    mouse_cursor.delta = MOUSE_CURSOR_WIDTH;
+    mouse_cursor.height = MOUSE_CURSOR_HEIGHT;
+    mouse_cursor.flags = MOE_BMP_ALPHA;
+    mouse_cursor.bitmap = moe_alloc_object(words * 4, 1);
+    uint8_t *p = (uint8_t *)mouse_cursor_source; 
+    for (size_t i = 0; i < words; i++) {
+        mouse_cursor.bitmap[i] = mouse_cursor_palette[p[i]];
+    }
 }
+

@@ -102,7 +102,7 @@ void ps2m_irq_handler(int irq) {
 }
 
 
-static ps2_state_t ps2_parse_data(intptr_t data, moe_hid_kbd_report_t* keyreport, moe_hid_mouse_report_t* mouse_report) {
+static ps2_state_t ps2_parse_data(intptr_t data, hid_raw_kbd_report_t *keyreport, moe_hid_mos_state_t *mouse_report) {
 
     if (data >= PS2_FIFO_MOUSE_MIN) {
         int m = (data - PS2_FIFO_MOUSE_MIN);
@@ -177,25 +177,24 @@ static ps2_state_t ps2_parse_data(intptr_t data, moe_hid_kbd_report_t* keyreport
 // PS2 to HID Thread
 _Noreturn void ps2_hid_thread(void *args) {
 
-    moe_hid_kbd_report_t keyreport[2] ={{0}};
-    moe_hid_mouse_report_t mouse_report = {{{0}}};
+    moe_hid_kbd_state_t keystate = {{0}};
+    moe_hid_mos_state_t mouse = {{{0}}};
     for (;;) {
         int cont;
         do {
-            memset(&mouse_report, 0, sizeof(mouse_report));
-            memset(keyreport, 0, sizeof(keyreport));
+            memset(&keystate.current, 0, sizeof(hid_raw_kbd_report_t));
             cont = 0;
             intptr_t ps2_data;
             if (moe_queue_wait(ps2_event_queue, &ps2_data, -1)) {
-                ps2_state_t state = ps2_parse_data(ps2_data, keyreport, &mouse_report);
+                ps2_state_t state = ps2_parse_data(ps2_data, &keystate.current, &mouse);
                 switch(state) {
                     case ps2_state_nodata:
                         break;
                     case ps2_state_key:
-                        hid_process_key_report(keyreport);
+                        hid_process_key_report(&keystate);
                         break;
                     case ps2_state_mouse:
-                        // TODO:
+                        hid_process_mouse_report(&mouse);
                         break;
                     case ps2_state_continued:
                         cont = 1;

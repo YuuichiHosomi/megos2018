@@ -12,9 +12,10 @@ extern int putchar(int);
 static moe_queue_t *cin;
 
 
-int moe_send_key_event(moe_hid_kbd_report_t *keyreport) {
+int moe_send_key_event(moe_hid_kbd_state_t *state) {
     if (!cin) return 0;
-    uint32_t uni = hid_usage_to_unicode(keyreport->keydata[0], keyreport->modifier);
+    hid_raw_kbd_report_t report = state->current;
+    uint32_t uni = hid_usage_to_unicode(report.keydata[0], report.modifier);
     if (uni != INVALID_UNICHAR) {
         return moe_queue_write(cin, uni);
     } else {

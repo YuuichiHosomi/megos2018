@@ -313,15 +313,29 @@ typedef union {
 void gradient(moe_bitmap_t *dest, uint32_t _start, uint32_t _end) {
     int width = dest->width;
     intptr_t sigma = dest->height;
+    intptr_t sigma2 = sigma / 2;
     rgb_color_t start = { _start }, end = { _end };
     for (int i = 0; i < sigma; i++) {
         moe_rect_t rect = {{0, i}, {width, 1}};
-        uint8_t c[3];
+        uint8_t c[4], d[4];
+        int dithering = 0;
         for (int j = 0; j < 3; j++) {
-            c[j] = (start.components[j] * (sigma - i) + end.components[j] * i) / sigma;
+            unsigned cc = (start.components[j] * (sigma - i) + end.components[j] * i) / sigma2;
+            if (cc & 1) dithering = 1;
+            c[j] = (cc >> 1);
+            d[j] = (cc >> 1) | (cc & 1);
         }
-        uint32_t color = (c[2] << 16) | (c[1] << 8) | (c[0]);
-        moe_fill_rect(dest, &rect, color);
+        if (dithering) {
+            uint32_t colors[] = { (c[2] << 16) | (c[1] << 8) | (c[0]), (d[2] << 16) | (d[1] << 8) | (d[0]) };
+            for (int j = 0; j < width; j++) {
+                int z = (i ^ j) & 1;
+                moe_rect_t rect2 = {{j, i}, {1, 1}};
+                moe_fill_rect(dest, &rect2, colors[z]);
+            }
+        } else {
+            uint32_t color = (c[2] << 16) | (c[1] << 8) | (c[0]);
+            moe_fill_rect(dest, &rect, color);
+        }
     }
 }
 

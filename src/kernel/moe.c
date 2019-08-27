@@ -539,6 +539,7 @@ int moe_sem_wait(moe_semaphore_t *self, int64_t us) {
     do {
         moe_thread_t *expected = NULL;
         if (atomic_compare_exchange_weak(&self->thread, &expected, current)) {
+            timeout = timeout_min;
             while (moe_measure_until(deadline)) {
                 moe_wait_for_object(&self->thread, timeout);
                 if (!moe_sem_trywait(self)) {

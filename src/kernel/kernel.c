@@ -66,8 +66,8 @@ void kernel_thread(void *args) {
     printf("Minimal Operating Environment v0.6.1 (codename warbler) [%d Cores, Memory %dMB]\n",
         moe_get_number_of_active_cpus(), (int)(bootinfo.total_memory >> 8));
 
-    xhci_init();
     hid_init();
+    xhci_init();
     shell_init();
 }
 
