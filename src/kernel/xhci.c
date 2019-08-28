@@ -69,7 +69,7 @@ typedef struct {
 
 
 typedef struct xhci_t {
-    usb_host_interface_t hci_tmpl;
+    usb_host_interface_t hci_vtt;
 
     moe_semaphore_t *sem_event;
     moe_semaphore_t *sem_urb;
@@ -535,13 +535,13 @@ int uhi_data_transfer(usb_host_interface_t *uhc, int dci, uintptr_t buffer, uint
 
 int xhci_init_dev(xhci_t *self) {
 
-    self->hci_tmpl.context = self;
-    self->hci_tmpl.configure_ep = uhi_configure_ep;
-    self->hci_tmpl.reset_ep = uhi_reset_ep;
-    self->hci_tmpl.get_max_packet_size = uhi_get_max_packet_size;
-    self->hci_tmpl.set_max_packet_size = uhi_set_max_packet_size;
-    self->hci_tmpl.control = uhi_control;
-    self->hci_tmpl.data_transfer = uhi_data_transfer;
+    self->hci_vtt.context = self;
+    self->hci_vtt.configure_ep = uhi_configure_ep;
+    self->hci_vtt.reset_ep = uhi_reset_ep;
+    self->hci_vtt.get_max_packet_size = uhi_get_max_packet_size;
+    self->hci_vtt.set_max_packet_size = uhi_set_max_packet_size;
+    self->hci_vtt.control = uhi_control;
+    self->hci_vtt.data_transfer = uhi_data_transfer;
 
     self->cap = MOE_PA2VA(self->base_address);
     uint8_t CAP_LENGTH = self->cap->caplength & 0xFF;
@@ -679,8 +679,8 @@ void process_event(xhci_t *self) {
             {
                 int port_id = trb->psc.port_id;
 #ifdef DEBUG
-                // _Atomic uint32_t *portsc = MOE_PA2VA(get_portsc(self, port_id));
-                // DEBUG_PRINT("PSC(%d %d %08x)", port_id, trb->psc.completion, atomic_load(portsc));
+                _Atomic uint32_t *portsc = MOE_PA2VA(get_portsc(self, port_id));
+                DEBUG_PRINT("PSC(%d %d %08x)", port_id, trb->psc.completion, atomic_load(portsc));
 #endif
                 moe_queue_write(self->port_change_queue, port_id);
                 moe_sem_signal(self->sem_config);
@@ -691,7 +691,7 @@ void process_event(xhci_t *self) {
             {
                 uint8_t cc = trb->cce.completion;
                 xhci_trb_t *command = MOE_PA2VA(trb->cce.ptr);
-                // DEBUG_PRINT("CCE(%d %d %d)", trb->cce.slot_id, command->common.type, cc);
+                DEBUG_PRINT("CCE(%d %d %d)", trb->cce.slot_id, command->common.type, cc);
 
                 usb_request_block_t *urb = urb_find_by_trb(self, command, urb_state_scheduled);
                 if (urb) {
@@ -712,9 +712,11 @@ void process_event(xhci_t *self) {
                     ctx->response = *trb;
                     moe_sem_signal(ctx->sem);
                 }
-                // int cc = trb->transfer_event.completion;
-                // xhci_trb_t *command = MOE_PA2VA(trb->transfer_event.ptr);
-                // DEBUG_PRINT("XFE(%d %d %d %d %d)", trb->transfer_event.slot_id, trb->transfer_event.endpoint_id, command->common.type, cc, trb->transfer_event.length);
+#ifdef DEBUG
+                int cc = trb->transfer_event.completion;
+                xhci_trb_t *command = MOE_PA2VA(trb->transfer_event.ptr);
+                DEBUG_PRINT("XFE(%d %d %d %d %d)", trb->transfer_event.slot_id, trb->transfer_event.endpoint_id, command->common.type, cc, trb->transfer_event.length);
+#endif
             }
                 break;
 
@@ -873,7 +875,7 @@ _Noreturn void xhci_config_thread(void *args) {
                 int slot_id = port_initialize(self, port_id);
                 if (slot_id > 0) {
                     usb_host_interface_t *hci = self->usb_devices[slot_id].hci = moe_alloc_object(sizeof(usb_host_interface_t), 1);
-                    *hci = self->hci_tmpl;
+                    *hci = self->hci_vtt;
                     hci->slot_id = slot_id;
                     hci->semaphore = moe_sem_create(0);
                     usb_new_device(hci);

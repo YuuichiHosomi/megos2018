@@ -32,8 +32,9 @@ typedef struct {
 
 typedef struct {
     usb_device *usb;
+    uint32_t if_class;
     int packet_size, interval;
-    int kbd_if, kbd_dci, mos_if, mos_dci;
+    int hid_if, hid_dci;
 } hid_device;
 
 
@@ -62,6 +63,11 @@ int usb_get_descriptor(usb_device *self, uint8_t desc_type, uint8_t index, size_
 
     urb_setup_data_t setup_data = setup_create(0x80, URB_GET_DESCRIPTOR, (desc_type << 8) | index, 0, length);
 
+    return self->hci->control(self->hci, 1, URB_TRT_CONTROL_IN, setup_data, self->base_buffer, USB_TIMEOUT);
+}
+
+int usb_get_class_descriptor(usb_device *self, uint8_t request_type, uint8_t desc_type, uint8_t index, int ifno, size_t length) {
+    urb_setup_data_t setup_data = setup_create(request_type, URB_GET_DESCRIPTOR, (desc_type << 8) | index, ifno, length);
     return self->hci->control(self->hci, 1, URB_TRT_CONTROL_IN, setup_data, self->base_buffer, USB_TIMEOUT);
 }
 
@@ -94,44 +100,73 @@ int usb_data_transfer(usb_device *self, int dci, uint16_t length, int64_t timeou
 void usb_hid_thread(void *args) {
     hid_device *self = args;
 
+    if (!self->hid_dci) return;
+
     int status;
 
     void *buffer = MOE_PA2VA(self->usb->base_buffer);
-    memset(buffer, 0, self->packet_size);
-    if (self->kbd_dci) {
-        moe_hid_kbd_state_t state;
-        DEBUG_PRINT("\n[Installed USB Keyboard SLOT %d IF %d DCI %d]\n", self->usb->slot_id, self->kbd_if, self->kbd_dci);
+    switch (self->if_class) {
+        case USB_CLS_HID_KBD:
+        {
+            moe_hid_kbd_state_t state;
+            DEBUG_PRINT("\n[Installed USB Keyboard SLOT %d IF %d DCI %d]\n", self->usb->hci->slot_id, self->hid_if, self->hid_dci);
 
-        for (;;) {
-            status = usb_data_transfer(self->usb, self->kbd_dci, self->packet_size, MOE_FOREVER);
-            if (status >= 0) {
-                _Atomic uint64_t *p = buffer;
-                _Atomic uint64_t *q = (_Atomic uint64_t *)&state.current;
-                if (*p != *q) {
-                    memcpy(&state.current, buffer, sizeof(hid_raw_kbd_report_t));
-                    DEBUG_PRINT("(Key %02x %02x)", state.current.modifier, state.current.keydata[0]);
-                    hid_process_key_report(&state);
+            for (;;) {
+                status = usb_data_transfer(self->usb, self->hid_dci, self->packet_size, MOE_FOREVER);
+                if (status >= 0) {
+                    _Atomic uint64_t *p = buffer;
+                    _Atomic uint64_t *q = (_Atomic uint64_t *)&state.current;
+                    if (*p != *q) {
+                        memcpy(&state.current, buffer, sizeof(hid_raw_kbd_report_t));
+                        DEBUG_PRINT("(Key %02x %02x)", state.current.modifier, state.current.keydata[0]);
+                        hid_process_key_report(&state);
+                    }
+                } else {
+                    _zprintf("#KBD_ERR(%d)", status);
+                    moe_usleep(100000);
                 }
-            } else {
-                _zprintf("#KBD_ERR(%d)", status);
-                moe_usleep(100000);
             }
+            break;
         }
-    } else if (self->mos_dci) {
-        moe_hid_mos_state_t state;
-        hid_raw_mos_report_t report;
-        DEBUG_PRINT("\n[Installed USB Mouse SLOT %d IF %d DCI %d]\n", self->usb->slot_id, self->mos_if, self->mos_dci);
+        
+        case USB_CLS_HID_MOS:
+        {
+            moe_hid_mos_state_t state;
+            hid_raw_mos_report_t report;
+            DEBUG_PRINT("\n[Installed USB Mouse SLOT %d IF %d DCI %d]\n", self->usb->hci->slot_id, self->hid_if, self->hid_dci);
 
-        for (;;) {
-            status = usb_data_transfer(self->usb, self->mos_dci, self->packet_size, MOE_FOREVER);
-            if (status >= 0) {
-                uint8_t *p = buffer;
-                memcpy(&report, buffer, sizeof(hid_raw_mos_report_t));
-                DEBUG_PRINT("(Mouse %x %02x %02x %02x)", p[0], p[1], p[2], p[3]);
-                hid_process_mouse_report(hid_convert_mouse(&state, &report));
-            } else {
-                _zprintf("#MOS_ERR(%d)", status);
-                moe_usleep(100000);
+            for (;;) {
+                status = usb_data_transfer(self->usb, self->hid_dci, self->packet_size, MOE_FOREVER);
+                if (status >= 0) {
+                    uint8_t *p = buffer;
+                    memcpy(&report, buffer, sizeof(hid_raw_mos_report_t));
+                    DEBUG_PRINT("(Mouse %x %02x %02x %02x)", p[0], p[1], p[2], p[3]);
+                    hid_process_mouse_report(hid_convert_mouse(&state, &report));
+                } else {
+                    _zprintf("#MOS_ERR(%d)", status);
+                    moe_usleep(100000);
+                }
+            }
+            break;
+        }
+
+        default:
+        {
+            DEBUG_PRINT("\n[USB HID SLOT %d IF %d EP %d CLASS %06x]", self->usb->hci->slot_id, self->hid_if, self->hid_dci, self->if_class);
+
+            for (;;) {
+                status = usb_data_transfer(self->usb, self->hid_dci, self->packet_size, MOE_FOREVER);
+                if (status >= 0) {
+                    uint8_t *p = buffer;
+                    DEBUG_PRINT("[HID ");
+                    for (int i = 0; i < status; i++) {
+                        DEBUG_PRINT(" %02x", p[i]);
+                    }
+                    DEBUG_PRINT("]");
+                } else {
+                    _zprintf("#HID_ERR(%d)", status);
+                    moe_usleep(100000);
+                }
             }
         }
     }
@@ -139,40 +174,39 @@ void usb_hid_thread(void *args) {
 
 hid_device *configure_hid(usb_device *self, usb_interface_descriptor_t *hid_if, usb_endpoint_descriptor_t *endpoint) {
     int status;
-    hid_device *hid = NULL;
 
+    uint32_t if_class = usb_interface_class(hid_if);
+    int ifno = hid_if->bInterfaceNumber;
     int packet = ((endpoint->wMaxPacketSize[1] << 8) | endpoint->wMaxPacketSize[0]);
     int epno = endpoint->bEndpointAddress & 15;
     int io = (endpoint->bEndpointAddress & 0x80) ? 1 : 0;
-    int dci = (epno << 1) | io;
+    DEBUG_PRINT("#%d ENDPOINT %d IO %d ATTR %02x MAX PACKET %d INTERVAL %d\n", self->hci->slot_id, epno, io, endpoint->bmAttributes, packet, endpoint->bInterval);
 
-    uint32_t if_class = usb_interface_class(hid_if);
+    hid_device *hid = moe_alloc_object(sizeof(hid_device), 1);
+    hid->usb = self;
+    hid->hid_if = ifno;
+    hid->packet_size = packet;
+    hid->interval = endpoint->bInterval * 1000;
+    hid->if_class = if_class;
+
     switch (if_class) {
         case USB_CLS_HID_KBD:
         case USB_CLS_HID_MOS:
         {
-            DEBUG_PRINT("#%d ENDPOINT %d IO %d ATTR %02x MAX PACKET %d INTERVAL %d\n", self->hci.slot_id, epno, io, endpoint->bmAttributes, packet, endpoint->bInterval);
-
-            int ifno = hid_if->bInterfaceNumber;
-            hid = moe_alloc_object(sizeof(hid_device), 1);
-            hid->usb = self;
-            if (if_class == USB_CLS_HID_KBD) {
-                hid->kbd_if = ifno;
-                hid->kbd_dci = dci;
-            } else if(if_class == USB_CLS_HID_MOS) {
-                hid->mos_if = ifno;
-                hid->mos_dci = dci;
-            }
-            hid->packet_size = packet;
-            hid->interval = endpoint->bInterval * 1000;
-
             status = hid_set_protocol(self, ifno, 0);
-            DEBUG_PRINT("#%d HID %06x SET PROTOCOL STATUS %d\n", self->slot_id, if_class, status);
+            DEBUG_PRINT("#%d HID %06x SET PROTOCOL STATUS %d\n", self->hci->slot_id, if_class, status);
             status = usb_config_endpoint(self, endpoint);
-            DEBUG_PRINT("#%d CONFIG ENDPOINT %d STATUS %d\n", self->slot_id, epno, status);
-
+            DEBUG_PRINT("#%d CONFIG ENDPOINT %d STATUS %d\n", self->hci->slot_id, epno, status);
+            hid->hid_dci = status;
             break;
         }
+
+        default:
+            // status = hid_set_protocol(self, ifno, 1);
+            // DEBUG_PRINT("#%d HID %06x SET PROTOCOL STATUS %d\n", self->hci->slot_id, if_class, status);
+            status = usb_config_endpoint(self, endpoint);
+            DEBUG_PRINT("#%d CONFIG ENDPOINT %d STATUS %d\n", self->hci->slot_id, epno, status);
+            hid->hid_dci = status;
 
     }
 
@@ -180,7 +214,13 @@ hid_device *configure_hid(usb_device *self, usb_interface_descriptor_t *hid_if, 
 }
 
 
-static int setup_usb_device(usb_device *self) {
+int usb_new_device(usb_host_interface_t *hci) {
+    uintptr_t ptr = moe_alloc_physical_page(sizeof(usb_device));
+    usb_device *self = MOE_PA2VA(ptr);
+    memset(self, 0, sizeof(usb_device));
+    self->base_buffer = ptr;
+    self->hci = hci;
+    // usb_devices[slot_id] = device;
 
     int status;
 
@@ -203,7 +243,7 @@ static int setup_usb_device(usb_device *self) {
     self->dev_class = (dd->bDeviceClass << 16) | (dd->bDeviceSubClass << 8) | dd->bDeviceProtocol;
 #ifdef DEBUG
     int usb_ver = (dd->bcdUSB[1] << 8) | (dd->bcdUSB[0]);
-    DEBUG_PRINT("\n#USB_DEVICE %d USB %d.%d LEN %d SZ %d VID %04x PID %04x CLASS %06x CONF %d\n", slot_id, usb_ver >> 8, (usb_ver >> 4) & 15, dd->bLength, dd->bMaxPacketSize0, self->vid, self->pid, self->dev_class, dd->bNumConfigurations);
+    DEBUG_PRINT("\n#USB_DEVICE %d USB %d.%d LEN %d SZ %d VID %04x PID %04x CLASS %06x CONF %d\n", self->hci->slot_id, usb_ver >> 8, (usb_ver >> 4) & 15, dd->bLength, dd->bMaxPacketSize0, self->vid, self->pid, self->dev_class, dd->bNumConfigurations);
 #endif
     status = usb_get_descriptor(self, USB_CONFIGURATION_DESCRIPTOR, 0, 8);
     if (status < 0) return -1;
@@ -226,10 +266,10 @@ static int setup_usb_device(usb_device *self) {
             switch (type) {
                 case USB_CONFIGURATION_DESCRIPTOR:
                     usb_configuration_descriptor_t *config = (usb_configuration_descriptor_t *)(p + index);
-                    DEBUG_PRINT("#%d CONFIG #IF %d CONFIG %d POWER %d mA\n", slot_id, config->bNumInterface, config->bConfigurationValue, config->bMaxPower * 2);
+                    DEBUG_PRINT("#%d CONFIG #IF %d CONFIG %d POWER %d mA\n", self->hci->slot_id, config->bNumInterface, config->bConfigurationValue, config->bMaxPower * 2);
                     if (!c_cnf) {
                         status = usb_set_configuration(self, config->bConfigurationValue);
-                        DEBUG_PRINT("#%d SET_CONFIG %d STATUS %d\n", slot_id, config->bConfigurationValue, status);
+                        DEBUG_PRINT("#%d SET_CONFIG %d STATUS %d\n", self->hci->slot_id, config->bConfigurationValue, status);
                         self->current_config = *config;
                         c_cnf = config;
                     }
@@ -237,7 +277,9 @@ static int setup_usb_device(usb_device *self) {
 
                 case USB_INTERFACE_DESCRIPTOR:
                     c_if = (usb_interface_descriptor_t *)(p + index);
-                    // DEBUG_PRINT("#%d IF %d ALT %d #EP %d CLASS %06x\n", slot_id, c_if->bInterfaceNumber, c_if->bAlternateSetting, c_if->bNumEndpoints, usb_interface_class(c_if));
+                    if (self->dev_class == 0) {
+                        DEBUG_PRINT("#%d IF %d ALT %d #EP %d CLASS %06x\n", self->hci->slot_id, c_if->bInterfaceNumber, c_if->bAlternateSetting, c_if->bNumEndpoints, usb_interface_class(c_if));
+                    }
                     break;
 
                 case USB_ENDPOINT_DESCRIPTOR:
@@ -245,10 +287,38 @@ static int setup_usb_device(usb_device *self) {
                     if (c_if->bInterfaceClass == USB_CLS_HID) {
                         hid_device *hid = configure_hid(self, c_if, endpoint);
                         if (hid) {
-                            moe_create_thread(&usb_hid_thread, priority_normal, hid, "usb.hid");
+                            char name[32];
+                            snprintf(name, 32, "usb.hid#%d.%d.%02x", self->hci->slot_id, c_if->bInterfaceNumber, endpoint->bEndpointAddress);
+                            moe_create_thread(&usb_hid_thread, priority_normal, hid, name);
                         }
                     }
                     break;
+                
+                case USB_HID_CLASS_DESCRIPTOR:
+                {
+                    // usb_hid_class_descriptor_t *hid = (usb_hid_class_descriptor_t *)(p + index);
+                    // int size = hid->reports[0].wDescriptorLength[0] + hid->reports[0].wDescriptorLength[1] * 256;
+                    // int status = usb_get_class_descriptor(self, 0x81, USB_HID_REPORT_DESCRIPTOR, 0, c_if->bInterfaceNumber, size);
+                    // _zprintf("#%d GET_REPORT_DESCRIPTOR %d\n", self->hci->slot_id, status);
+                    // uint8_t *c = self->buffer;
+                    // for (int i = 0; i < status; i++) {
+                    //     _zprintf(" %02x", c[i]);
+                    // }
+                    // _zprintf("\n");
+                }
+                    break;
+
+                default:
+                {
+#ifdef DEBUG
+                    int limit = p[index];
+                    _zprintf("#%d IF %d descriptor %02x\n", self->hci->slot_id, config->bNumInterface, type);
+                    for (int i = 0; i < limit; i++) {
+                        _zprintf(" %02x", p[index + i]);
+                    }
+                    _zprintf("\n");
+#endif
+                }
             }
             uint8_t q = p[index];
             if (q) {
@@ -260,15 +330,4 @@ static int setup_usb_device(usb_device *self) {
     }
 
     return 0;
-}
-
-
-void usb_new_device(usb_host_interface_t *hci) {
-    uintptr_t ptr = moe_alloc_physical_page(sizeof(usb_device));
-    usb_device *device = MOE_PA2VA(ptr);
-    memset(device, 0, sizeof(usb_device));
-    device->base_buffer = ptr;
-    device->hci = hci;
-    // usb_devices[slot_id] = device;
-    setup_usb_device(device);
 }

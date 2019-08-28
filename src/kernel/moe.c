@@ -157,7 +157,6 @@ static moe_thread_t *sch_next() {
 
     moe_thread_t *thread;
     do {
-
         for(int i = 0; i < DEFAULT_SCHEDULE_QUEUES; i++) {
             thread = (moe_thread_t*)moe_queue_read(moe.ready[i], 0);
             if (thread) {

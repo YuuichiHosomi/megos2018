@@ -120,7 +120,7 @@ typedef struct {
     uint8_t bCountryCode;
     uint8_t bNumDescriptors;
     usb_hid_report_descriptor_t reports[1];
-} usb_hid_descriptor_t;
+} usb_hid_class_descriptor_t;
 
 
 typedef union {
