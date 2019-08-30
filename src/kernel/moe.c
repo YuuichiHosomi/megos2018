@@ -75,13 +75,16 @@ typedef enum {
     moe_irql_high,
 } moe_irql_t;
 
-typedef struct {
-    int cpuid;
-    uintptr_t arch_cpuid;
-    moe_thread_t* idle;
-    _Atomic (moe_thread_t*) current;
-    _Atomic (moe_thread_t*) retired;
-    _Atomic moe_irql_t irql;
+typedef union {
+    uint8_t _padding[4096];
+    struct {
+        int cpuid;
+        uintptr_t arch_cpuid;
+        moe_thread_t* idle;
+        _Atomic (moe_thread_t*) current;
+        _Atomic (moe_thread_t*) retired;
+        _Atomic moe_irql_t irql;
+    };
 } core_specific_data_t;
 
 static struct {

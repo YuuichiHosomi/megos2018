@@ -22,7 +22,7 @@ void usb_new_device(usb_host_interface_t *hci);
 #define SIZE_ERST           1
 #define MAX_PORT_CHANGE     64
 
-#define MAX_URB             1024
+#define MAX_URB             256
 #define URB_DISPOSE_TIMEOUT 100000
 
 

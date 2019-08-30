@@ -133,20 +133,32 @@ moe_hid_mos_state_t *hid_convert_mouse(moe_hid_mos_state_t *mos, hid_raw_mos_rep
     return mos;
 }
 
-static moe_hid_mos_state_t global_mouse = {{{0}}};
+static moe_hid_absolute_pointer_t global_pointer = {{{0}}};
+
+static void update_global_pointer() {
+    moe_point_t point = {global_pointer.x, global_pointer.y};
+    moe_blt(NULL, &mouse_cursor, &point, NULL, 0);
+}
 
 int hid_process_mouse_report(moe_hid_mos_state_t *mos) {
     // TODO: everything
 
-    global_mouse.pressed |= mos->pressed;
-    global_mouse.released |= mos->released;
-    global_mouse.x += mos->x;
-    global_mouse.y += mos->y;
+    global_pointer.pressed |= mos->pressed;
+    global_pointer.released |= mos->released;
+    global_pointer.x += mos->x;
+    global_pointer.y += mos->y;
 
-    moe_point_t point = {global_mouse.x, global_mouse.y};
-    moe_blt(NULL, &mouse_cursor, &point, NULL, 0);
+    update_global_pointer();
 
-    return 0;
+    return 1;
+}
+
+int hid_process_absolute_pointer(moe_hid_absolute_pointer_t *abs) {
+    // TODO: everything
+
+    update_global_pointer();
+
+    return 1;
 }
 
 
