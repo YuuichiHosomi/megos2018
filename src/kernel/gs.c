@@ -209,7 +209,12 @@ void draw_pattern(moe_bitmap_t *dest, moe_rect_t* rect, const uint8_t* pattern, 
     uintptr_t delta = dest->delta;
     uintptr_t w8 = (w + 7) / 8;
 
-    if ( x < 0 || y < 0) return;
+    intptr_t hl = dest->height - y;
+    if (hl < h) {
+        h = hl;
+    }
+
+    if (x < 0 || x >= dest->width || y < 0 || y >= dest->height || h == 0) return;
 
     if (dest->flags & MOE_BMP_ROTATE) {
         y = dest->height - y - h;
@@ -263,13 +268,18 @@ uint32_t main_console_fgcolor = 0xCCCCCC;
 int main_console_cursor_x = 0;
 int main_console_cursor_y = 0;
 int main_console_cols = 0;
+int main_console_cursor_visible = 0;
 
 int putchar(int _c) {
     // static moe_spinlock_t lock;
     // moe_spinlock_acquire(&lock);
     moe_bitmap_t *dest = &main_screen;
+    int old_cursor = moe_set_console_cursor_visible(NULL, 0);
     int c = _c & 0xFF;
     switch (c) {
+        case '\r':
+            main_console_cursor_x = 0;
+            break;
         case '\n':
             main_console_cursor_x = 0;
             main_console_cursor_y ++;
@@ -278,6 +288,9 @@ int putchar(int _c) {
             if (main_console_cursor_x > 0) {
                 main_console_cursor_x--;
             }
+            break;
+        case '\t':
+            main_console_cursor_x = (main_console_cursor_x + 8) & ~7;
             break;
         default:
         {
@@ -300,8 +313,31 @@ int putchar(int _c) {
             main_console_cursor_x ++;
         }
     }
+    moe_set_console_cursor_visible(NULL, old_cursor);
     // moe_spinlock_release(&lock);
     return 1;
+}
+
+int moe_set_console_cursor_visible(void *context, int visible) {
+    int result = main_console_cursor_visible;
+    main_console_cursor_visible = visible;
+
+    moe_rect_t rect = {{console_padding_h + main_console_cursor_x * font_w, console_padding_v + main_console_cursor_y * font_h}, {font_w, font_h}};
+    if (visible) {
+        moe_fill_rect(context, &rect, main_console_fgcolor);
+    } else {
+        moe_blt(context, &back_buffer, &rect.origin, &rect, 0);
+    }
+
+    return result;
+}
+
+void gs_cls() {
+    int old_cursor = moe_set_console_cursor_visible(NULL, 0);
+    main_console_cursor_x = 0;
+    main_console_cursor_y = 0;
+    moe_blt(NULL, &back_buffer, NULL, NULL, 0);
+    moe_set_console_cursor_visible(NULL, old_cursor);
 }
 
 
@@ -337,6 +373,15 @@ void gradient(moe_bitmap_t *dest, uint32_t _start, uint32_t _end) {
             moe_fill_rect(dest, &rect, color);
         }
     }
+}
+
+
+void gs_bsod() {
+    main_console_cursor_x = 0;
+    main_console_cursor_y = 0;
+    moe_set_console_cursor_visible(NULL, 0);
+    // blur(&back_buffer, &main_screen, 0x000000);
+    // moe_blt(NULL, &back_buffer, NULL, NULL, 0);
 }
 
 

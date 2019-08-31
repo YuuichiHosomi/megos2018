@@ -185,7 +185,7 @@ _Noreturn void ps2_hid_thread(void *args) {
             memset(&keystate.current, 0, sizeof(hid_raw_kbd_report_t));
             cont = 0;
             intptr_t ps2_data;
-            if (moe_queue_wait(ps2_event_queue, &ps2_data, -1)) {
+            if (moe_queue_wait(ps2_event_queue, &ps2_data, MOE_FOREVER)) {
                 ps2_state_t state = ps2_parse_data(ps2_data, &keystate.current, &mouse);
                 switch(state) {
                     case ps2_state_nodata:
@@ -234,7 +234,7 @@ static int ps2_init() {
     ps2_wait_for_write(PS2_TIMEOUT);
     ps2_out8(PS2_DATA_PORT, 0xF4);
 
-    moe_create_thread(&ps2_hid_thread, priority_realtime, 0, "hid-ps2");
+    moe_create_thread(&ps2_hid_thread, priority_realtime, 0, "lpc.ps2.hid");
 
     return 1;
 }

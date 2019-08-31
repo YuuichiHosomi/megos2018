@@ -1,0 +1,8 @@
+#	MEG-OS MOE Resource File
+prefix: string
+# enum:
+#   command:
+#     - help: 1
+strings:
+  default:
+    bad_command: Bad command or file name

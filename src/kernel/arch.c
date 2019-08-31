@@ -160,6 +160,7 @@ static void gdt_setup() {
 #define BSOD_BUFF_SIZE 1024
 static char bsod_buff[BSOD_BUFF_SIZE];
 extern int putchar(int);
+extern void gs_bsod();
 void default_int_handler(x64_context_t* regs) {
     static moe_spinlock_t lock;
     moe_spinlock_acquire(&lock);
@@ -179,7 +180,7 @@ void default_int_handler(x64_context_t* regs) {
         , regs->r8, regs->r9, regs->r10, regs->r11, regs->r12, regs->r13, regs->r14, regs->r15
         );
 
-    // moe_bsod(bsod_buff);
+    gs_bsod();
     for (const char *p = bsod_buff; *p; p++) {
         putchar(*p);
     }
@@ -383,8 +384,8 @@ moe_measure_t moe_create_measure(int64_t us) {
     if (us == MOE_FOREVER) {
         return MOE_FOREVER;
     }
-    if (us > 0) {
-        return lapic_timer_value + (us + 1000) / 1000;
+    if (us >= 0) {
+        return lapic_timer_value + us / 1000;
     } else {
         return 0;
     }
@@ -395,6 +396,10 @@ int moe_measure_until(moe_measure_t deadline) {
         return 1;
     }
     return (intptr_t)(deadline - lapic_timer_value) > 0;
+}
+
+int64_t moe_measure_diff(moe_measure_t from) {
+    return (atomic_load(&lapic_timer_value) - from) * 1000;
 }
 
 int smp_send_invalidate_tlb() {
@@ -455,8 +460,6 @@ void smp_init_ap(uint8_t cpuid) {
     apic_write_lapic(0x3E0, 0x0000000B);
     apic_write_lapic(0x320, 0x00030000 | IRQ_LAPIC_TIMER);
     apic_write_lapic(0x380, lapic_timer_div);
-
-    __asm__ volatile ("sti");
 }
 
 
@@ -795,6 +798,14 @@ static void pci_init() {
 
 
 /*********************************************************************/
+
+_Noreturn void arch_reset() {
+    io_out8(0x0CF9, 0x06);
+    moe_usleep(10000);
+    io_out8(0x0092, 0x01);
+    moe_usleep(10000);
+    for (;;) { io_hlt(); }
+}
 
 void arch_init(moe_bootinfo_t* info) {
 

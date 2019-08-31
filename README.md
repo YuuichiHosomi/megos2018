@@ -1,16 +1,14 @@
-# Minimal Operating Environment
+# MEG-OS MOE
 
-- A Minimal Step UEFI-aware OS?
+- Minimal Operating Environment
 
 ## THIS VERSION
 
-- Restarting...
+- THIS IS JUNK
 
-## Hardware Requirements
+## Requirements
 
-- UEFI Class 2 or higher computer
-- 64bit System
+- 64bit UEFI system
 - Up to 32 logical processor cores
-- 64MB of system memory
-- ACPI 2.0 or higher
+- XX MB of system memory
 - 800x600 pixels graphics display

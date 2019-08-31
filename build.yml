@@ -25,6 +25,7 @@ targets:
     sources:
       - acpi
       - arch
+      - asmpart.asm
       - gs
       - hidmgr
       - kernel
@@ -32,8 +33,8 @@ targets:
       - lpc
       - memory
       - moe
-      - moeasm.asm
       - page
       - shell
       - usb
       - xhci
+      - cpuid

@@ -10,7 +10,9 @@
 #include "acpi.h"
 
 
+void *moe_kname(char *buffer, size_t limit);
 int _zprintf(const char *format, ...);
+void _zputs(const char *string);
 #ifdef DEBUG
 #define DEBUG_PRINT(...)    _zprintf(__VA_ARGS__)
 #else
@@ -77,6 +79,8 @@ static inline void io_hlt() { __asm__ volatile("hlt"); }
 
 int atomic_bit_test_and_set(void *p, size_t bit);
 int atomic_bit_test_and_clear(void *p, size_t bit);
+
+_Noreturn void arch_reset();
 
 
 typedef void (*MOE_IRQ_HANDLER)(int irq);

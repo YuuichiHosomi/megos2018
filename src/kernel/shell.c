@@ -5,8 +5,80 @@
 #include "kernel.h"
 #include "hid.h"
 
+#include "rsrc.h"
 
 extern int putchar(int);
+extern void gs_cls();
+
+
+typedef int (*PSEUDO_MAIN)(int, char**);
+typedef struct {
+    const char *name;
+    PSEUDO_MAIN proc;
+    const char *tips;
+} command_list_t;
+
+
+const char* get_string(string id) {
+    if(id >= string_max) return NULL;
+
+    const char *retval = NULL;
+
+    if(!retval) {
+        retval = string_default[id];
+    }
+
+    return retval;
+}
+
+
+int cmd_cls(int argc, char **argv) {
+    gs_cls();
+    return 0;
+}
+
+int cmd_ver(int argc, char **argv) {
+    char buffer[256];
+    _zputs(moe_kname(buffer, 256));
+    return 0;
+}
+
+int cmd_reboot(int argc, char **argv) {
+    moe_reboot();
+    return 0;
+}
+
+int cmd_shutdown(int argc, char **argv) {
+    moe_shutdown_system();
+    return 0;
+}
+
+int cmd_help(int argc, char **argv);
+int cmd_cpuid(int argc, char **argv);
+int cmd_ps(int argc, char **argv);
+
+command_list_t commands[] = {
+    { "help", cmd_help, "Display this help" },
+    { "cls", cmd_cls, "Clear screen" },
+    { "ver", cmd_ver, "Show version information" },
+    { "reboot", cmd_reboot, "Restart computer" },
+    { "exit", cmd_shutdown, "Exit" },
+    { "cpuid", cmd_cpuid, "Show cpuid information" },
+    { "ps", cmd_ps, NULL },
+    { 0 },
+};
+
+int cmd_help(int argc, char **argv) {
+    for (int i = 0; commands[i].name; i++) {
+        if (commands[i].tips) {
+            _zprintf("%s\t%s\n", commands[i].name, commands[i].tips);
+        }
+    }
+    return 0;
+}
+
+
+/*********************************************************************/
 
 
 static moe_queue_t *cin;
@@ -23,7 +95,7 @@ int moe_send_key_event(moe_hid_kbd_state_t *state) {
     }
 }
 
-uint32_t key_in(int wait) {
+uint32_t zgetchar(int64_t wait) {
     intptr_t result = 0;
     if (wait) {
         while (!moe_queue_wait(cin, &result, UINT32_MAX));
@@ -32,6 +104,57 @@ uint32_t key_in(int wait) {
     }
     return result;
 }
+
+
+int read_cmdline(char* buffer, size_t max_len) {
+    int cont_flag = 1;
+    int len = 0, limit = max_len - 1;
+
+    int old_cursor_visible = moe_set_console_cursor_visible(NULL, 1);
+    while (cont_flag) {
+        uint32_t c = zgetchar(MOE_FOREVER);
+        switch (c) {
+            case '\x08': // bs
+            case '\x7F': // del
+                if (len > 0) {
+                    len--;
+                    printf("\b \b");
+                    if (buffer[len] < 0x20) { // ^X
+                        printf("\b \b");
+                    }
+                }
+                break;
+
+            case '\x0D': // cr
+            case '\x0A': // lf
+                cont_flag = 0;
+                break;
+            
+            default:
+                if (len < limit) {
+                    if (c < 0x80) {
+                        buffer[len++] = c;
+                        if (c < 0x20) { // ^X
+                            _zprintf("^%c", c | 0x40);
+                        } else {
+                            _zprintf("%c", c);
+                        }
+                    } else { // non ascii
+                        _zprintf("?+%04x", c);
+                    }
+                }
+                break;
+        }
+    }
+    moe_set_console_cursor_visible(NULL, old_cursor_visible);
+    buffer[len] = '\0';
+    printf("\n");
+    return len;
+}
+
+
+/*********************************************************************/
+
 
 _Noreturn void fiber_test_1(void *args) {
     int k = moe_get_current_fiber_id();
@@ -56,42 +179,112 @@ _Noreturn void fiber_test_thread(void *args) {
         moe_usleep(10000);
     }
     for (;;) {
-        moe_usleep(1);
+        moe_usleep(10000);
         moe_yield();
     }
 }
 
 
-void shell_init() {
+/*********************************************************************/
+//  Pseudo shell
+
+#define MAX_CMDLINE 80
+#define MAX_ARGV    256
+#define MAX_ARGBUFF 256
+
+void sysinit(void *args) {
 
     cin = moe_queue_create(256);
+
+    cmd_ver(0, NULL);
 
     moe_create_thread(&fiber_test_thread, 0, NULL, "fiber_test");
     moe_usleep(1000000);
 
-    // 💩 mode
-    printf("\n\nUNCommand Mode");
+    // const char *autoexec = "ps\n";
+    // for (int i = 0; autoexec[i]; i++) {
+    //     moe_queue_write(cin, autoexec[i]);
+    // }
+
+    int argc;
+    char* argv[MAX_ARGV];
+    char con_buff[MAX_CMDLINE];
+    char arg_buff[MAX_ARGBUFF];
+
+    printf("\n\n[Pseudo shell]\n");
     for (;;) {
-        printf("\n# ");
-        int cont = 1;
-        do {
-            int c = key_in(1);
-            switch (c) {
-                case 8:
-                    printf("\b \b");
-                    break;
-                case 10:
-                case 13:
-                    cont = 0;
+        printf(">");
+        read_cmdline(con_buff, MAX_CMDLINE);
+        strncpy(arg_buff, con_buff, MAX_ARGBUFF);
+ 
+        char *p = arg_buff;
+        for (int cont = 1; cont; ) {
+            char c = *p;
+            switch(c) {
+                case ' ':
+                case '\t':
+                    p++;
                     break;
                 default:
-                    if (c < 0x7F && c >= 0x20) {
-                        putchar(c);
-                    } else {
-                        putchar('?');
-                    }
+                    cont = 0;
                     break;
             }
-        } while (cont);
-    }
+        }
+        if (!*p) continue;
+
+        int stop = 0;
+        argc = 0;
+        do {
+            argv[argc++] = p;
+            for (int cont = 1; cont; ) {
+                char c = *p;
+                switch(c) {
+                    case ' ':
+                    case '\t':
+                        cont = 0;
+                        break;
+                    case '\0':
+                        stop = 1;
+                        cont = 0;
+                        break;
+                    default:
+                        p++;
+                        break;
+                }
+            }
+            *p++ = '\0';
+            for (int cont = 1; cont;) {
+                char c = *p;
+                switch(c) {
+                    case ' ':
+                    case '\t':
+                        p++;
+                        break;
+                    case '\0':
+                        stop = 1;
+                        cont = 0;
+                        break;
+                    default:
+                        cont = 0;
+                        break;
+                }
+            }
+        } while (!stop);
+
+        if (argv[0][0] == '!') { __asm__ volatile ("int3"); }
+
+        command_list_t *cmd_to_run = NULL;
+        for (int i = 0; commands[i].name; i++) {
+            int x = strncmp(commands[i].name, argv[0], 8);
+            if (!x){
+                cmd_to_run = &commands[i];
+                break;
+            }
+        }
+        if (cmd_to_run) {
+            cmd_to_run->proc(argc, argv);
+        } else {
+            _zprintf("%s\n", get_string(string_bad_command));
+        }
+   }
 }

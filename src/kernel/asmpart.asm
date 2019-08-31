@@ -678,10 +678,11 @@ _startup_ap:
     mov ecx, ebp
     call smp_init_ap
 
-    ;; TODO: thread dispatcher
-.forever:
+    ; idle thread
+    sti
+.loop:
     hlt
-    jmp .forever
+    jmp .loop
 
 
 [bits 16]

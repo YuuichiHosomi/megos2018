@@ -288,7 +288,7 @@ int usb_new_device(usb_host_interface_t *hci) {
                         hid_device *hid = configure_hid(self, c_if, endpoint);
                         if (hid) {
                             char name[32];
-                            snprintf(name, 32, "usb.hid#%d.%d.%02x", self->hci->slot_id, c_if->bInterfaceNumber, endpoint->bEndpointAddress);
+                            snprintf(name, 32, "usb.hid#%d.%d.%02x.%06x", self->hci->slot_id, c_if->bInterfaceNumber, endpoint->bEndpointAddress, hid->if_class);
                             moe_create_thread(&usb_hid_thread, priority_normal, hid, name);
                         }
                     }

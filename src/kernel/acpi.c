@@ -152,8 +152,8 @@ int acpi_enable(int enabled) {
 
 // Reset if possible
 void acpi_reset() {
-    acpi_enable(1);
     if (fadt->Flags & ACPI_FADT_RESET_REG_SUP) {
+        acpi_enable(1);
         acpi_gas_output(&fadt->RESET_REG, fadt->RESET_VALUE);
         for(;;) { io_hlt(); }
     }
