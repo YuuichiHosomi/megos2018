@@ -15,6 +15,7 @@
 int printf(const char *format, ...);
 int snprintf(char* buffer, size_t n, const char* format, ...);
 char *strncpy(char *s1, const char *s2, size_t n);
+int strncmp(const char *s1, const char *s2, size_t n);
 void *memcpy(void *p, const void *q, size_t n);
 void *memset(void *p, int v, size_t n);
 void memset32(uint32_t *p, uint32_t v, size_t n);
@@ -63,6 +64,8 @@ typedef struct moe_bitmap_t {
 moe_bitmap_t *moe_create_bitmap(moe_size_t *size, uint32_t flags, uint32_t color);
 void moe_blt(moe_bitmap_t *dest, moe_bitmap_t *src, moe_point_t *origin, moe_rect_t *rect, uint32_t options);
 void moe_fill_rect(moe_bitmap_t *dest, moe_rect_t *rect, uint32_t color);
+
+int moe_set_console_cursor_visible(void *context, int visible);
 
 
 //  Minimal Memory Subsystem
@@ -120,6 +123,7 @@ intptr_t moe_sem_getvalue(moe_semaphore_t *self);
 typedef uint64_t moe_measure_t;
 moe_measure_t moe_create_measure(int64_t);
 int moe_measure_until(moe_measure_t);
+int64_t moe_measure_diff(moe_measure_t from);
 
 typedef struct moe_queue_t moe_queue_t;
 moe_queue_t *moe_queue_create(size_t capacity);

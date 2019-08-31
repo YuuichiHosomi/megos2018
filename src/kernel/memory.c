@@ -43,7 +43,7 @@ uintptr_t moe_alloc_physical_page(size_t n) {
             uintptr_t result = atomic_fetch_add(&static_start, size);
             return result;
         } else {
-            io_pause();
+            cpu_relax();
         }
     }
     return 0;

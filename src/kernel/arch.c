@@ -88,6 +88,7 @@ extern void io_set_lazy_fpu_restore();
 extern void thread_init(int);
 extern void thread_reschedule();
 extern void lpc_init();
+extern int acpi_enable(int enabled);
 
 
 static tuple_eax_edx_t io_rdmsr(uint32_t const addr) {
@@ -159,6 +160,7 @@ static void gdt_setup() {
 #define BSOD_BUFF_SIZE 1024
 static char bsod_buff[BSOD_BUFF_SIZE];
 extern int putchar(int);
+extern void gs_bsod();
 void default_int_handler(x64_context_t* regs) {
     static moe_spinlock_t lock;
     moe_spinlock_acquire(&lock);
@@ -178,12 +180,12 @@ void default_int_handler(x64_context_t* regs) {
         , regs->r8, regs->r9, regs->r10, regs->r11, regs->r12, regs->r13, regs->r14, regs->r15
         );
 
-    // moe_bsod(bsod_buff);
+    gs_bsod();
     for (const char *p = bsod_buff; *p; p++) {
         putchar(*p);
     }
     moe_spinlock_release(&lock);
-    for (;;) { io_hlt(); }
+    moe_exit_thread(-1);
 }
 
 
@@ -340,7 +342,7 @@ int moe_install_msi(MOE_IRQ_HANDLER handler) {
             irq_handler[irq] = handler;
             return irq - MAX_IRQ;
         } else {
-            io_pause();
+            cpu_relax();
         }
     }
     return 0;
@@ -382,8 +384,8 @@ moe_measure_t moe_create_measure(int64_t us) {
     if (us == MOE_FOREVER) {
         return MOE_FOREVER;
     }
-    if (us > 0) {
-        return lapic_timer_value + (us + 1000) / 1000;
+    if (us >= 0) {
+        return lapic_timer_value + us / 1000;
     } else {
         return 0;
     }
@@ -394,6 +396,10 @@ int moe_measure_until(moe_measure_t deadline) {
         return 1;
     }
     return (intptr_t)(deadline - lapic_timer_value) > 0;
+}
+
+int64_t moe_measure_diff(moe_measure_t from) {
+    return (atomic_load(&lapic_timer_value) - from) * 1000;
 }
 
 int smp_send_invalidate_tlb() {
@@ -454,8 +460,6 @@ void smp_init_ap(uint8_t cpuid) {
     apic_write_lapic(0x3E0, 0x0000000B);
     apic_write_lapic(0x320, 0x00030000 | IRQ_LAPIC_TIMER);
     apic_write_lapic(0x380, lapic_timer_div);
-
-    __asm__ volatile ("sti");
 }
 
 
@@ -606,10 +610,10 @@ static void apic_init() {
         uint32_t acpi_tmr_base = acpi_read_pm_timer();
         uint32_t acpi_tmr_val = acpi_read_pm_timer();
         do {
-            io_pause();
+            cpu_relax();
         } while (acpi_tmr_val == acpi_read_pm_timer());
         do {
-            io_pause();
+            cpu_relax();
             acpi_tmr_val = acpi_read_pm_timer();
         } while (timer_val > ((acpi_tmr_val - acpi_tmr_base) & 0xFFFFFF));
         uint32_t count = apic_read_lapic(0x390);
@@ -795,6 +799,14 @@ static void pci_init() {
 
 /*********************************************************************/
 
+_Noreturn void arch_reset() {
+    io_out8(0x0CF9, 0x06);
+    moe_usleep(10000);
+    io_out8(0x0092, 0x01);
+    moe_usleep(10000);
+    for (;;) { io_hlt(); }
+}
+
 void arch_init(moe_bootinfo_t* info) {
 
     tuple_eax_edx_t tuple = { 0 };
@@ -805,6 +817,11 @@ void arch_init(moe_bootinfo_t* info) {
 
     pci_init();
     apic_init();
+    acpi_enable(1);
 
     lpc_init();
+
+    // cpuid_t regs = {0x80000001};
+    // io_cpuid(&regs);
+    // printf("CPUID %08x %08x %08x %08x\n", regs.eax, regs.ecx, regs.edx, regs.ebx);
 }

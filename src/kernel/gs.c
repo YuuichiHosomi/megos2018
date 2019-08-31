@@ -209,7 +209,12 @@ void draw_pattern(moe_bitmap_t *dest, moe_rect_t* rect, const uint8_t* pattern, 
     uintptr_t delta = dest->delta;
     uintptr_t w8 = (w + 7) / 8;
 
-    if ( x < 0 || y < 0) return;
+    intptr_t hl = dest->height - y;
+    if (hl < h) {
+        h = hl;
+    }
+
+    if (x < 0 || x >= dest->width || y < 0 || y >= dest->height || h == 0) return;
 
     if (dest->flags & MOE_BMP_ROTATE) {
         y = dest->height - y - h;
@@ -263,13 +268,18 @@ uint32_t main_console_fgcolor = 0xCCCCCC;
 int main_console_cursor_x = 0;
 int main_console_cursor_y = 0;
 int main_console_cols = 0;
+int main_console_cursor_visible = 0;
 
 int putchar(int _c) {
     // static moe_spinlock_t lock;
     // moe_spinlock_acquire(&lock);
     moe_bitmap_t *dest = &main_screen;
+    int old_cursor = moe_set_console_cursor_visible(NULL, 0);
     int c = _c & 0xFF;
     switch (c) {
+        case '\r':
+            main_console_cursor_x = 0;
+            break;
         case '\n':
             main_console_cursor_x = 0;
             main_console_cursor_y ++;
@@ -278,6 +288,9 @@ int putchar(int _c) {
             if (main_console_cursor_x > 0) {
                 main_console_cursor_x--;
             }
+            break;
+        case '\t':
+            main_console_cursor_x = (main_console_cursor_x + 8) & ~7;
             break;
         default:
         {
@@ -300,8 +313,31 @@ int putchar(int _c) {
             main_console_cursor_x ++;
         }
     }
+    moe_set_console_cursor_visible(NULL, old_cursor);
     // moe_spinlock_release(&lock);
     return 1;
+}
+
+int moe_set_console_cursor_visible(void *context, int visible) {
+    int result = main_console_cursor_visible;
+    main_console_cursor_visible = visible;
+
+    moe_rect_t rect = {{console_padding_h + main_console_cursor_x * font_w, console_padding_v + main_console_cursor_y * font_h}, {font_w, font_h}};
+    if (visible) {
+        moe_fill_rect(context, &rect, main_console_fgcolor);
+    } else {
+        moe_blt(context, &back_buffer, &rect.origin, &rect, 0);
+    }
+
+    return result;
+}
+
+void gs_cls() {
+    int old_cursor = moe_set_console_cursor_visible(NULL, 0);
+    main_console_cursor_x = 0;
+    main_console_cursor_y = 0;
+    moe_blt(NULL, &back_buffer, NULL, NULL, 0);
+    moe_set_console_cursor_visible(NULL, old_cursor);
 }
 
 
@@ -313,16 +349,39 @@ typedef union {
 void gradient(moe_bitmap_t *dest, uint32_t _start, uint32_t _end) {
     int width = dest->width;
     intptr_t sigma = dest->height;
+    intptr_t sigma2 = sigma / 2;
     rgb_color_t start = { _start }, end = { _end };
     for (int i = 0; i < sigma; i++) {
         moe_rect_t rect = {{0, i}, {width, 1}};
-        uint8_t c[3];
+        uint8_t c[4], d[4];
+        int dithering = 0;
         for (int j = 0; j < 3; j++) {
-            c[j] = (start.components[j] * (sigma - i) + end.components[j] * i) / sigma;
+            unsigned cc = (start.components[j] * (sigma - i) + end.components[j] * i) / sigma2;
+            if (cc & 1) dithering = 1;
+            c[j] = (cc >> 1);
+            d[j] = (cc >> 1) | (cc & 1);
         }
-        uint32_t color = (c[2] << 16) | (c[1] << 8) | (c[0]);
-        moe_fill_rect(dest, &rect, color);
+        if (dithering) {
+            uint32_t colors[] = { (c[2] << 16) | (c[1] << 8) | (c[0]), (d[2] << 16) | (d[1] << 8) | (d[0]) };
+            for (int j = 0; j < width; j++) {
+                int z = (i ^ j) & 1;
+                moe_rect_t rect2 = {{j, i}, {1, 1}};
+                moe_fill_rect(dest, &rect2, colors[z]);
+            }
+        } else {
+            uint32_t color = (c[2] << 16) | (c[1] << 8) | (c[0]);
+            moe_fill_rect(dest, &rect, color);
+        }
     }
+}
+
+
+void gs_bsod() {
+    main_console_cursor_x = 0;
+    main_console_cursor_y = 0;
+    moe_set_console_cursor_visible(NULL, 0);
+    // blur(&back_buffer, &main_screen, 0x000000);
+    // moe_blt(NULL, &back_buffer, NULL, NULL, 0);
 }
 
 

@@ -37,6 +37,7 @@
     extern ipi_sche_main
     extern thread_on_start
     extern fiber_on_start
+    extern moe_exit_thread
 
 
 ;; int gdt_init();
@@ -198,6 +199,8 @@ _new_thread:
     pop rax
     pop rcx
     call rax
+    mov rcx, rax
+    call moe_exit_thread
     ud2
 
 
@@ -675,10 +678,11 @@ _startup_ap:
     mov ecx, ebp
     call smp_init_ap
 
-    ;; TODO: thread dispatcher
-.forever:
+    ; idle thread
+    sti
+.loop:
     hlt
-    jmp .forever
+    jmp .loop
 
 
 [bits 16]

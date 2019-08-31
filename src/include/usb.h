@@ -120,7 +120,7 @@ typedef struct {
     uint8_t bCountryCode;
     uint8_t bNumDescriptors;
     usb_hid_report_descriptor_t reports[1];
-} usb_hid_descriptor_t;
+} usb_hid_class_descriptor_t;
 
 
 typedef union {
@@ -138,7 +138,7 @@ typedef union {
 typedef struct usb_host_interface_t usb_host_interface_t;
 
 typedef int (*UHI_CONFIGURE_EP)
-(usb_host_interface_t *uhc, int epno, int attributes, int max_packet_size, int interval, int64_t timeout);
+(usb_host_interface_t *uhc, usb_endpoint_descriptor_t *endpoint, int64_t timeout);
 
 typedef int (*UHI_RESET_EP)
 (usb_host_interface_t *self, int epno, int64_t timeout);

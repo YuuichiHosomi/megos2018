@@ -1,6 +1,7 @@
-// Minimal OS Kernel
+// MEG-OS Kernel
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
+
 #include "moe.h"
 #include <stdarg.h>
 #include "kernel.h"
@@ -14,17 +15,19 @@ extern void page_init(moe_bootinfo_t *bootinfo);
 extern void xhci_init();
 extern void pg_enter_strict_mode();
 extern void hid_init();
-extern void shell_init();
+extern void sysinit(void *);
 
 extern char *strchr(const char *s, int c);
 extern int vprintf(const char *format, va_list args);
 extern int putchar(int);
+extern void gs_bsod();
 
 
 /*********************************************************************/
 
 
 _Noreturn void _panic(const char* file, uintptr_t line, ...) {
+    gs_bsod();
     va_list list;
     va_start(list, line);
 
@@ -42,7 +45,14 @@ _Noreturn void _panic(const char* file, uintptr_t line, ...) {
 
 _Noreturn void moe_reboot() {
     acpi_reset();
+    arch_reset();
     for (;;) io_hlt();
+}
+
+_Noreturn void moe_shutdown_system() {
+    acpi_enter_sleep_state(5);
+    moe_usleep(5);
+    moe_reboot();
 }
 
 static moe_semaphore_t *sem_zpf;
@@ -56,20 +66,23 @@ int _zprintf(const char *format, ...) {
     return retval;
 }
 
+void _zputs(const char *string) {
+    moe_sem_wait(sem_zpf, MOE_FOREVER);
+    for (int i = 0; string[i]; i++) {
+        putchar(string[i]);
+    }
+    moe_sem_signal(sem_zpf);
+}
+
 
 /*********************************************************************/
 
 moe_bootinfo_t bootinfo;
 
-void kernel_thread(void *args) {
-
-    printf("Minimal Operating Environment v0.6.1 (codename warbler) [%d Cores, Memory %dMB]\n",
+void *moe_kname(char *buffer, size_t limit) {
+    snprintf(buffer, limit, "MEG-OS v0.6.2 (codename warbler) [%d Cores, Memory %dMB]\n",
         moe_get_number_of_active_cpus(), (int)(bootinfo.total_memory >> 8));
-
-    xhci_init();
-    hid_init();
-    shell_init();
-    for (;;) io_hlt();
+    return buffer;
 }
 
 static _Noreturn void start_kernel() {
@@ -82,7 +95,10 @@ static _Noreturn void start_kernel() {
     pg_enter_strict_mode();
     sem_zpf = moe_sem_create(1);
 
-    moe_create_thread(&kernel_thread, 0, NULL, "kernel");
+    hid_init();
+    xhci_init();
+
+    moe_create_thread(&sysinit, 0, NULL, "sysinit");
 
     // Idle thread
     for (;;) io_hlt();

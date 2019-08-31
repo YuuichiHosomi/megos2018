@@ -6,13 +6,14 @@
 #include "kernel.h"
 
 
-#define DEFAULT_QUANTUM     3
-#define CONSUME_QUANTUM_THRESHOLD 2500
-#define THREAD_NAME_SIZE    32
-#define CLEANUP_LOAD_TIME   1000
-#define DEFAULT_SCHEDULE_SIZE   256
-#define MAX_THREADS         256
-#define CONTEXT_SAVE_AREA_SIZE  1024
+#define DEFAULT_QUANTUM             3
+#define CONSUME_QUANTUM_THRESHOLD   2500
+#define THREAD_NAME_SIZE            32
+#define CLEANUP_LOAD_TIME           1000
+#define DEFAULT_SCHEDULE_SIZE       256
+#define DEFAULT_SCHEDULE_QUEUES     2
+#define MAX_THREADS                 256
+#define CONTEXT_SAVE_AREA_SIZE      1024
 
 typedef uint32_t moe_affinity_t;
 typedef int context_id;
@@ -31,17 +32,22 @@ typedef struct moe_thread_t {
     union {
         uintptr_t flags;
         struct {
-            unsigned zombie:1;
+            unsigned priority:4;
+            unsigned :2;
             unsigned running:1;
+            unsigned zombie:1;
+            unsigned last_cpuid:8;
         };
     };
     context_id thid;
     int exit_code;
 
-    moe_priority_level_t priority;
-    moe_affinity_t soft_affinity, hard_affinity;
+    moe_affinity_t weak_affinity, strong_affinity;
     _Atomic uint8_t quantum_left;
     uint8_t quantum, quantum_min, quantum_max;
+    moe_measure_t measure;
+    _Atomic int64_t cputime;
+    _Atomic int load0, load;
 
     _Atomic (moe_thread_t *) *signal_object;
     moe_measure_t deadline;
@@ -74,19 +80,22 @@ typedef enum {
     moe_irql_high,
 } moe_irql_t;
 
-typedef struct {
-    int cpuid;
-    uintptr_t arch_cpuid;
-    moe_thread_t* idle;
-    _Atomic (moe_thread_t*) current;
-    _Atomic (moe_thread_t*) retired;
-    _Atomic moe_irql_t irql;
+typedef union {
+    uint8_t _padding[4096];
+    struct {
+        int cpuid;
+        uintptr_t arch_cpuid;
+        moe_thread_t* idle;
+        _Atomic (moe_thread_t*) current;
+        _Atomic (moe_thread_t*) retired;
+        _Atomic moe_irql_t irql;
+    };
 } core_specific_data_t;
 
 static struct {
     _Atomic (moe_thread_t *) *thread_list;
     core_specific_data_t *csd;
-    moe_queue_t *ready;
+    moe_queue_t *ready[DEFAULT_SCHEDULE_QUEUES];
     moe_queue_t *retired;
     _Atomic context_id next_thid;
     _Atomic context_id next_fibid;
@@ -126,7 +135,8 @@ static moe_thread_t *_get_current_thread() {
 
 static int sch_add(moe_thread_t *thread) {
     if (thread->priority) {
-        return moe_queue_write(moe.ready, (uintptr_t)thread);
+        int pri = thread->priority >= priority_high ? 0 : 1;
+        return moe_queue_write(moe.ready[pri], (uintptr_t)thread);
     } else {
         return -1;
     }
@@ -140,7 +150,7 @@ static int sch_retire(moe_thread_t *thread) {
     }
     if (thread->priority) {
         while (atomic_flag_test_and_set(&moe.lock)) {
-            io_pause();
+            cpu_relax();
         }
         int retval = moe_queue_write(moe.retired, (intptr_t)thread);
         atomic_flag_clear(&moe.lock);
@@ -151,16 +161,18 @@ static int sch_retire(moe_thread_t *thread) {
 }
 
 static moe_thread_t *sch_next() {
-    for (int i = 0; i < 2; i++) {
+    for (int retry = 0; retry < 2; retry++) {
 
     moe_thread_t *thread;
     do {
-        thread = (moe_thread_t*)moe_queue_read(moe.ready, 0);
-        if (thread) {
-            if (moe_measure_until(thread->deadline)) {
-                sch_retire(thread);
-            } else {
-                return thread;
+        for(int i = 0; i < DEFAULT_SCHEDULE_QUEUES; i++) {
+            thread = (moe_thread_t*)moe_queue_read(moe.ready[i], 0);
+            if (thread) {
+                if (moe_measure_until(thread->deadline)) {
+                    sch_retire(thread);
+                } else {
+                    return thread;
+                }
             }
         }
     } while (thread);
@@ -184,6 +196,9 @@ static moe_thread_t *sch_next() {
 static void _next_thread(core_specific_data_t *csd, moe_thread_t *current, _Atomic (moe_thread_t *) *signal_object, moe_measure_t deadline) {
     moe_thread_t *next = sch_next();
     if (current != next) {
+        int64_t load = moe_measure_diff(current->measure);
+        atomic_fetch_add(&current->cputime, load);
+        atomic_fetch_add(&current->load0, load);
         current->signal_object = signal_object;
         current->deadline = deadline;
         current->running = 0;
@@ -192,14 +207,18 @@ static void _next_thread(core_specific_data_t *csd, moe_thread_t *current, _Atom
         csd->retired = current;
         _do_switch_context(&current->context, &next->context);
         csd = _get_current_csd();
+        moe_thread_t *current = csd->current;
+        current->last_cpuid = csd->cpuid;
+        current->measure = moe_create_measure(0);
         sch_retire(atomic_exchange(&csd->retired, NULL));
     }
 }
 
 void thread_on_start() {
     core_specific_data_t *csd = _get_current_csd();
-    // moe_thread_t *current = csd->current;
-    // current->running = 1;
+    moe_thread_t *current = csd->current;
+    current->last_cpuid = csd->cpuid;
+    current->measure = moe_create_measure(0);
     sch_retire(atomic_exchange(&csd->retired, NULL));
 }
 
@@ -235,12 +254,10 @@ static moe_thread_t *_create_thread(moe_thread_start start, moe_priority_level_t
     new_thread->thid = atomic_fetch_add(&moe.next_thid, 1);
     new_thread->priority = priority;
     if (priority) {
-        new_thread->quantum_min = priority;
-        new_thread->quantum_max = DEFAULT_QUANTUM * priority * priority;
-        new_thread->quantum = new_thread->quantum_max;
-        new_thread->quantum_left = new_thread->quantum_max;
+        new_thread->quantum = priority;
+        new_thread->quantum_left = DEFAULT_QUANTUM * priority * priority;
     }
-    new_thread->hard_affinity = moe.system_affinity;
+    new_thread->strong_affinity = moe.system_affinity;
     if (name) {
         strncpy(&new_thread->name[0], name, THREAD_NAME_SIZE - 1);
     }
@@ -271,7 +288,7 @@ _Noreturn void moe_exit_thread(uint32_t exit_code) {
     current->exit_code = exit_code;
     current->zombie = 1;
     moe_usleep(MOE_FOREVER);
-    for (;;) io_hlt();
+    for (;;) moe_usleep(MOE_FOREVER);
 }
 
 void thread_reschedule() {
@@ -281,7 +298,7 @@ void thread_reschedule() {
     moe_priority_level_t priority = current->priority;
     if (priority >= priority_realtime) {
         // do nothing
-    } else if (priority == priority_idle) {
+    } else if (priority == priority_idle || (priority < priority_high && moe_queue_get_estimated_count(moe.ready[0]))) {
         _next_thread(csd, current, NULL, 0);
     } else {
         int quantum = atomic_fetch_add(&current->quantum_left, -1);
@@ -415,14 +432,24 @@ _Noreturn void moe_exit_fiber(uint32_t exit_code) {
     current->exit_code = exit_code;
     // TODO: everything
     moe_yield();
-    for (;;) io_hlt();
+    for (;;) moe_usleep(MOE_FOREVER);
 }
 
 
 _Noreturn void scheduler_thread(void *args) {
     for (;;) {
-        // TODO: everything
-        moe_usleep(10000000);
+        moe_usleep(1000000);
+        int64_t usage = 0;
+        for (int i = 0; i < MAX_THREADS; i++) {
+            moe_thread_t *thread = moe.thread_list[i];
+            if (!thread) continue;
+            int load = atomic_load(&thread->load0);
+            atomic_store(&thread->load, load);
+            atomic_fetch_add(&thread->load0, -load);
+            if (i < moe.ncpu) {
+                usage += load;
+            }
+        }
     }
 }
 
@@ -433,7 +460,9 @@ void thread_init(int ncpu) {
     moe.ncpu = ncpu;
     moe.system_affinity = AFFINITY(ncpu) - 1;
     moe.thread_list = moe_alloc_object(sizeof(void *), MAX_THREADS);
-    moe.ready = moe_queue_create(DEFAULT_SCHEDULE_SIZE);
+    for (int i = 0; i < DEFAULT_SCHEDULE_QUEUES; i++) {
+        moe.ready[i] = moe_queue_create(DEFAULT_SCHEDULE_SIZE);
+    }
     moe.retired = moe_queue_create(DEFAULT_SCHEDULE_SIZE);
     moe.next_fibid = 1;
 
@@ -442,7 +471,7 @@ void thread_init(int ncpu) {
         _csd[i].cpuid = i;
         snprintf(name, THREAD_NAME_SIZE, "(Idle Core #%d)", i);
         moe_thread_t *th = _create_thread(NULL, priority_idle, NULL, name);
-        th->hard_affinity = th->soft_affinity = AFFINITY(i);
+        th->strong_affinity = th->weak_affinity = AFFINITY(i);
         _csd[i].idle = th;
         _csd[i].current = th;
     }
@@ -471,7 +500,7 @@ int moe_spinlock_acquire(moe_spinlock_t *lock) {
         if (moe_spinlock_try(lock)) {
             return 0;
         } else {
-            io_pause();
+            cpu_relax();
         }
     }
 }
@@ -512,7 +541,7 @@ int moe_sem_trywait(moe_semaphore_t *self) {
         if (atomic_compare_exchange_weak(&self->value, &value, value - 1)) {
             return 0;
         } else {
-            io_pause();
+            cpu_relax();
         }
     }
     return -1;
@@ -524,35 +553,27 @@ int moe_sem_wait(moe_semaphore_t *self, int64_t us) {
         return 0;
     }
 
-    // if (atomic_load(&self->thread) != NULL) {
-    //     int64_t timeout_us = MIN(us, 1000);
-    //     moe_measure_t deadline1 = moe_create_measure(timeout_us);
-    //     do {
-    //         if (!moe_sem_trywait(self)) {
-    //             return 0;
-    //         } else {
-    //             io_pause();
-    //         }
-    //     } while (moe_measure_until(deadline1));
-    // }
-
-    moe_measure_t deadline2 = moe_create_measure(us);
-    const int64_t timeout_min = 1000;
+    moe_measure_t deadline = moe_create_measure(us);
+    const int64_t timeout_min = 100;
     const int64_t timeout_max = 100000;
     int64_t timeout = timeout_min;
     moe_thread_t *current = _get_current_thread();
     do {
         moe_thread_t *expected = NULL;
         if (atomic_compare_exchange_weak(&self->thread, &expected, current)) {
-            moe_wait_for_object(&self->thread, timeout);
-            if (!moe_sem_trywait(self)) {
-                return 0;
-            }
             timeout = timeout_min;
+            while (moe_measure_until(deadline)) {
+                moe_wait_for_object(&self->thread, timeout);
+                if (!moe_sem_trywait(self)) {
+                    return 0;
+                }
+                timeout = MIN(timeout_max, timeout * 2);
+            }
+            return -1;
         }
         moe_usleep(timeout);
         timeout = MIN(timeout_max, timeout * 2);
-    } while (moe_measure_until(deadline2));
+    } while (moe_measure_until(deadline));
 
     return -1;
 }
@@ -624,7 +645,7 @@ int moe_queue_write(moe_queue_t* self, intptr_t data) {
             moe_sem_signal(&self->read_sem);
             return 0;
         } else {
-            io_pause();
+            cpu_relax();
         }
     }
     return -1;
@@ -667,3 +688,24 @@ size_t atomic_bit_scan_and_reset(_Atomic uint32_t *p, size_t limit, size_t def_v
 
 
 /*********************************************************************/
+
+
+int cmd_ps(int argc, char **argv) {
+    printf("ID context   attr affinity usage cpu time   name\n");
+    for (int i = 0; i < MAX_THREADS; i++) {
+        moe_thread_t* p = moe.thread_list[i];
+        if (!p) continue;
+        uint64_t time = p->cputime / 1000000;
+        uint32_t time0 = time % 60;
+        uint32_t time1 = (time / 60) % 60;
+        uint32_t time2 = (time / 3600);
+        int usage = p->load / 1000;
+        if (usage > 999) usage = 999;
+        int usage0 = usage % 10, usage1 = usage / 10;
+        printf("%2d %09zx %04zx %08x %2d.%d%% %4u:%02u:%02u %s\n",
+            (int)p->thid, (uintptr_t)p & 0xFFFFFFFFF, p->flags,
+            p->strong_affinity, usage1, usage0, time2, time1, time0,
+            p->name);
+    }
+    return 0;
+}

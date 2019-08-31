@@ -36,7 +36,8 @@ when :x64
   URL_OVMF      = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEX64_OVMF.fd"
   PATH_OVMF     = "var/ovmfx64.fd"
   QEMU_ARCH     = "x86_64"
-  QEMU_OPTS     = "-smp 4 -rtc base=localtime -device nec-usb-xhci,id=xhci -device usb-kbd -device usb-mouse -device usb-tablet"
+  QEMU_OPTS     = "-smp 4 -rtc base=localtime -device nec-usb-xhci,id=xhci -device usb-kbd -device usb-mouse"
+  # -device usb-tablet"
 when :i386
   URL_OVMF      = nil
   PATH_OVMF     = "var/ovmfia32.fd"
@@ -196,14 +197,22 @@ def make_efi(cputype, target, src_tokens, options = {})
         if enums
           enums.keys.each do |ns|
             file.puts "typedef enum {"
-            enums[ns].each do |item|
-              file.puts "\t#{ns}_#{item.gsub(/\W/, '_')},"
+            strings = enums[ns].map do |item|
+              result_string = item
+              if item.is_a?(Hash)
+                key = item.keys[0]
+                result_string = key
+                file.puts "\t#{ns}_#{key} = #{item[key]},"
+              else
+                file.puts "\t#{ns}_#{item.gsub(/\W/, '_')},"
+              end
+              result_string
             end
             file.puts "\t#{ns}_max"
-            file.puts "} #{ns};"
+            file.puts "} #{ns}_enum;"
             file.puts "const char * #{ns}_strings[] = {"
-            enums[ns].each do |item|
-              file.puts "\t#{item.inspect},"
+            strings.each do |s|
+              file.puts "\t#{s.inspect},"
             end
             file.puts "};"
           end
