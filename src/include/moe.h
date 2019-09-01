@@ -14,15 +14,15 @@
 
 int printf(const char *format, ...);
 int snprintf(char* buffer, size_t n, const char* format, ...);
+char *strchr(const char *s, int c);
 char *strncpy(char *s1, const char *s2, size_t n);
 int strncmp(const char *s1, const char *s2, size_t n);
 void *memcpy(void *p, const void *q, size_t n);
 void *memset(void *p, int v, size_t n);
-void memset32(uint32_t *p, uint32_t v, size_t n);
 
-_Noreturn void _panic(const char *file, uintptr_t line, ...);
-#define moe_assert(cond, ...) if (!(cond)) { _panic(__FILE__, __LINE__, __VA_ARGS__); }
-#define moe_panic(...) _panic(__FILE__, __LINE__, __VA_ARGS__)
+_Noreturn void _zpanic(const char *file, uintptr_t line, ...);
+#define moe_assert(cond, ...) if (!(cond)) { _zpanic(__FILE__, __LINE__, __VA_ARGS__); }
+#define moe_panic(...) _zpanic(__FILE__, __LINE__, __VA_ARGS__)
 _Noreturn void moe_reboot();
 _Noreturn void moe_shutdown_system();
 

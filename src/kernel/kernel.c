@@ -17,7 +17,6 @@ extern void pg_enter_strict_mode();
 extern void hid_init();
 extern void sysinit(void *);
 
-extern char *strchr(const char *s, int c);
 extern int vprintf(const char *format, va_list args);
 extern int putchar(int);
 extern void gs_bsod();
@@ -26,7 +25,7 @@ extern void gs_bsod();
 /*********************************************************************/
 
 
-_Noreturn void _panic(const char* file, uintptr_t line, ...) {
+_Noreturn void _zpanic(const char* file, uintptr_t line, ...) {
     gs_bsod();
     va_list list;
     va_start(list, line);
