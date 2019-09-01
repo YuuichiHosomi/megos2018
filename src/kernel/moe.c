@@ -44,7 +44,7 @@ typedef struct moe_thread_t {
 
     moe_affinity_t weak_affinity, strong_affinity;
     _Atomic uint8_t quantum_left;
-    uint8_t quantum, quantum_min, quantum_max;
+    uint8_t quantum;
     moe_measure_t measure;
     _Atomic int64_t cputime;
     _Atomic int load0, load;
@@ -211,6 +211,11 @@ static void _next_thread(core_specific_data_t *csd, moe_thread_t *current, _Atom
         current->last_cpuid = csd->cpuid;
         current->measure = moe_create_measure(0);
         sch_retire(atomic_exchange(&csd->retired, NULL));
+    } else {
+        int64_t load = moe_measure_diff(current->measure);
+        atomic_fetch_add(&current->cputime, load);
+        atomic_fetch_add(&current->load0, load);
+        current->measure = moe_create_measure(0);
     }
 }
 
