@@ -741,6 +741,8 @@ void process_event(xhci_t *self) {
 _Noreturn void xhci_event_thread(void *args) {
     xhci_t *self = args;
 
+    moe_create_thread(&xhci_config_thread, priority_normal, &xhci, "xhci.config");
+
     xhci_init_dev(self);
 
 #ifdef DEBUG
@@ -907,8 +909,7 @@ void xhci_init() {
         xhci.port_change_queue = moe_queue_create(MAX_PORT_CHANGE);
         xhci.urbs = moe_alloc_object(sizeof(usb_request_block_t), MAX_URB);
 
-        moe_create_thread(&xhci_event_thread, priority_realtime, &xhci, "xhci.event");
-        moe_create_thread(&xhci_config_thread, priority_normal, &xhci, "xhci.config");
+        moe_create_process(&xhci_event_thread, priority_realtime, &xhci, "xhci.event");
 
 #ifdef DEBUG
     for (;;) moe_usleep(MOE_FOREVER);

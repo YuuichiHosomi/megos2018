@@ -565,7 +565,7 @@ error:
 
 EFI_STATUS exec(CONST CHAR16* path) {
     EFI_STATUS status;
-    cout->ClearScreen(cout);
+    // cout->ClearScreen(cout);
     EFI_HANDLE child = NULL;
     EFI_DEVICE_PATH_PROTOCOL* dpath = NULL;
     base_and_size exe_ptr;
@@ -598,22 +598,18 @@ EFI_STATUS exec(CONST CHAR16* path) {
     return status;
 }
 
-EFI_STATUS start_os() {
-    return exec(KERNEL_PATH);
-}
-
 
 void efi_blt_bmp(uint8_t *bmp, int offset_x, int offset_y) {
-    int bmp_w = *((uint32_t*)(bmp + 18));
-    int bmp_h = *((uint32_t*)(bmp + 22));
-    int bmp_bpp = *((uint16_t*)(bmp + 28));
+    int bmp_w = *((uint32_t *)(bmp + 18));
+    int bmp_h = *((uint32_t *)(bmp + 22));
+    int bmp_bpp = *((uint16_t *)(bmp + 28));
     int bmp_bpp8 = (bmp_bpp + 7) / 8;
     int bmp_delta = (bmp_bpp8 * bmp_w + 3) & 0xFFFFFFFC;
-    const uint8_t* msdib = bmp + *((uint32_t*)(bmp + 10));
+    const uint8_t *msdib = bmp + *((uint32_t *)(bmp + 10));
 
-    EFI_GRAPHICS_OUTPUT_BLT_PIXEL *blt_buffer = malloc(bmp_w * bmp_h * sizeof(EFI_GRAPHICS_OUTPUT_BLT_PIXEL));
-    uint32_t *q = (uint32_t*)blt_buffer;
     UINTN blt_delta = bmp_w * sizeof(EFI_GRAPHICS_OUTPUT_BLT_PIXEL);
+    EFI_GRAPHICS_OUTPUT_BLT_PIXEL *blt_buffer = malloc(blt_delta * bmp_h);
+    uint32_t *q = (uint32_t *)blt_buffer;
 
     switch (bmp_bpp) {
         case 24:
@@ -633,6 +629,16 @@ void efi_blt_bmp(uint8_t *bmp, int offset_x, int offset_y) {
     free(blt_buffer);
 }
 
+
+EFI_STATUS start_os() {
+    cout->ClearScreen(cout);
+    acpi_bgrt_t* bgrt = NULL;
+    if (gop) bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
+    if (bgrt) {
+        efi_blt_bmp((uint8_t *)bgrt->Image_Address, bgrt->Image_Offset_X, bgrt->Image_Offset_Y);
+    }
+    return exec(KERNEL_PATH);
+}
 
 
 EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE _image, IN EFI_SYSTEM_TABLE *st) {
@@ -693,7 +699,6 @@ cp932_exit:
     BOOLEAN menu_flag = FALSE;
     // cout->SetAttribute(cout, 0x17);
     cout->ClearScreen(cout);
-    // printf("%d %d", edid_x, edid_y);
     acpi_bgrt_t* bgrt = NULL;
     if (gop) bgrt = acpi_find_table(ACPI_BGRT_SIGNATURE);
     if (bgrt) {
