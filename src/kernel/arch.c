@@ -79,16 +79,17 @@ extern void *_irq47;
 
 
 #define SIZE_TSS    0x10000
-extern uint16_t gdt_init();
+extern uint16_t gdt_init(void);
 extern void gdt_load(void *gdt, x64_tss_desc_t *tss);
 extern void idt_load(volatile void*, size_t);
-extern x64_tss_t *io_get_tss();
+extern x64_tss_t *io_get_tss(void);
 extern _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stack_base);
-extern void io_set_lazy_fpu_restore();
+extern void io_set_lazy_fpu_restore(void);
 extern void thread_init(int);
-extern void thread_reschedule();
-extern void lpc_init();
+extern void thread_reschedule(void);
+extern void lpc_init(void);
 extern int acpi_enable(int enabled);
+static int hpet_init(void);
 
 
 static tuple_eax_edx_t io_rdmsr(uint32_t const addr) {
@@ -106,6 +107,42 @@ static void io_cpuid(cpuid_t *regs) {
     : "=a"(regs->eax), "=c"(regs->ecx), "=d"(regs->edx), "=b"(regs->ebx)
     : "a"(regs->eax), "c"(regs->ecx)
     );
+}
+
+
+/*********************************************************************/
+// Measure Service
+
+typedef moe_measure_t (*MOE_CREATE_MEASURE)(int64_t us);
+typedef int (*MOE_MEASURE_UNTIL)(moe_measure_t deadline);
+typedef int64_t (*MOE_MEASURE_DIFF)(moe_measure_t from);
+
+struct {
+    MOE_CREATE_MEASURE create;
+    MOE_MEASURE_UNTIL until;
+    MOE_MEASURE_DIFF diff;
+} measure_vtt;
+
+moe_measure_t moe_create_measure(int64_t us) {
+    if (us == MOE_FOREVER) {
+        return MOE_FOREVER;
+    }
+    if (us >= 0) {
+        return measure_vtt.create(us);
+    } else {
+        return 0;
+    }
+}
+
+int moe_measure_until(moe_measure_t deadline) {
+    if (deadline == MOE_FOREVER) {
+        return 1;
+    }
+    return measure_vtt.until(deadline);
+}
+
+int64_t moe_measure_diff(moe_measure_t from) {
+    return measure_vtt.diff(from);
 }
 
 
@@ -267,8 +304,8 @@ void *ioapic_base = NULL;
 _Atomic int smp_mode = 0;
 _Atomic uint8_t next_msi = 0;
 
+uint64_t lapic_freq = 0;
 uint32_t lapic_timer_div = 0;
-uint32_t lapic_timer_div2 = 0;
 _Atomic uint64_t lapic_timer_value = 0;
 
 
@@ -381,25 +418,15 @@ void irq_livt() {
     }
 }
 
-moe_measure_t moe_create_measure(int64_t us) {
-    if (us == MOE_FOREVER) {
-        return MOE_FOREVER;
-    }
-    if (us >= 0) {
-        return lapic_timer_value + us / 1000;
-    } else {
-        return 0;
-    }
+moe_measure_t lapic_create_measure(int64_t us) {
+    return lapic_timer_value + us / 1000;
 }
 
-int moe_measure_until(moe_measure_t deadline) {
-    if (deadline == MOE_FOREVER) {
-        return 1;
-    }
+int lapic_measure_until(moe_measure_t deadline) {
     return (intptr_t)(deadline - lapic_timer_value) > 0;
 }
 
-int64_t moe_measure_diff(moe_measure_t from) {
+int64_t lapic_measure_diff(moe_measure_t from) {
     return (atomic_load(&lapic_timer_value) - from) * 1000;
 }
 
@@ -602,27 +629,49 @@ static void apic_init() {
         idt_set_kernel_handler(IRQ_SCHEDULE, (uintptr_t)&_ipi_sche, 0);
         // idt_set_kernel_handler(IRQ_INVALIDATE_TLB, (uintptr_t)&_ipi_invtlb, 0);
 
-        // LAPIC timer
+
+        // HPET, LAPIC Timer, and ACPI PM Timer
+
         apic_write_lapic(0x3E0, 0x0000000B);
         apic_write_lapic(0x320, 0x00010020);
-        apic_write_lapic(0x380, UINT32_MAX);
-        const int magic_number = 100;
-        uint32_t timer_val = ACPI_PM_TIMER_FREQ / magic_number;
-        uint32_t acpi_tmr_base = acpi_read_pm_timer();
-        uint32_t acpi_tmr_val = acpi_read_pm_timer();
-        do {
-            cpu_relax();
-        } while (acpi_tmr_val == acpi_read_pm_timer());
-        do {
-            cpu_relax();
-            acpi_tmr_val = acpi_read_pm_timer();
-        } while (timer_val > ((acpi_tmr_val - acpi_tmr_base) & 0xFFFFFF));
-        uint32_t count = apic_read_lapic(0x390);
-        uint64_t lapic_freq = ((uint64_t)UINT32_MAX - count) * magic_number;
+
+        if (hpet_init()) {
+            // no HPET
+            const int magic_number = 100;
+            uint32_t timer_val = ACPI_PM_TIMER_FREQ / magic_number;
+            uint32_t acpi_tmr_val = acpi_read_pm_timer();
+            do {
+                cpu_relax();
+            } while (acpi_tmr_val == acpi_read_pm_timer());
+            uint32_t acpi_tmr_base = acpi_read_pm_timer();
+            apic_write_lapic(0x380, UINT32_MAX);
+            do {
+                cpu_relax();
+                acpi_tmr_val = acpi_read_pm_timer();
+            } while (timer_val > ((acpi_tmr_val - acpi_tmr_base) & 0xFFFFFF));
+            uint32_t count = apic_read_lapic(0x390);
+            lapic_freq = ((uint64_t)UINT32_MAX - count) * magic_number;
+
+            measure_vtt.create = lapic_create_measure;
+            measure_vtt.until = lapic_measure_until;
+            measure_vtt.diff = lapic_measure_diff;
+        } else {
+            // use HPET
+            const int magic_number = 100;
+            moe_measure_t deadline0 = moe_create_measure(1);
+            while (moe_measure_until(deadline0)) {
+                cpu_relax();
+            }
+            moe_measure_t deadline1 = moe_create_measure(1000000 / magic_number);
+            apic_write_lapic(0x380, UINT32_MAX);
+            while (moe_measure_until(deadline1)) {
+                cpu_relax();
+            }
+            uint32_t count = apic_read_lapic(0x390);
+            lapic_freq = ((uint64_t)UINT32_MAX - count) * magic_number;
+        }
 
         lapic_timer_div = lapic_freq / 1000;
-        lapic_timer_div2 = lapic_freq / 1000000;
-
         irq_handler[0] = &irq_livt;
         apic_write_lapic(0x320, 0x00020000 | IRQ_LAPIC_TIMER);
         apic_write_lapic(0x380, lapic_timer_div);
@@ -795,6 +844,72 @@ void pci_write_config(uint32_t addr, uint32_t val) {
 
 static void pci_init() {
     // do nothing
+}
+
+
+/*********************************************************************/
+//  High Precision Event Timer
+
+#define HPET_DIV    1
+_Atomic uint64_t *hpet_base;
+uint32_t hpet_main_cnt_period = 0;
+_Atomic uint64_t hpet_count = 0;
+// static const uint64_t timer_div = 1000 * HPET_DIV;
+uint64_t measure_div;
+
+static void hpet_write_reg(uintptr_t index, uint64_t val) {
+    hpet_base[index / 8] = val;
+}
+
+static uint64_t hpet_read_reg(uintptr_t index) {
+    return hpet_base[index / 8];
+}
+
+void hpet_irq_handler(int irq) {
+    hpet_count++;
+}
+
+static int64_t hpet_get_measure() {
+    return hpet_read_reg(0xF0) / measure_div;
+}
+
+static moe_measure_t hpet_create_measure(int64_t us) {
+    return hpet_get_measure() + us;
+}
+
+static int hpet_measure_until(moe_measure_t deadline) {
+    return (intptr_t)(deadline - hpet_get_measure()) > 0;
+}
+
+static int64_t hpet_measure_diff(moe_measure_t from) {
+    return hpet_get_measure() - from;
+}
+
+
+static int hpet_init(void) {
+    acpi_hpet_t* hpet = acpi_find_table(ACPI_HPET_SIGNATURE);
+    if (hpet) {
+        hpet_base = pg_map_mmio(hpet->address.address, 1);
+
+        measure_vtt.create = hpet_create_measure;
+        measure_vtt.until = hpet_measure_until;
+        measure_vtt.diff = hpet_measure_diff;
+
+        hpet_main_cnt_period = hpet_read_reg(0) >> 32;
+        hpet_write_reg(0x10, 0);
+        hpet_write_reg(0x20, 0); // Clear all interrupts
+        hpet_write_reg(0xF0, 0); // Reset MAIN_COUNTER_VALUE
+        hpet_write_reg(0x10, 0x03); // LEG_RT_CNF | ENABLE_CNF
+
+        measure_div = 1000000000 / hpet_main_cnt_period;
+        hpet_write_reg(0x100, 0x4C);
+        hpet_write_reg(0x108, HPET_DIV * 1000000000000 / hpet_main_cnt_period);
+        moe_install_irq(0, &hpet_irq_handler);
+
+        return 0;
+    } else {
+        return -1;
+    }
 }
 
 
