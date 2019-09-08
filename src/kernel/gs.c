@@ -319,17 +319,17 @@ int putchar(int _c) {
 }
 
 int moe_set_console_cursor_visible(void *context, int visible) {
-    int result = main_console_cursor_visible;
+    int old_value = main_console_cursor_visible;
     main_console_cursor_visible = visible;
 
     moe_rect_t rect = {{console_padding_h + main_console_cursor_x * font_w, console_padding_v + main_console_cursor_y * font_h}, {font_w, font_h}};
     if (visible) {
         moe_fill_rect(context, &rect, main_console_fgcolor);
-    } else {
+    } else if (old_value) {
         moe_blt(context, &back_buffer, &rect.origin, &rect, 0);
     }
 
-    return result;
+    return old_value;
 }
 
 void gs_cls() {
@@ -409,7 +409,7 @@ void gs_init(moe_bootinfo_t* info) {
     back_buffer.height = main_screen.height;
     back_buffer.delta = main_screen.width;
     back_buffer.bitmap = moe_alloc_object(back_buffer.delta * back_buffer.delta * 4, 1);
-    gradient(&back_buffer, 0x1A237E, 0x455A64);
-    moe_blt(NULL, &back_buffer, NULL, NULL, 0);
+    // gradient(&back_buffer, 0x1A237E, 0x455A64);
+    // moe_blt(NULL, &back_buffer, NULL, NULL, 0);
 
 }

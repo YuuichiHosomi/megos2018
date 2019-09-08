@@ -1,6 +1,7 @@
 // MEG-OS Loader for EFI
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
+
 #include "boot.h"
 
 #define	INVALID_UNICHAR	0xFFFE
@@ -175,7 +176,7 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
             EFI_PRINT("ERROR: KERNEL NOT FOUND\r\n");
             return EFI_NOT_FOUND;
         }
-        locator = pe_prepare(kernel_ptr.base, kernel_ptr.size);
+        locator = recognize_kernel_signature(kernel_ptr.base, kernel_ptr.size);
         if (!locator) {
             EFI_PRINT("ERROR: BAD KERNEL SIGNATURE FOUND\r\n");
             return EFI_LOAD_ERROR;

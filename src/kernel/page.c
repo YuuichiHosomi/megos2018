@@ -74,7 +74,7 @@ static uintptr_t root_page_to_va(uintptr_t page) {
 
 void invalidate_tlb() {
     io_invalidate_tlb();
-    // smp_send_invalidate_tlb();
+    smp_send_invalidate_tlb();
 }
 
 
@@ -110,7 +110,7 @@ void *pg_map_mmio(uintptr_t base, size_t _size) {
 }
 
 void *pg_map_vram(uintptr_t base, size_t size) {
-    return pg_map(base, (void *)root_page_to_va(VRAM_PAGE), size, PTE_USER | PTE_WRITE | PTE_PRESENT);
+    return pg_map(base, (void *)root_page_to_va(VRAM_PAGE), size, PTE_NOT_EXECUTE | PTE_USER | PTE_WRITE | PTE_PRESENT);
 }
 
 
@@ -122,8 +122,14 @@ void *pg_valloc(uintptr_t pa, size_t size) {
 }
 
 
+_Noreturn void page_process(void *args) {
+    for (;;) {
+        moe_usleep(MOE_FOREVER);
+    }
+}
+
 void pg_enter_strict_mode() {
-    // return;
+    // moe_create_process(&page_process, priority_realtime, NULL, "page");
     pg_set_pte(0, 0, 4);
     invalidate_tlb();
 }
@@ -145,7 +151,7 @@ void page_init(moe_bootinfo_t *bootinfo) {
     MOE_PHYSICAL_ADDRESS pml3v_pa = moe_alloc_physical_page(NATIVE_PAGE_SIZE);
     uint64_t *pml3v_va = (uint64_t *)pml3v_pa;
     memset(pml3v_va, 0, NATIVE_PAGE_SIZE);
-    pml4_va[VRAM_PAGE] = pml3v_pa | common_attributes | PTE_USER;
+    pml4_va[VRAM_PAGE] = pml3v_pa | common_attributes | PTE_USER | PTE_NOT_EXECUTE;
 
     pte_t pml2v_pa = moe_alloc_physical_page(NATIVE_PAGE_SIZE);
     pte_t *pml2v_va = (pte_t *)pml2v_pa;

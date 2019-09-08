@@ -1,6 +1,7 @@
-// MOE
+// MOE Subsystem
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
+
 #include <stdatomic.h>
 #include "moe.h"
 #include "kernel.h"
@@ -39,12 +40,14 @@ typedef struct moe_thread_t {
             unsigned last_cpuid:8;
         };
     };
+    context_id pid;
     context_id thid;
     int exit_code;
+    _Atomic int ref_cnt;
 
     moe_affinity_t weak_affinity, strong_affinity;
     _Atomic uint8_t quantum_left;
-    uint8_t quantum, quantum_min, quantum_max;
+    uint8_t quantum;
     moe_measure_t measure;
     _Atomic int64_t cputime;
     _Atomic int load0, load;
@@ -99,6 +102,7 @@ static struct {
     moe_queue_t *retired;
     _Atomic context_id next_thid;
     _Atomic context_id next_fibid;
+    _Atomic context_id next_pid;
     moe_affinity_t system_affinity;
     int ncpu;
     _Atomic int n_active_cpu;
@@ -106,8 +110,8 @@ static struct {
 } moe;
 
 extern moe_thread_t *_do_switch_context(cpu_context_t *from, cpu_context_t *to);
-extern void io_setup_new_thread(moe_thread_t *thread, uintptr_t* new_sp);
-extern void io_setup_new_fiber(moe_fiber_t *fiber, uintptr_t* new_sp);
+extern void io_setup_new_thread(cpu_context_t *context, uintptr_t* new_sp, moe_thread_start start, void *args);
+extern void io_setup_new_fiber(cpu_context_t *context, uintptr_t* new_sp, moe_thread_start start, void *args);
 extern int smp_get_current_cpuid();
 
 
@@ -211,6 +215,11 @@ static void _next_thread(core_specific_data_t *csd, moe_thread_t *current, _Atom
         current->last_cpuid = csd->cpuid;
         current->measure = moe_create_measure(0);
         sch_retire(atomic_exchange(&csd->retired, NULL));
+    } else {
+        int64_t load = moe_measure_diff(current->measure);
+        atomic_fetch_add(&current->cputime, load);
+        atomic_fetch_add(&current->load0, load);
+        current->measure = moe_create_measure(0);
     }
 }
 
@@ -251,7 +260,9 @@ int moe_signal_object(_Atomic (moe_thread_t *) *obj) {
 
 static moe_thread_t *_create_thread(moe_thread_start start, moe_priority_level_t priority, void *args, const char *name) {
     moe_thread_t *new_thread = moe_alloc_object(sizeof(moe_thread_t), 1);
+    new_thread->ref_cnt = 1;
     new_thread->thid = atomic_fetch_add(&moe.next_thid, 1);
+    new_thread->pid = _get_current_thread()->pid;
     new_thread->priority = priority;
     if (priority) {
         new_thread->quantum = priority;
@@ -267,9 +278,7 @@ static moe_thread_t *_create_thread(moe_thread_start start, moe_priority_level_t
         uintptr_t* sp = stack + stack_count;
         *--sp = 0;
         *--sp = 0x00007fffdeadbeef;
-        *--sp = (uintptr_t)args;
-        *--sp = (uintptr_t)start;
-        io_setup_new_thread(new_thread, sp);
+        io_setup_new_thread(&new_thread->context, sp, start, args);
     }
 
     for (int i = 0; i< MAX_THREADS; i++) {
@@ -355,9 +364,7 @@ moe_fiber_t *_create_fiber(moe_thread_start start, void *args, size_t stack_size
         uintptr_t* sp = stack + stack_count;
         *--sp = 0;
         *--sp = 0x00007fffdeadbeef;
-        *--sp = (uintptr_t)args;
-        *--sp = (uintptr_t)start;
-        io_setup_new_fiber(new_fiber, sp);
+        io_setup_new_fiber(&new_fiber->context, sp, start, args);
     }
     return new_fiber;
 }
@@ -410,7 +417,6 @@ const char *moe_get_current_fiber_name() {
 }
 
 void moe_yield() {
-    if (!moe.csd) return;
     moe_thread_t *current_thread = _get_current_thread();
     moe_fiber_t *current = current_thread->current_fiber;
     if (!current) return;
@@ -437,6 +443,7 @@ _Noreturn void moe_exit_fiber(uint32_t exit_code) {
 
 
 _Noreturn void scheduler_thread(void *args) {
+    moe_raise_pid();
     for (;;) {
         moe_usleep(1000000);
         int64_t usage = 0;
@@ -464,6 +471,7 @@ void thread_init(int ncpu) {
         moe.ready[i] = moe_queue_create(DEFAULT_SCHEDULE_SIZE);
     }
     moe.retired = moe_queue_create(DEFAULT_SCHEDULE_SIZE);
+    moe.next_pid = 1;
     moe.next_fibid = 1;
 
     core_specific_data_t *_csd = moe_alloc_object(sizeof(core_specific_data_t), ncpu);
@@ -663,27 +671,43 @@ size_t moe_queue_get_estimated_free(moe_queue_t* self) {
 
 /*********************************************************************/
 
-int atomic_bit_scan(_Atomic uint64_t *p) {
-    uint64_t word = atomic_load(p);
-    if (word == 0) return -1;
-    return __builtin_ctz(word);
+int moe_get_pid() {
+    return _get_current_thread()->pid;
 }
 
+int moe_raise_pid() {
+    int result = atomic_fetch_add(&moe.next_pid, 1);
+    _get_current_thread()->pid = result;
+    return result;
+}
 
-size_t atomic_bit_scan_and_reset(_Atomic uint32_t *p, size_t limit, size_t def_val) {
-    size_t words = (limit + 31) / 32;
-    for (size_t i = 0; i < words; i++) {
-        uint32_t word = p[i];
-        while (word != 0) {
-            size_t position = __builtin_ctz(word);
-            uint32_t mask = 1 << position;
-            uint32_t desired = word & ~mask;
-            if (atomic_compare_exchange_weak(&p[i], &word, desired)) {
-                return i * 32 + position;
-            }
-        }
-    }
-    return def_val;
+typedef struct {
+    moe_semaphore_t sem;
+    int pid;
+    moe_thread_start start;
+    void *args;
+} new_process_info;
+
+_Noreturn void process_start(void *_args) {
+    new_process_info *process_info = _args;
+
+    moe_thread_start start = process_info->start;
+    void *args = process_info->args;
+    process_info->pid = moe_raise_pid();
+    moe_sem_signal(&process_info->sem);
+
+    start(args);
+    moe_exit_thread(-1);
+}
+
+int moe_create_process(moe_thread_start start, moe_priority_level_t priority, void *args, const char *name) {
+    new_process_info process_info;
+    moe_sem_init(&process_info.sem, 0);
+    process_info.start = start;
+    process_info.args = args;
+    moe_create_thread(&process_start, priority, &process_info, name);
+    moe_sem_wait(&process_info.sem, MOE_FOREVER);
+    return process_info.pid;
 }
 
 
@@ -691,7 +715,7 @@ size_t atomic_bit_scan_and_reset(_Atomic uint32_t *p, size_t limit, size_t def_v
 
 
 int cmd_ps(int argc, char **argv) {
-    printf("ID context   attr affinity usage cpu time   name\n");
+    printf("THID PID attr affinity usage cpu time   name\n");
     for (int i = 0; i < MAX_THREADS; i++) {
         moe_thread_t* p = moe.thread_list[i];
         if (!p) continue;
@@ -702,8 +726,8 @@ int cmd_ps(int argc, char **argv) {
         int usage = p->load / 1000;
         if (usage > 999) usage = 999;
         int usage0 = usage % 10, usage1 = usage / 10;
-        printf("%2d %09zx %04zx %08x %2d.%d%% %4u:%02u:%02u %s\n",
-            (int)p->thid, (uintptr_t)p & 0xFFFFFFFFF, p->flags,
+        printf("%4d %3d %04zx %08x %2d.%d%% %4u:%02u:%02u %s\n",
+            (int)p->thid, (int)p->pid, p->flags,
             p->strong_affinity, usage1, usage0, time2, time1, time0,
             p->name);
     }

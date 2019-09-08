@@ -192,7 +192,7 @@ _Noreturn void fiber_test_thread(void *args) {
 #define MAX_ARGV    256
 #define MAX_ARGBUFF 256
 
-void sysinit(void *args) {
+void shell_start() {
 
     cin = moe_queue_create(256);
 

@@ -12,21 +12,20 @@ extern void arch_init(moe_bootinfo_t* info);
 extern void gs_init(moe_bootinfo_t *bootinfo);
 extern void mm_init(moe_bootinfo_t *bootinfo);
 extern void page_init(moe_bootinfo_t *bootinfo);
-extern void xhci_init();
-extern void pg_enter_strict_mode();
-extern void hid_init();
-extern void sysinit(void *);
+extern void xhci_init(void);
+extern void pg_enter_strict_mode(void);
+extern void hid_init(void);
+extern void shell_start(void);
 
-extern char *strchr(const char *s, int c);
 extern int vprintf(const char *format, va_list args);
 extern int putchar(int);
-extern void gs_bsod();
+extern void gs_bsod(void);
 
 
 /*********************************************************************/
 
 
-_Noreturn void _panic(const char* file, uintptr_t line, ...) {
+_Noreturn void _zpanic(const char* file, uintptr_t line, ...) {
     gs_bsod();
     va_list list;
     va_start(list, line);
@@ -85,6 +84,14 @@ void *moe_kname(char *buffer, size_t limit) {
     return buffer;
 }
 
+void sysinit(void *args) {
+
+    hid_init();
+    xhci_init();
+
+    shell_start();
+}
+
 static _Noreturn void start_kernel() {
 
     mm_init(&bootinfo);
@@ -95,10 +102,8 @@ static _Noreturn void start_kernel() {
     pg_enter_strict_mode();
     sem_zpf = moe_sem_create(1);
 
-    hid_init();
-    xhci_init();
-
-    moe_create_thread(&sysinit, 0, NULL, "sysinit");
+    moe_create_process(&sysinit, 0, NULL, "sysinit");
+    // moe_create_thread(&sysinit, 0, NULL, "sysinit");
 
     // Idle thread
     for (;;) io_hlt();

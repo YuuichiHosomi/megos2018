@@ -14,17 +14,17 @@
 
 int printf(const char *format, ...);
 int snprintf(char* buffer, size_t n, const char* format, ...);
+char *strchr(const char *s, int c);
 char *strncpy(char *s1, const char *s2, size_t n);
 int strncmp(const char *s1, const char *s2, size_t n);
 void *memcpy(void *p, const void *q, size_t n);
 void *memset(void *p, int v, size_t n);
-void memset32(uint32_t *p, uint32_t v, size_t n);
 
-_Noreturn void _panic(const char *file, uintptr_t line, ...);
-#define moe_assert(cond, ...) if (!(cond)) { _panic(__FILE__, __LINE__, __VA_ARGS__); }
-#define moe_panic(...) _panic(__FILE__, __LINE__, __VA_ARGS__)
-_Noreturn void moe_reboot();
-_Noreturn void moe_shutdown_system();
+_Noreturn void _zpanic(const char *file, uintptr_t line, ...);
+#define moe_assert(cond, ...) if (!(cond)) { _zpanic(__FILE__, __LINE__, __VA_ARGS__); }
+#define moe_panic(...) _zpanic(__FILE__, __LINE__, __VA_ARGS__)
+_Noreturn void moe_reboot(void);
+_Noreturn void moe_shutdown_system(void);
 
 
 //  Minimal Graphics Subsystem
@@ -92,18 +92,22 @@ typedef enum {
 typedef void (*moe_thread_start)(void *args);
 int moe_create_thread(moe_thread_start start, moe_priority_level_t priority, void *args, const char *name);
 int moe_usleep(int64_t us);
-int moe_get_current_thread_id();
-const char *moe_get_current_thread_name();
+int moe_get_current_thread_id(void);
+const char *moe_get_current_thread_name(void);
 _Noreturn void moe_exit_thread(uint32_t exit_code);
-int moe_get_number_of_active_cpus();
+int moe_get_number_of_active_cpus(void);
+
+int moe_get_pid(void);
+int moe_raise_pid(void);
+int moe_create_process(moe_thread_start start, moe_priority_level_t priority, void *args, const char *name);
 
 moe_fiber_t *moe_create_fiber(moe_thread_start start, void *args, size_t stack_size, const char *name);
-moe_fiber_t *moe_get_primary_fiber();
-moe_fiber_t *moe_get_current_fiber();
+moe_fiber_t *moe_get_primary_fiber(void);
+moe_fiber_t *moe_get_current_fiber(void);
 _Noreturn void moe_exit_fiber(uint32_t exit_code);
-int moe_get_current_fiber_id();
-const char *moe_get_current_fiber_name();
-void moe_yield();
+int moe_get_current_fiber_id(void);
+const char *moe_get_current_fiber_name(void);
+void moe_yield(void);
 
 
 typedef _Atomic uintptr_t moe_spinlock_t;

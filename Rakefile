@@ -19,38 +19,42 @@ else
   :unknown
 end
 
-VENDOR_NAME     = "MOE"
+VENDOR_NAME     = "MEGOS"
 PATH_BIN        = "bin/"
 PATH_SRC        = "src/"
 PATH_SRC_FONTS  = "#{PATH_SRC}fonts/include/"
 PATH_OBJ        = "obj/"
 PATH_MNT        = "mnt/"
+PATH_VAR        = "var/"
 PATH_EFI_BOOT   = "#{PATH_MNT}EFI/BOOT/"
 PATH_EFI_VENDOR = "#{PATH_MNT}EFI/#{VENDOR_NAME}/"
 PATH_INC        = "#{PATH_SRC}include/"
 CP932_BIN       = "#{PATH_EFI_VENDOR}cp932.bin"
-TARGET_ISO      = "var/moe.iso"
+TARGET_ISO      = "#{PATH_VAR}moe.iso"
 
 case ARCH.to_sym
 when :x64
   URL_OVMF      = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEX64_OVMF.fd"
-  PATH_OVMF     = "var/ovmfx64.fd"
+  URL_SHELL     = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEX64_Shell.efi"
+  PATH_OVMF     = "#{PATH_VAR}ovmfx64.fd"
   QEMU_ARCH     = "x86_64"
   QEMU_OPTS     = "-smp 4 -rtc base=localtime -device nec-usb-xhci,id=xhci -device usb-kbd -device usb-mouse"
-  # -device usb-tablet"
 when :i386
-  URL_OVMF      = nil
-  PATH_OVMF     = "var/ovmfia32.fd"
+  URL_OVMF      = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEIa32_OVMF.fd"
+  URL_SHELL     = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEIA32_Shell.efi"
+  PATH_OVMF     = "#{PATH_VAR}ovmfia32.fd"
   QEMU_ARCH     = "x86_64"
   QEMU_OPTS     = "-smp 4 -rtc base=localtime -device nec-usb-xhci,id=xhci"
 when :arm
-  URL_OVMF      = nil
-  PATH_OVMF     = "var/ovmfarm.fd"
+  URL_OVMF      = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEARM_QEMU_EFI.fd"
+  URL_SHELL     = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEARM_Shell.efi"
+  PATH_OVMF     = "#{PATH_VAR}ovmfarm.fd"
   QEMU_ARCH     = "aarch64"
   QEMU_OPTS     = "-M virt -cpu cortex-a15"
 when :aa64
   URL_OVMF      = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEAARCH64_QEMU_EFI.fd"
-  PATH_OVMF     = "var/ovmfaa64.fd"
+  URL_SHELL     = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEAARCH64_Shell.efi"
+  PATH_OVMF     = "#{PATH_VAR}ovmfaa64.fd"
   QEMU_ARCH     = "aarch64"
   QEMU_OPTS     = "-M virt -cpu cortex-a57"
 else
@@ -81,6 +85,7 @@ directory PATH_OBJ
 directory PATH_BIN
 directory PATH_EFI_BOOT
 directory PATH_EFI_VENDOR
+directory PATH_VAR
 
 TASKS = [ :main ]
 
@@ -91,12 +96,7 @@ end
 task :default => [PATH_OBJ, PATH_BIN, TASKS].flatten
 
 desc "Install to #{PATH_MNT}"
-task :install => [:default, PATH_MNT, PATH_EFI_BOOT, PATH_EFI_VENDOR, PATH_OVMF, CP932_BIN] do
-  (target, efi_suffix) = convert_arch(ARCH)
-  FileUtils.cp("#{PATH_BIN}menu#{efi_suffix}.efi", "#{PATH_EFI_BOOT}boot#{efi_suffix}.efi")
-  FileUtils.cp("#{PATH_BIN}boot#{efi_suffix}.efi", "#{PATH_EFI_VENDOR}boot#{efi_suffix}.efi")
-  FileUtils.cp("#{PATH_BIN}kernel.bin", "#{PATH_EFI_VENDOR}kernel.bin")
-end
+task :install => ["main:install".to_sym]
 
 desc "Make an ISO image"
 task :iso => [PATH_MNT, :install] do
@@ -105,7 +105,7 @@ end
 
 desc "Run with QEMU"
 task :run => [:ovmf, :install] do
-  sh "qemu-system-#{QEMU_ARCH} #{QEMU_OPTS} -bios #{PATH_OVMF} -monitor stdio -drive format=raw,file=fat:rw:mnt"
+  sh "qemu-system-#{QEMU_ARCH} #{QEMU_OPTS} -bios #{PATH_OVMF} -s -monitor stdio -drive format=raw,file=fat:rw:mnt"
 end
 
 desc "Format"
@@ -117,7 +117,7 @@ desc "Download OVMF"
 task :ovmf => PATH_OVMF do
 end
 if URL_OVMF
-  file PATH_OVMF do |t|
+  file PATH_OVMF => [PATH_VAR] do |t|
     sh "curl -# -L -o #{t.name} #{URL_OVMF}"
   end
 end
@@ -163,17 +163,14 @@ def make_efi(cputype, target, src_tokens, options = {})
 
   local_incs = []
 
-  if options['base_dir']
-    path_src_p    = "#{PATH_SRC}#{options['base_dir']}/"
-    local_incs  << FileList["#{path_src_p}*.h"]
-  else
-    path_src_p    = "#{PATH_SRC}"
-  end
+  base_dir = options['base_dir'] || target
+  path_src_p = "#{PATH_SRC}#{base_dir}/"
+  local_incs << FileList["#{path_src_p}*.h"]
 
   if options['no_suffix']
-    output    = "#{PATH_BIN}#{target}"
+    output = "#{PATH_BIN}#{target}"
   else
-    output    = "#{PATH_BIN}#{target}#{efi_suffix}.efi"
+    output = "#{PATH_BIN}#{target}#{efi_suffix}.efi"
   end
   subsystem = options['subsystem'] || 'efi_application'
 
@@ -287,8 +284,8 @@ def make_efi(cputype, target, src_tokens, options = {})
     obj
   end
 
-  file output => objs do |t|
-    sh "#{LD} -subsystem:#{subsystem} #{ LFLAGS} #{ t.prerequisites.join(' ') } -out:#{ t.name }"
+  file output => [PATH_BIN, objs].flatten do |t|
+    sh "#{LD} -subsystem:#{subsystem} #{ LFLAGS} #{ objs.join(' ') } -out:#{ t.name }"
   end
 
   output
@@ -297,21 +294,39 @@ end
 
 namespace :main do
 
-  targets = []
+  targets = {}
 
-  config = File.open("build.yml") do |file|
+  build_yml = File.open("build.yml") do |file|
     YAML.load(file)
   end
+  target_config = build_yml['targets']
 
-  config['targets'].keys.each do |target|
-    sources = config['targets'][target]['sources']
-    allow = config['targets'][target]['valid_arch']
+  target_config.keys.each do |target|
+    sources = target_config[target]['sources']
+    allow = target_config[target]['valid_arch']
     if allow == 'all' || allow.include?(ARCH.to_s) then
-      targets << make_efi(ARCH, target, sources, config['targets'][target])
+      targets[target] = make_efi(ARCH, target, sources, target_config[target])
     end
   end
 
   desc "Build Main"
-  task :build => targets
+  task :build => targets.values
+
+  install_targets = []
+  (_, efi_suffix) = convert_arch(ARCH)
+  target_config.keys.each do |t|
+    config = target_config[t]
+    bin = targets[t]
+    if bin
+      move_to = config['efi_bootloader'] ? "#{PATH_EFI_BOOT}boot#{efi_suffix}.efi" : "#{PATH_EFI_VENDOR}#{File.basename(bin)}"
+      file move_to => bin do
+        puts "copy #{bin.inspect} to #{move_to.inspect}"
+        FileUtils.cp bin, move_to
+      end
+      install_targets << move_to
+    end
+  end
+
+  task :install => [:build, PATH_VAR, PATH_MNT, PATH_EFI_BOOT, PATH_OVMF, CP932_BIN, install_targets].flatten
 
 end
