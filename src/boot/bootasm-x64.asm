@@ -44,5 +44,7 @@ start_kernel:
     mov rsp, [r10 + 8]
     mov rcx, r9
     xor edx, edx
+    mov esi, edx
+    mov rdi, rcx
     call rax
     ud2

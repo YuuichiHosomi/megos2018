@@ -129,7 +129,7 @@ _Noreturn void page_process(void *args) {
 }
 
 void pg_enter_strict_mode() {
-    moe_create_process(&page_process, priority_realtime, NULL, "page");
+    // moe_create_process(&page_process, priority_realtime, NULL, "page");
     pg_set_pte(0, 0, 4);
     invalidate_tlb();
 }

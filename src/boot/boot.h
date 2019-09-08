@@ -14,4 +14,4 @@ void *valloc(uint64_t base, size_t size);
 void vprotect(uint64_t base, size_t size, int attr);
 
 typedef uint64_t (*IMAGE_LOCATOR)(uint64_t);
-IMAGE_LOCATOR pe_prepare(void *obj, size_t size);
+IMAGE_LOCATOR recognize_kernel_signature(void *obj, size_t size);

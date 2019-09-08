@@ -183,13 +183,14 @@ _do_switch_context:
 
     ret
 
-
-; void io_setup_new_thread(moe_thread_t *thread, uintptr_t* new_sp);
+; void io_setup_new_thread(cpu_context_t *context, uintptr_t* new_sp, moe_thread_start start, void *args);
     global io_setup_new_thread
 io_setup_new_thread:
     lea rax, [rel _new_thread]
-    sub rdx, BYTE 8
+    sub rdx, BYTE 0x18
     mov [rdx], rax
+    mov [rdx + 0x08], r8
+    mov [rdx + 0x10], r9
     mov [rcx + CTX_SP], rdx
     ret
 
@@ -203,13 +204,14 @@ _new_thread:
     call moe_exit_thread
     ud2
 
-
-; void io_setup_new_fiber(moe_fiber_t *fiber, uintptr_t* new_sp);
+; void io_setup_new_fiber(cpu_context_t *context, uintptr_t* new_sp, moe_thread_start start, void *args);
     global io_setup_new_fiber
 io_setup_new_fiber:
     lea rax, [rel _new_fiber]
-    sub rdx, BYTE 8
+    sub rdx, BYTE 0x18
     mov [rdx], rax
+    mov [rdx + 0x08], r8
+    mov [rdx + 0x10], r9
     mov [rcx + CTX_SP], rdx
     ret
 
@@ -621,8 +623,8 @@ smp_setup_init:
     movzx r11d, cl
     shl r11d, 12
     mov edi, r11d
-    lea rsi, [rel _mp_rm_payload]
-    mov ecx, _end_mp_rm_payload - _mp_rm_payload
+    lea rsi, [rel _smp_rm_payload]
+    mov ecx, _end_smp_rm_payload - _smp_rm_payload
     rep movsb
 
     mov r10d, SMPINFO
@@ -652,7 +654,7 @@ smp_setup_init:
     mov [r10 + IA32_MISC_MSR], eax
     mov [r10 + IA32_MISC_MSR + 4], edx
 
-    lea ecx, [r11 + _startup64 - _mp_rm_payload]
+    lea ecx, [r11 + _startup64 - _smp_rm_payload]
     mov edx, KERNEL_CS64
     mov [r10 + SMPINFO_START64], ecx
     mov [r10 + SMPINFO_START64 + 4], edx
@@ -687,7 +689,9 @@ _startup_ap:
 
 [bits 16]
 
-_mp_rm_payload:
+; Payload to initialize SMP Applicaition Processors
+; NOTE: These sequences can't use the stack
+_smp_rm_payload:
     cli
     xor ax, ax
     mov ds, ax
@@ -727,6 +731,7 @@ _mp_rm_payload:
     mov fs, ax
     mov gs, ax
 
+    ; restore BSP's system registers
     mov eax, [bx + SMPINFO_CR4]
     mov cr4, eax
     mov eax, [bx + SMPINFO_CR3]
@@ -755,7 +760,7 @@ _mp_rm_payload:
 _startup64:
     jmp [rbx + SMPINFO_START_AP]
 
-_end_mp_rm_payload:
+_end_smp_rm_payload:
 
 
 [section .data]

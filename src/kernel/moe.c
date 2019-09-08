@@ -1,6 +1,7 @@
-// MOE
+// MOE Subsystem
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
+
 #include <stdatomic.h>
 #include "moe.h"
 #include "kernel.h"
@@ -109,8 +110,8 @@ static struct {
 } moe;
 
 extern moe_thread_t *_do_switch_context(cpu_context_t *from, cpu_context_t *to);
-extern void io_setup_new_thread(moe_thread_t *thread, uintptr_t* new_sp);
-extern void io_setup_new_fiber(moe_fiber_t *fiber, uintptr_t* new_sp);
+extern void io_setup_new_thread(cpu_context_t *context, uintptr_t* new_sp, moe_thread_start start, void *args);
+extern void io_setup_new_fiber(cpu_context_t *context, uintptr_t* new_sp, moe_thread_start start, void *args);
 extern int smp_get_current_cpuid();
 
 
@@ -277,9 +278,7 @@ static moe_thread_t *_create_thread(moe_thread_start start, moe_priority_level_t
         uintptr_t* sp = stack + stack_count;
         *--sp = 0;
         *--sp = 0x00007fffdeadbeef;
-        *--sp = (uintptr_t)args;
-        *--sp = (uintptr_t)start;
-        io_setup_new_thread(new_thread, sp);
+        io_setup_new_thread(&new_thread->context, sp, start, args);
     }
 
     for (int i = 0; i< MAX_THREADS; i++) {
@@ -365,9 +364,7 @@ moe_fiber_t *_create_fiber(moe_thread_start start, void *args, size_t stack_size
         uintptr_t* sp = stack + stack_count;
         *--sp = 0;
         *--sp = 0x00007fffdeadbeef;
-        *--sp = (uintptr_t)args;
-        *--sp = (uintptr_t)start;
-        io_setup_new_fiber(new_fiber, sp);
+        io_setup_new_fiber(&new_fiber->context, sp, start, args);
     }
     return new_fiber;
 }
@@ -420,7 +417,6 @@ const char *moe_get_current_fiber_name() {
 }
 
 void moe_yield() {
-    if (!moe.csd) return;
     moe_thread_t *current_thread = _get_current_thread();
     moe_fiber_t *current = current_thread->current_fiber;
     if (!current) return;
@@ -712,31 +708,6 @@ int moe_create_process(moe_thread_start start, moe_priority_level_t priority, vo
     moe_create_thread(&process_start, priority, &process_info, name);
     moe_sem_wait(&process_info.sem, MOE_FOREVER);
     return process_info.pid;
-}
-
-/*********************************************************************/
-
-int atomic_bit_scan(_Atomic uint64_t *p) {
-    uint64_t word = atomic_load(p);
-    if (word == 0) return -1;
-    return __builtin_ctz(word);
-}
-
-
-size_t atomic_bit_scan_and_reset(_Atomic uint32_t *p, size_t limit, size_t def_val) {
-    size_t words = (limit + 31) / 32;
-    for (size_t i = 0; i < words; i++) {
-        uint32_t word = p[i];
-        while (word != 0) {
-            size_t position = __builtin_ctz(word);
-            uint32_t mask = 1 << position;
-            uint32_t desired = word & ~mask;
-            if (atomic_compare_exchange_weak(&p[i], &word, desired)) {
-                return i * 32 + position;
-            }
-        }
-    }
-    return def_val;
 }
 
 

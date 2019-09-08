@@ -1,6 +1,7 @@
 // Minimal Boot Time Paging Manager
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
+
 #include <stdatomic.h>
 #include "boot.h"
 #include "x86.h"
@@ -16,7 +17,7 @@ enum {
     MAX_GATES_MEMORY = 0xA0000,
 };
 
-static const uint64_t MAX_VA = 0x0000FFFFFFFFFFFF;
+static const uint64_t MAX_VA = UINT64_C(0x0000FFFFFFFFFFFF);
 static moe_bootinfo_t *bootinfo;
 typedef uint64_t pte_t;
 static uintptr_t kma_base, kma_size = 0x1000;

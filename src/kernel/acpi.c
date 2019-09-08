@@ -214,7 +214,6 @@ void acpi_init(acpi_rsd_ptr_t* _rsdp) {
             pm_timer_mask = 0x00FFFFFF;
         }
     }
-    // moe_assert(pm_timer_type, "ACPI PM TIMER NOT FOUND");
 
     // Search S5
     {

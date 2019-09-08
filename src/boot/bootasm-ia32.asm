@@ -101,6 +101,8 @@ _next64:
     mov rax, [rbx]
     mov rsp, [rbx + 8]
     xor edx, edx
+    mov esi, edx
+    mov rdi, rcx
     call rax
     ud2
 
