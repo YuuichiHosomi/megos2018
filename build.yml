@@ -1,8 +1,8 @@
 # build configuration file
 targets:
-  menu:
+  osldr:
+    efi_bootloader: true
     valid_arch: all
-    base_dir: bootmenu
     sources:
       - osldr
       - atop
@@ -10,7 +10,6 @@ targets:
       - libstd
   boot:
     valid_arch: x64 i386
-    base_dir: boot
     sources:
       - boot
       - bootpg
