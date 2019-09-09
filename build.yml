@@ -8,6 +8,7 @@ targets:
       - atop
       - menu
       - libstd
+      - eficon
   boot:
     valid_arch: x64 i386
     sources:

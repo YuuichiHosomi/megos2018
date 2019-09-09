@@ -71,7 +71,7 @@ command_list_t commands[] = {
 int cmd_help(int argc, char **argv) {
     for (int i = 0; commands[i].name; i++) {
         if (commands[i].tips) {
-            _zprintf("%s\t%s\n", commands[i].name, commands[i].tips);
+            printf("%s\t%s\n", commands[i].name, commands[i].tips);
         }
     }
     return 0;
@@ -135,12 +135,12 @@ int read_cmdline(char* buffer, size_t max_len) {
                     if (c < 0x80) {
                         buffer[len++] = c;
                         if (c < 0x20) { // ^X
-                            _zprintf("^%c", c | 0x40);
+                            printf("^%c", c | 0x40);
                         } else {
-                            _zprintf("%c", c);
+                            printf("%c", c);
                         }
                     } else { // non ascii
-                        _zprintf("?+%04x", c);
+                        printf("?+%04x", c);
                     }
                 }
                 break;
@@ -284,7 +284,7 @@ void shell_start() {
         if (cmd_to_run) {
             cmd_to_run->proc(argc, argv);
         } else {
-            _zprintf("%s\n", get_string(string_bad_command));
+            printf("%s\n", get_string(string_bad_command));
         }
    }
 }

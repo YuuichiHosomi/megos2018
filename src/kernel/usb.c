@@ -122,7 +122,7 @@ void usb_hid_thread(void *args) {
                         hid_process_key_report(&state);
                     }
                 } else {
-                    _zprintf("#KBD_ERR(%d)", status);
+                    printf("#KBD_ERR(%d)", status);
                     moe_usleep(100000);
                 }
             }
@@ -143,7 +143,7 @@ void usb_hid_thread(void *args) {
                     DEBUG_PRINT("(Mouse %x %02x %02x %02x)", p[0], p[1], p[2], p[3]);
                     hid_process_mouse_report(hid_convert_mouse(&state, &report));
                 } else {
-                    _zprintf("#MOS_ERR(%d)", status);
+                    printf("#MOS_ERR(%d)", status);
                     moe_usleep(100000);
                 }
             }
@@ -164,7 +164,7 @@ void usb_hid_thread(void *args) {
                     }
                     DEBUG_PRINT("]");
                 } else {
-                    _zprintf("#HID_ERR(%d)", status);
+                    printf("#HID_ERR(%d)", status);
                     moe_usleep(100000);
                 }
             }
@@ -299,12 +299,12 @@ int usb_new_device(usb_host_interface_t *hci) {
                     // usb_hid_class_descriptor_t *hid = (usb_hid_class_descriptor_t *)(p + index);
                     // int size = hid->reports[0].wDescriptorLength[0] + hid->reports[0].wDescriptorLength[1] * 256;
                     // int status = usb_get_class_descriptor(self, 0x81, USB_HID_REPORT_DESCRIPTOR, 0, c_if->bInterfaceNumber, size);
-                    // _zprintf("#%d GET_REPORT_DESCRIPTOR %d\n", self->hci->slot_id, status);
+                    // printf("#%d GET_REPORT_DESCRIPTOR %d\n", self->hci->slot_id, status);
                     // uint8_t *c = self->buffer;
                     // for (int i = 0; i < status; i++) {
-                    //     _zprintf(" %02x", c[i]);
+                    //     printf(" %02x", c[i]);
                     // }
-                    // _zprintf("\n");
+                    // printf("\n");
                 }
                     break;
 
@@ -312,11 +312,11 @@ int usb_new_device(usb_host_interface_t *hci) {
                 {
 #ifdef DEBUG
                     int limit = p[index];
-                    _zprintf("#%d IF %d descriptor %02x\n", self->hci->slot_id, config->bNumInterface, type);
+                    printf("#%d IF %d descriptor %02x\n", self->hci->slot_id, config->bNumInterface, type);
                     for (int i = 0; i < limit; i++) {
-                        _zprintf(" %02x", p[index + i]);
+                        printf(" %02x", p[index + i]);
                     }
-                    _zprintf("\n");
+                    printf("\n");
 #endif
                 }
             }

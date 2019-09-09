@@ -69,7 +69,7 @@ typedef struct {
 
 
 typedef struct xhci_t {
-    usb_host_interface_t hci_vtt;
+    usb_host_interface_t hci_vt;
 
     moe_semaphore_t *sem_event;
     moe_semaphore_t *sem_urb;
@@ -535,13 +535,13 @@ int uhi_data_transfer(usb_host_interface_t *uhc, int dci, uintptr_t buffer, uint
 
 int xhci_init_dev(xhci_t *self) {
 
-    self->hci_vtt.context = self;
-    self->hci_vtt.configure_ep = uhi_configure_ep;
-    self->hci_vtt.reset_ep = uhi_reset_ep;
-    self->hci_vtt.get_max_packet_size = uhi_get_max_packet_size;
-    self->hci_vtt.set_max_packet_size = uhi_set_max_packet_size;
-    self->hci_vtt.control = uhi_control;
-    self->hci_vtt.data_transfer = uhi_data_transfer;
+    self->hci_vt.context = self;
+    self->hci_vt.configure_ep = uhi_configure_ep;
+    self->hci_vt.reset_ep = uhi_reset_ep;
+    self->hci_vt.get_max_packet_size = uhi_get_max_packet_size;
+    self->hci_vt.set_max_packet_size = uhi_set_max_packet_size;
+    self->hci_vt.control = uhi_control;
+    self->hci_vt.data_transfer = uhi_data_transfer;
 
     self->cap = MOE_PA2VA(self->base_address);
     uint8_t CAP_LENGTH = self->cap->caplength & 0xFF;
@@ -664,7 +664,7 @@ int xhci_init_dev(xhci_t *self) {
 }
 
 
-void process_event(xhci_t *self) {
+static void process_event(xhci_t *self) {
 
     int cycle = self->event_cycle;
     for (;;) {
@@ -877,7 +877,7 @@ _Noreturn void xhci_config_thread(void *args) {
                 int slot_id = port_initialize(self, port_id);
                 if (slot_id > 0) {
                     usb_host_interface_t *hci = self->usb_devices[slot_id].hci = moe_alloc_object(sizeof(usb_host_interface_t), 1);
-                    *hci = self->hci_vtt;
+                    *hci = self->hci_vt;
                     hci->slot_id = slot_id;
                     hci->semaphore = moe_sem_create(0);
                     usb_new_device(hci);

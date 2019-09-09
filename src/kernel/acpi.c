@@ -238,7 +238,6 @@ void acpi_init(acpi_rsd_ptr_t* _rsdp) {
         }
     }
 
-    // printf("ACPI %d %08x %08x (%d) %08llx\n", acpi_get_pm_timer_type(), acpi_read_pm_timer(), fadt->PM_TMR_BLK, fadt->X_PM_TMR_BLK.address_space_id, fadt->X_PM_TMR_BLK.address);
 }
 
 // void irq_sci(int irq) {

@@ -13,10 +13,12 @@
 #define MIN(a, b)   ((a) < (b) ? (a) : (b))
 
 int printf(const char *format, ...);
+int vprintf(const char *format, va_list args);
 int snprintf(char* buffer, size_t n, const char* format, ...);
 char *strchr(const char *s, int c);
 char *strncpy(char *s1, const char *s2, size_t n);
 int strncmp(const char *s1, const char *s2, size_t n);
+size_t strlen(const char *s);
 void *memcpy(void *p, const void *q, size_t n);
 void *memset(void *p, int v, size_t n);
 

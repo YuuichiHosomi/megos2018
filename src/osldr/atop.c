@@ -10,7 +10,15 @@
 #define FONT_PROPERTY(x) MEGH0816_ ## x
 
 void *memset(void *, int, size_t);
-void *malloc(size_t);
+
+static void *malloc(size_t n) {
+    void *result = 0;
+    EFI_STATUS status = gST->BootServices->AllocatePool(EfiBootServicesData, n, &result);
+    if(EFI_ERROR(status)){
+        return 0;
+    }
+    return result;
+}
 
 void *blt_buffer = NULL;
 
@@ -58,7 +66,7 @@ typedef struct {
 static uint16_t *uni2ansi_tbl = NULL;
 static fontx2_zn_font font_zn;
 
-EFI_STATUS cp932_tbl_init(base_and_size table_bin_ptr) {
+EFI_STATUS cp932_tbl_init(struct iovec table_bin_vec) {
 
     const size_t sizeof_unitable = 0x20000;
     uni2ansi_tbl = malloc(sizeof_unitable);
@@ -66,7 +74,7 @@ EFI_STATUS cp932_tbl_init(base_and_size table_bin_ptr) {
     memset(uni2ansi_tbl, 0, sizeof_unitable);
 
     uint16_t cp932_code = 0x8140;
-    uint16_t *p = table_bin_ptr.base;
+    uint16_t *p = table_bin_vec.iov_base;
     size_t length = *p++;
     for (int i = 0; i < length; i++, p++){
         uni2ansi_tbl[*p] = cp932_code;
@@ -84,9 +92,9 @@ EFI_STATUS cp932_tbl_init(base_and_size table_bin_ptr) {
     return EFI_SUCCESS;
 }
 
-EFI_STATUS cp932_font_init(base_and_size font_ptr) {
+EFI_STATUS cp932_font_init(struct iovec font_vec) {
 
-    font_zn.rawPtr	= font_ptr.base;
+    font_zn.rawPtr	= font_vec.iov_base;
     font_zn.font_w	= font_zn.rawPtr[0x0E];
     font_zn.font_h	= font_zn.rawPtr[0x0F];
     font_zn.font_w8 = (font_zn.font_w + 7) >> 3;

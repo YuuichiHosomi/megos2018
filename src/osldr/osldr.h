@@ -30,10 +30,10 @@ extern EFI_HANDLE* image;
 extern EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL* cout;
 extern EFI_GRAPHICS_OUTPUT_PROTOCOL* gop;
 
-typedef struct {
-	void* base;
-	size_t size;
-} base_and_size;
+struct iovec {
+    void  *iov_base;
+    size_t iov_len;
+};
 
 typedef struct {
 	const char* label;
@@ -46,8 +46,8 @@ typedef struct {
 	int item_count, max_items, selected_index, pool_size, pool_used;
 } menu_buffer;
 
-EFI_STATUS cp932_tbl_init(base_and_size);
-EFI_STATUS cp932_font_init(base_and_size);
+EFI_STATUS cp932_tbl_init(struct iovec);
+EFI_STATUS cp932_font_init(struct iovec);
 EFIAPI EFI_STATUS ATOP_init(IN EFI_GRAPHICS_OUTPUT_PROTOCOL* gop, OUT EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL** result);
 
 EFI_INPUT_KEY efi_wait_any_key(BOOLEAN, int);

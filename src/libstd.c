@@ -1,12 +1,15 @@
 // Subset of Standard C Library
-// Copyright (c) 1998,2018 MEG-OS project, All rights reserved.
+// Copyright (c) 2018 MEG-OS project, All rights reserved.
 // License: MIT
+
 #include <stdarg.h>
 #include <stddef.h>
-#include "efi.h"
+#include <stdint.h>
 
-int putchar(char c);
+typedef wchar_t CHAR16;
+
 int snprintf(char* buffer, size_t n, const char* format, ...);
+int vprintf(const char *format, va_list args);
 
 
 /*********************************************************************/
@@ -41,11 +44,30 @@ char *strchr(const char *s, int c) {
     }
 }
 
+size_t strlen(const char *s) {
+    size_t count = 0;
+    while (s[count]) { count++; }
+    return count;
+}
+
+char *strncpy(char *s1, const char *s2, size_t n) {
+    snprintf(s1, n, "%s", s2);
+    return s1;
+}
+
+int strncmp(const char *s1, const char *s2, size_t n) {
+    while ((n > 1) && (*s1 == *s2)){
+        if (!*s1) return 0;
+        s1++, s2++, n--;
+    }
+    return (int)*s1 - (int)*s2;
+}
+
 
 /*********************************************************************/
 
 
-static int sprintf_num(char** _buffer, uintptr_t val, unsigned base, size_t width, char padding, size_t* _count, size_t _limit, int sign, int _signed) {
+static void sprintf_num(char **_buffer, uintptr_t val, unsigned base, size_t width, char padding, size_t* _count, size_t _limit, int sign, int _signed) {
     char* buffer = *_buffer;
     size_t count = *_count;
 
@@ -90,33 +112,20 @@ static int sprintf_num(char** _buffer, uintptr_t val, unsigned base, size_t widt
     for (int i = content_size - 1; i >= 0; i--) {
         mod = val % base;
         val /= base;
-        buffer[i] = (mod<10) ? ('0'+mod) : ('a'-10+mod);
+        buffer[i] = (mod < 10) ? ('0' + mod) : ('a' - 10 + mod);
         if (!val) break;
     }
 
     *_buffer = buffer + content_size;
     *_count = count + content_size;
-    return content_size;
+
 }
 
-char *strncpy(char *s1, const char *s2, size_t n) {
-    snprintf(s1, n, "%s", s2);
-    return s1;
-}
-
-int strncmp(const char *s1, const char *s2, size_t n) {
-    while ((n > 1) && (*s1 == *s2)){
-        if (!*s1) return 0;
-        s1++, s2++, n--;
-    }
-    return (int)*s1 - (int)*s2;
-}
-
-int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
+int vsnprintf(char *buffer, size_t limit, const char *format, va_list args) {
     size_t count = 0;
-    const char* p = format;
-    char* q = buffer;
-    for(;*p && count<limit;) {
+    const char *p = format;
+    char *q = buffer;
+    for(; *p && count < limit; ) {
         char c = *p++;
         if (c == '%') {
             size_t width = 0, dot_width = 0;
@@ -136,14 +145,14 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
                 c = *p++;
             }
             while (c >= '0' && c <= '9') {
-                width = width*10 + (c-'0');
+                width = width * 10 + (c - '0');
                 c = *p++;
             }
             if (c == '.') {
                 dot_width_enable = 1;
                 c = *p++;
                 while (c >= '0' && c <= '9') {
-                    dot_width = dot_width*10 + (c-'0');
+                    dot_width = dot_width * 10 + (c - '0');
                     c = *p++;
                 }
             }
@@ -153,8 +162,8 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
                 slimit = count + dot_width;
             }
 
-            for(;c == 'z';c=*p++) { z_flag=1; }
-            for(;c == 'l';c=*p++) { l_flag=1; }
+            for(;c == 'z'; c = *p++) { z_flag = 1; }
+            for(;c == 'l'; c = *p++) { l_flag = 1; }
 
             switch(c) {
                 default:
@@ -169,7 +178,7 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
 
                 case 's':
                     {
-                        const char* r = va_arg(args, char*);
+                        const char *r = va_arg(args, const char*);
                         if (!r) r = "(null)";
                         for (; *r && count < slimit; count++) {
                             *q++ = *r++;
@@ -179,14 +188,14 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
 
                 case 'S':
                     {
-                        const CHAR16* r = va_arg(args, const CHAR16*);
+                        const CHAR16 *r = va_arg(args, const CHAR16 *);
                         if (!r) r = L"(null)";
                         for (; *r && count < slimit; count++) {
                             CHAR16 ch = *r++;
                             if (ch < 0x80) {
                                 *q++ = ch;
                             } else if (ch < 0x0800) {
-                                uint8_t utf[] = { 0xC0|(ch>>6), 0x80|(ch&0x3F) };
+                                uint8_t utf[] = { 0xC0 | (ch >> 6), 0x80 | (ch & 0x3F) };
                                 if (count + 1 < slimit) {
                                     count++;
                                     *q++ = utf[0];
@@ -195,7 +204,7 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
                                     break;
                                 }
                             } else {
-                                uint8_t utf[] = { 0xE0|(ch>>12), 0x80|((ch>>6)&0x3F), 0x80|(ch&0x3F) };
+                                uint8_t utf[] = { 0xE0 | (ch >> 12), 0x80 | ((ch >> 6) & 0x3F), 0x80 | (ch & 0x3F) };
                                 if (count + 2 < slimit) {
                                     count += 2;
                                     *q++ = utf[0];
@@ -212,6 +221,7 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
                 case 'd':
                 case 'u':
                 case 'x':
+                // case 'X':
                     {
                         uintptr_t val;
                         unsigned base = (c == 'x') ? 16 : 10;
@@ -237,7 +247,7 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
                     break;
 
                 case 'p':
-                    sprintf_num(&q, va_arg(args, uintptr_t), 16, 2*sizeof(void*), '0', &count, limit, 0, 0);
+                    sprintf_num(&q, va_arg(args, uintptr_t), 16, 2 * sizeof(void *), '0', &count, limit, 0, 0);
                     break;
             }
 
@@ -252,25 +262,11 @@ int vsnprintf(char* buffer, size_t limit, const char* format, va_list args) {
     return count;
 }
 
-
 int snprintf(char *buffer, size_t n, const char *format, ...) {
     va_list list;
     va_start(list, format);
     int retval = vsnprintf(buffer, n, format, list);
     va_end(list);
-    return retval;
-}
-
-#define PRINTF_BUFFER_SIZE 0x1000
-static char printf_buffer[PRINTF_BUFFER_SIZE];
-
-int vprintf(const char *format, va_list args) {
-    int count = vsnprintf(printf_buffer, PRINTF_BUFFER_SIZE, format, args);
-    int retval = 0;
-    char *p = printf_buffer;
-    for(int i = 0; i < count; i++) {
-        retval += putchar(*p++);
-    }
     return retval;
 }
 

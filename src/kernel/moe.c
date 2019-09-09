@@ -715,20 +715,22 @@ int moe_create_process(moe_thread_start start, moe_priority_level_t priority, vo
 
 
 int cmd_ps(int argc, char **argv) {
-    printf("THID PID attr affinity usage cpu time   name\n");
+    printf("THID PID attr affinity usage cpu time    name\n");
     for (int i = 0; i < MAX_THREADS; i++) {
         moe_thread_t* p = moe.thread_list[i];
         if (!p) continue;
-        uint64_t time = p->cputime / 1000000;
-        uint32_t time0 = time % 60;
-        uint32_t time1 = (time / 60) % 60;
-        uint32_t time2 = (time / 3600);
+        uint64_t cputime = p->cputime;
+        uint64_t time = cputime / 1000000;
+        uint32_t time_ms = (cputime / 10000) % 100;
+        uint32_t time_s = time % 60;
+        uint32_t time_m = (time / 60) % 60;
+        uint32_t time_h = (time / 3600);
         int usage = p->load / 1000;
         if (usage > 999) usage = 999;
         int usage0 = usage % 10, usage1 = usage / 10;
-        printf("%4d %3d %04zx %08x %2d.%d%% %4u:%02u:%02u %s\n",
+        printf("%4u %3u %04zx %08x %2u.%u%% %2u:%02u:%02u.%02u %s\n",
             (int)p->thid, (int)p->pid, p->flags,
-            p->strong_affinity, usage1, usage0, time2, time1, time0,
+            p->strong_affinity, usage1, usage0, time_h, time_m, time_s, time_ms,
             p->name);
     }
     return 0;

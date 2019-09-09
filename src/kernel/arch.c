@@ -121,14 +121,14 @@ struct {
     MOE_CREATE_MEASURE create;
     MOE_MEASURE_UNTIL until;
     MOE_MEASURE_DIFF diff;
-} measure_vtt;
+} measure_vt;
 
 moe_measure_t moe_create_measure(int64_t us) {
     if (us == MOE_FOREVER) {
         return MOE_FOREVER;
     }
     if (us >= 0) {
-        return measure_vtt.create(us);
+        return measure_vt.create(us);
     } else {
         return 0;
     }
@@ -138,11 +138,11 @@ int moe_measure_until(moe_measure_t deadline) {
     if (deadline == MOE_FOREVER) {
         return 1;
     }
-    return measure_vtt.until(deadline);
+    return measure_vt.until(deadline);
 }
 
 int64_t moe_measure_diff(moe_measure_t from) {
-    return measure_vtt.diff(from);
+    return measure_vt.diff(from);
 }
 
 
@@ -653,9 +653,9 @@ static void apic_init() {
             uint32_t count = apic_read_lapic(0x390);
             lapic_freq = ((uint64_t)UINT32_MAX - count) * magic_number;
 
-            measure_vtt.create = lapic_create_measure;
-            measure_vtt.until = lapic_measure_until;
-            measure_vtt.diff = lapic_measure_diff;
+            measure_vt.create = lapic_create_measure;
+            measure_vt.until = lapic_measure_until;
+            measure_vt.diff = lapic_measure_diff;
         } else {
             // use HPET
             const int magic_number = 100;
@@ -729,10 +729,6 @@ static void _pci_write_config(uint32_t addr, uint32_t val) {
     io_out32(PCI_CONFIG_DATA, val);
 }
 
-static void _pci_disable_config() {
-    io_out32(PCI_CONFIG_ADDRESS, 0);
-}
-
 int pci_parse_bar(uint32_t _base, unsigned idx, uint64_t *_bar, uint64_t *_size) {
 
     if (idx >= 6) return 0;
@@ -764,7 +760,6 @@ int pci_parse_bar(uint32_t _base, unsigned idx, uint64_t *_bar, uint64_t *_size)
         nbar = _pci_read_config(base);
         _pci_write_config(base, bar0);
     }
-    _pci_disable_config();
     if (nbar) {
         if (is_bar64) {
             nbar ^= UINT64_MAX;
@@ -798,13 +793,11 @@ uint32_t pci_find_by_class(uint32_t cls, uint32_t mask) {
                 if ((data & 0xFFFF) != 0xFFFF) {
                     uint32_t PCI08 = pci_read_config(base + 0x08);
                     if ((PCI08 & mask) == cls) {
-                        _pci_disable_config();
                         return PCI_ADDRESS_ENABLE | base;
                     }
                 }
             }
     }
-    _pci_disable_config();
     return 0;
 }
 
@@ -813,12 +806,10 @@ uint32_t pci_find_capability(uint32_t base, uint8_t id) {
     while (cap_ptr) {
         uint32_t data = _pci_read_config(base + cap_ptr);
         if ((data & 0xFF) == id) {
-            _pci_disable_config();
             return cap_ptr;
         }
         cap_ptr = (data >> 8) & 0xFF;
     }
-    _pci_disable_config();
     return 0;
 }
 
@@ -827,19 +818,16 @@ void pci_dump_config(uint32_t base, void *p) {
     for (uint32_t i = 0; i < 256 / 4; i++) {
         d[i] = _pci_read_config(base + i * 4);
     }
-    _pci_disable_config();
 }
 
 
 uint32_t pci_read_config(uint32_t addr) {
     uint32_t retval = _pci_read_config(addr);
-    _pci_disable_config();
     return retval;
 }
 
 void pci_write_config(uint32_t addr, uint32_t val) {
     _pci_write_config(addr, val);
-    _pci_disable_config();
 }
 
 
@@ -892,9 +880,9 @@ static int hpet_init(void) {
     if (hpet) {
         hpet_base = pg_map_mmio(hpet->address.address, 1);
 
-        measure_vtt.create = hpet_create_measure;
-        measure_vtt.until = hpet_measure_until;
-        measure_vtt.diff = hpet_measure_diff;
+        measure_vt.create = hpet_create_measure;
+        measure_vt.until = hpet_measure_until;
+        measure_vt.diff = hpet_measure_diff;
 
         hpet_main_cnt_period = hpet_read_reg(0) >> 32;
         hpet_write_reg(0x10, 0);

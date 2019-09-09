@@ -24,11 +24,6 @@ int is_valid_arch(void);
 
 #define	EFI_PRINT(s)	gST->ConOut->OutputString(st->ConOut, L ## s)
 
-typedef struct {
-	void* base;
-	size_t size;
-} base_and_size;
-
 EFI_SYSTEM_TABLE *gST;
 EFI_BOOT_SERVICES *gBS;
 EFI_RUNTIME_SERVICES *gRT;
@@ -69,7 +64,7 @@ static void free(void* p) {
     }
 }
 
-static EFI_STATUS efi_get_file_content(IN EFI_FILE_HANDLE fs, IN CONST CHAR16* path, OUT base_and_size* result) {
+static EFI_STATUS efi_get_file_content(IN EFI_FILE_HANDLE fs, IN CONST CHAR16* path, OUT struct iovec* result) {
     EFI_STATUS status;
     EFI_FILE_HANDLE handle = NULL;
     void* buff = NULL;
@@ -105,8 +100,8 @@ static EFI_STATUS efi_get_file_content(IN EFI_FILE_HANDLE fs, IN CONST CHAR16* p
     status = handle->Close(handle);
     if (EFI_ERROR(status)) goto error;
 
-    result->base = buff;
-    result->size = read_count;
+    result->iov_base = buff;
+    result->iov_len = read_count;
 
     return EFI_SUCCESS;
 
@@ -143,7 +138,7 @@ moe_bootinfo_t bootinfo;
 
 EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
     EFI_STATUS status;
-    base_and_size kernel_ptr;
+    struct iovec kernel_vec;
     IMAGE_LOCATOR locator = NULL;
 
     // Init UEFI Environments
@@ -171,12 +166,12 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
         status = fs->OpenVolume(fs, &file);
         if (EFI_ERROR(status)) return EFI_LOAD_ERROR;
 
-        status = efi_get_file_content(file, KERNEL_PATH, &kernel_ptr);
+        status = efi_get_file_content(file, KERNEL_PATH, &kernel_vec);
         if (EFI_ERROR(status)) {
             EFI_PRINT("ERROR: KERNEL NOT FOUND\r\n");
             return EFI_NOT_FOUND;
         }
-        locator = recognize_kernel_signature(kernel_ptr.base, kernel_ptr.size);
+        locator = recognize_kernel_signature(kernel_vec);
         if (!locator) {
             EFI_PRINT("ERROR: BAD KERNEL SIGNATURE FOUND\r\n");
             return EFI_LOAD_ERROR;

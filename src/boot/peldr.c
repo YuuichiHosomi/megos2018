@@ -10,8 +10,8 @@ pe_section_table_t *sec_tbl;
 
 uint64_t pe64_locate(uint64_t base);
 
-IMAGE_LOCATOR recognize_kernel_signature(void *obj, size_t size) {
-    pe_offset_0 = (uintptr_t)obj;
+IMAGE_LOCATOR recognize_kernel_signature(struct iovec obj) {
+    pe_offset_0 = (uintptr_t)obj.iov_base;
 
     uint16_t *mz = (uint16_t*)pe_offset_0;
     if (mz[0] != IMAGE_DOS_SIGNATURE) return NULL;

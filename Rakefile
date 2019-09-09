@@ -1,6 +1,5 @@
 #
-# Rakefile for EFI Hello world
-#
+
 require 'rake/clean'
 require 'rake/packagetask'
 # require 'json'
@@ -36,25 +35,21 @@ case ARCH.to_sym
 when :x64
   URL_OVMF      = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEX64_OVMF.fd"
   URL_SHELL     = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEX64_Shell.efi"
-  PATH_OVMF     = "#{PATH_VAR}ovmfx64.fd"
   QEMU_ARCH     = "x86_64"
   QEMU_OPTS     = "-smp 4 -rtc base=localtime -device nec-usb-xhci,id=xhci -device usb-kbd -device usb-mouse"
 when :i386
   URL_OVMF      = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEIa32_OVMF.fd"
   URL_SHELL     = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEIA32_Shell.efi"
-  PATH_OVMF     = "#{PATH_VAR}ovmfia32.fd"
   QEMU_ARCH     = "x86_64"
   QEMU_OPTS     = "-smp 4 -rtc base=localtime -device nec-usb-xhci,id=xhci"
 when :arm
   URL_OVMF      = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEARM_QEMU_EFI.fd"
   URL_SHELL     = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEARM_Shell.efi"
-  PATH_OVMF     = "#{PATH_VAR}ovmfarm.fd"
   QEMU_ARCH     = "aarch64"
   QEMU_OPTS     = "-M virt -cpu cortex-a15"
 when :aa64
   URL_OVMF      = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEAARCH64_QEMU_EFI.fd"
   URL_SHELL     = "https://github.com/retrage/edk2-nightly/raw/master/bin/RELEASEAARCH64_Shell.efi"
-  PATH_OVMF     = "#{PATH_VAR}ovmfaa64.fd"
   QEMU_ARCH     = "aarch64"
   QEMU_OPTS     = "-M virt -cpu cortex-a57"
 else
@@ -95,8 +90,33 @@ end
 
 task :default => [PATH_OBJ, PATH_BIN, TASKS].flatten
 
+def convert_arch(s)
+  case s.to_sym
+  when :x64
+    ['x86_64-pc-win32-coff', 'x64']
+  when :i386
+    ['i386-pc-win32-coff', 'ia32']
+  when :arm
+    ['arm-pc-win32-coff', 'arm']
+  when :aa64
+    ['aarch64-pc-win32-coff', 'aa64']
+  end
+end
+
+def make_curl(cputype, target, base_path, url)
+  (cf_target, efi_suffix) = convert_arch(cputype)
+  path_output = "#{base_path}#{target.gsub(/\{\:suffix\}/, efi_suffix)}"
+  file path_output => [base_path] do |t|
+    sh "curl -# -L -o #{t.name} #{url}"
+  end
+  path_output
+end
+
+PATH_SHELL = make_curl(ARCH, 'shell{:suffix}.efi', PATH_EFI_BOOT, URL_SHELL)
+PATH_OVMF = make_curl(ARCH, 'ovmf{:suffix}.fd', PATH_VAR, URL_OVMF)
+
 desc "Install to #{PATH_MNT}"
-task :install => ["main:install".to_sym]
+task :install => [:'main:install']
 
 desc "Make an ISO image"
 task :iso => [PATH_MNT, :install] do
@@ -104,22 +124,13 @@ task :iso => [PATH_MNT, :install] do
 end
 
 desc "Run with QEMU"
-task :run => [:ovmf, :install] do
+task :run => [PATH_OVMF, :install] do
   sh "qemu-system-#{QEMU_ARCH} #{QEMU_OPTS} -bios #{PATH_OVMF} -s -monitor stdio -drive format=raw,file=fat:rw:mnt"
 end
 
 desc "Format"
 task :format do
   sh "clang-format -i #{ FileList["#{PATH_SRC}**/*.c"] } #{ FileList["#{PATH_SRC}**/*.h"] }"
-end
-
-desc "Download OVMF"
-task :ovmf => PATH_OVMF do
-end
-if URL_OVMF
-  file PATH_OVMF => [PATH_VAR] do |t|
-    sh "curl -# -L -o #{t.name} #{URL_OVMF}"
-  end
 end
 
 
@@ -303,7 +314,7 @@ namespace :main do
 
   target_config.keys.each do |target|
     sources = target_config[target]['sources']
-    allow = target_config[target]['valid_arch']
+    allow = target_config[target]['valid_arch'] || 'all'
     if allow == 'all' || allow.include?(ARCH.to_s) then
       targets[target] = make_efi(ARCH, target, sources, target_config[target])
     end
@@ -327,6 +338,6 @@ namespace :main do
     end
   end
 
-  task :install => [:build, PATH_VAR, PATH_MNT, PATH_EFI_BOOT, PATH_OVMF, CP932_BIN, install_targets].flatten
+  task :install => [:build, PATH_VAR, PATH_EFI_BOOT, PATH_EFI_VENDOR, PATH_OVMF, CP932_BIN, install_targets].flatten
 
 end

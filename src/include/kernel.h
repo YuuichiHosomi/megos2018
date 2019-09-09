@@ -11,10 +11,9 @@
 
 
 void *moe_kname(char *buffer, size_t limit);
-int _zprintf(const char *format, ...);
 void _zputs(const char *string);
 #ifdef DEBUG
-#define DEBUG_PRINT(...)    _zprintf(__VA_ARGS__)
+#define DEBUG_PRINT(...)    printf(__VA_ARGS__)
 #else
 #define DEBUG_PRINT(...)
 #endif
