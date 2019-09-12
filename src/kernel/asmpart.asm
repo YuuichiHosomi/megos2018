@@ -253,23 +253,6 @@ io_restore_irq:
     ret
 
 
-; int atomic_bit_test_and_set(void *p, size_t bit);
-    global atomic_bit_test_and_set
-atomic_bit_test_and_set:
-    lock bts [rcx], edx
-    sbb eax, eax
-    ret
-
-; int atomic_bit_test_and_clear(void *p, size_t bit);
-    global atomic_bit_test_and_clear
-atomic_bit_test_and_clear:
-    lock btc [rcx], edx
-    sbb eax, eax
-    ret
-
-; int atomic_bit_test(void *p, size_t bit);
-
-
     global _int00, _int03, _int06, _int08, _int0D, _int0E
 _int00: ; #DE
     push BYTE 0

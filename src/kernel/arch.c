@@ -92,17 +92,17 @@ extern int acpi_enable(int enabled);
 static int hpet_init(void);
 
 
-static tuple_eax_edx_t io_rdmsr(uint32_t const addr) {
+static inline tuple_eax_edx_t io_rdmsr(uint32_t const addr) {
     tuple_eax_edx_t result;
     __asm__ volatile ("rdmsr": "=a"(result.eax), "=d"(result.edx) : "c"(addr));
     return result;
 }
 
-static void io_wrmsr(uint32_t const addr, tuple_eax_edx_t val) {
+static inline void io_wrmsr(uint32_t const addr, tuple_eax_edx_t val) {
     __asm__ volatile ("wrmsr": : "c"(addr), "d"(val.edx), "a"(val.eax));
 }
 
-static void io_cpuid(cpuid_t *regs) {
+static inline void io_cpuid(cpuid_t *regs) {
     __asm__ volatile ("cpuid"
     : "=a"(regs->eax), "=c"(regs->ecx), "=d"(regs->edx), "=b"(regs->ebx)
     : "a"(regs->eax), "c"(regs->ecx)

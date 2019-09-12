@@ -18,7 +18,9 @@ int vprintf(const char *format, va_list args);
 void* memcpy(void* p, const void* q, size_t n) {
     uint8_t* _p = (uint8_t*)p;
     const uint8_t* _q = (const uint8_t*)q;
-    // #pragma clang loop vectorize(enable) interleave(enable)
+#ifdef __SSE__
+    #pragma clang loop vectorize(enable) interleave(enable)
+#endif
     for (int i = 0; i < n; i++) {
         *_p++ = *_q++;
     }
@@ -27,7 +29,9 @@ void* memcpy(void* p, const void* q, size_t n) {
 
 void* memset(void * p, int v, size_t n) {
     uint8_t* _p = (uint8_t*)p;
-    // #pragma clang loop vectorize(enable) interleave(enable)
+#ifdef __SSE__
+    #pragma clang loop vectorize(enable) interleave(enable)
+#endif
     for (int i = 0; i < n; i++) {
         *_p++ = v;
     }

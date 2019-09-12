@@ -41,47 +41,6 @@ typedef struct {
 } moe_bootinfo_t;
 
 
-//  Architecture Specific
-static inline void io_out8(uintptr_t port, uint8_t value) {
-    __asm__ volatile ("outb %%al, %%dx":: "a"(value), "d"(port));
-}
-
-static inline void io_out16(uintptr_t port, uint16_t value) {
-    __asm__ volatile ("outw %%ax, %%dx":: "a"(value), "d"(port));
-}
-
-static inline void io_out32(uintptr_t port, uint32_t value) {
-    __asm__ volatile ("outl %%eax, %%dx":: "a"(value), "d"(port));
-}
-
-static inline uint8_t io_in8(uintptr_t port) {
-    uint16_t value;
-    __asm__ volatile ("inb %%dx, %%al": "=a"(value) :"d"(port));
-    return value;
-}
-
-static inline uint16_t io_in16(uintptr_t port) {
-    uint16_t value;
-    __asm__ volatile ("inw %%dx, %%ax": "=a"(value) :"d"(port));
-    return value;
-}
-
-static inline uint32_t io_in32(uintptr_t port) {
-    uint32_t value;
-    __asm__ volatile ("inl %%dx, %%eax": "=a"(value) :"d"(port));
-    return value;
-}
-
-static inline void io_hlt() { __asm__ volatile("hlt"); }
-#define cpu_relax __builtin_ia32_pause
-// static inline void cpu_relax() { __asm__ volatile("pause"); }
-
-int atomic_bit_test_and_set(void *p, size_t bit);
-int atomic_bit_test_and_clear(void *p, size_t bit);
-
-_Noreturn void arch_reset();
-
-
 typedef void (*MOE_IRQ_HANDLER)(int irq);
 int moe_install_irq(uint8_t irq, MOE_IRQ_HANDLER handler);
 int moe_uninstall_irq(uint8_t irq);
@@ -98,10 +57,6 @@ uint32_t READ_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p);
 void WRITE_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p, uint32_t v);
 uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p);
 void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v);
-
-
-uintptr_t io_lock_irq();
-void io_restore_irq(uintptr_t);
 
 
 // Low Level Memory Manager
@@ -134,3 +89,69 @@ int pci_parse_bar(uint32_t _base, unsigned idx, uint64_t *_bar, uint64_t *_size)
 uint32_t pci_find_by_class(uint32_t cls, uint32_t mask);
 void pci_dump_config(uint32_t base, void *p);
 uint32_t pci_find_capability(uint32_t base, uint8_t id);
+
+
+//  Architecture Specific
+_Noreturn void arch_reset();
+
+uintptr_t io_lock_irq();
+void io_restore_irq(uintptr_t);
+
+static inline void io_out8(uintptr_t port, uint8_t value) {
+    __asm__ volatile ("outb %%al, %%dx":: "a"(value), "d"(port));
+}
+
+static inline void io_out16(uintptr_t port, uint16_t value) {
+    __asm__ volatile ("outw %%ax, %%dx":: "a"(value), "d"(port));
+}
+
+static inline void io_out32(uintptr_t port, uint32_t value) {
+    __asm__ volatile ("outl %%eax, %%dx":: "a"(value), "d"(port));
+}
+
+static inline uint8_t io_in8(uintptr_t port) {
+    uint16_t value;
+    __asm__ volatile ("inb %%dx, %%al": "=a"(value) :"d"(port));
+    return value;
+}
+
+static inline uint16_t io_in16(uintptr_t port) {
+    uint16_t value;
+    __asm__ volatile ("inw %%dx, %%ax": "=a"(value) :"d"(port));
+    return value;
+}
+
+static inline uint32_t io_in32(uintptr_t port) {
+    uint32_t value;
+    __asm__ volatile ("inl %%dx, %%eax": "=a"(value) :"d"(port));
+    return value;
+}
+
+static inline void io_hlt() {
+    __asm__ volatile("hlt");
+}
+#define cpu_relax __builtin_ia32_pause
+// static inline void cpu_relax() { __asm__ volatile("pause"); }
+
+static inline int atomic_bit_test_and_set(void *p, size_t bit) {
+    uint32_t *_p = (uint32_t *)p;
+    int result;
+    __asm__ volatile (
+        "lock bts %[bit], %[ptr];\n"
+        "sbb %0, %0;\n"
+    :"=r"(result)
+    :[ptr]"m"(*_p), [bit]"Ir"(bit));
+    return result;
+}
+
+static inline int atomic_bit_test_and_clear(void *p, size_t bit) {
+    uint32_t *_p = (uint32_t *)p;
+    int result;
+    __asm__ volatile (
+        "lock btr %[bit], %[ptr];\n"
+        "sbb %0, %0;\n"
+    :"=r"(result)
+    :[ptr]"m"(*_p), [bit]"Ir"(bit));
+    return result;
+}
+
