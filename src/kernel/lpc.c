@@ -1,4 +1,4 @@
-// Legacy PC Devices
+// Legacy PC's Low Pin Count Devices
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
 #include "moe.h"
