@@ -57,7 +57,7 @@ cpuid_feature_table_t sysisa_table[] = {
     {CPUID_F81D, 27, "RDTSCP"},
     {CPUID_F01D, 28, "HT"},
     {CPUID_F01C, 21, "x2APIC"},
-    {CPUID_F01C, 24, "TSC-DEADLINE"},
+    {CPUID_F01C, 24, "TSC-deadline"},
     {CPUID_F01C, 26, "XSAVE"},
     {CPUID_F01C, 27, "OSXSAVE"},
     {CPUID_F07B, 0,  "FSGSBASE"},

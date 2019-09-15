@@ -6,6 +6,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __SSE__
+#define LIBSTD_ENABLE_VECTOR
+#endif
+
 typedef wchar_t CHAR16;
 
 int snprintf(char* buffer, size_t n, const char* format, ...);
@@ -18,7 +22,7 @@ int vprintf(const char *format, va_list args);
 void* memcpy(void* p, const void* q, size_t n) {
     uint8_t* _p = (uint8_t*)p;
     const uint8_t* _q = (const uint8_t*)q;
-#ifdef __SSE__
+#ifdef LIBSTD_ENABLE_VECTOR
     #pragma clang loop vectorize(enable) interleave(enable)
 #endif
     for (int i = 0; i < n; i++) {
@@ -29,7 +33,7 @@ void* memcpy(void* p, const void* q, size_t n) {
 
 void* memset(void * p, int v, size_t n) {
     uint8_t* _p = (uint8_t*)p;
-#ifdef __SSE__
+#ifdef LIBSTD_ENABLE_VECTOR
     #pragma clang loop vectorize(enable) interleave(enable)
 #endif
     for (int i = 0; i < n; i++) {
