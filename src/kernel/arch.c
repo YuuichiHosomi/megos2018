@@ -78,27 +78,28 @@ extern void *_irq46;
 extern void *_irq47;
 
 
-#define SIZE_TSS    0x10000
-extern uint16_t gdt_init(void);
-extern void gdt_load(void *gdt, x64_tss_desc_t *tss);
+extern uint16_t cpu_init(void);
+extern void gdt_load(void *gdt, x64_tss_desc_t *tss_desc);
 extern void idt_load(volatile void*, size_t);
-extern x64_tss_t *io_get_tss(void);
 extern _Atomic uint32_t *smp_setup_init(uint8_t vector_sipi, int max_cpu, size_t stack_chunk_size, uintptr_t* stack_base);
 extern void io_set_lazy_fpu_restore(void);
 extern void thread_init(int);
 extern void thread_reschedule(void);
 extern void lpc_init(void);
 extern int acpi_enable(int enabled);
+extern size_t gdt_preferred_size();
+extern uintptr_t syscall(uintptr_t func_no, uintptr_t params);
+
 static int hpet_init(void);
 
 
-static inline tuple_eax_edx_t io_rdmsr(uint32_t const addr) {
+static inline tuple_eax_edx_t cpu_rdmsr(uint32_t const addr) {
     tuple_eax_edx_t result;
     __asm__ volatile ("rdmsr": "=a"(result.eax), "=d"(result.edx) : "c"(addr));
     return result;
 }
 
-static inline void io_wrmsr(uint32_t const addr, tuple_eax_edx_t val) {
+static inline void cpu_wrmsr(uint32_t const addr, tuple_eax_edx_t val) {
     __asm__ volatile ("wrmsr": : "c"(addr), "d"(val.edx), "a"(val.eax));
 }
 
@@ -165,33 +166,32 @@ void idt_set_handler(uint8_t num, uintptr_t offset, uint16_t sel, uint8_t attr, 
     idt[num] = desc;
 }
 
-static void idt_set_kernel_handler(uint8_t num, uintptr_t offset, uint8_t ist) {
-    idt_set_handler(num, offset, cs_sel, 0x8E, ist);
+static void idt_set_kernel_handler(uint8_t num, uintptr_t offset, unsigned dpl, uint8_t ist) {
+    idt_set_handler(num, offset, cs_sel, 0x8E | (dpl << 5), ist);
 }
 
-static void tss_init(x64_tss_desc_t *tss, uint64_t base, size_t size) {
-    x64_tss_desc_t _tss = {{size - 1}};
-    _tss.base_1 = base;
-    _tss.base_2 = base >> 24;
-    _tss.base_3 = base >> 32;
-    _tss.type = DESC_TYPE_TSS64;
-    _tss.present = 1;
-    *tss = _tss;
+static x64_tss_desc_t make_tss_desc(void *base, size_t size) {
+    uintptr_t _base = (uintptr_t)base;
+    x64_tss_desc_t tss_desc = {{size - 1}};
+    tss_desc.base_1 = _base;
+    tss_desc.base_2 = _base >> 24;
+    tss_desc.base_3 = _base >> 32;
+    tss_desc.type = DESC_TYPE_TSS64;
+    tss_desc.present = 1;
+    return tss_desc;
 }
+
 
 static void gdt_setup() {
-    uintptr_t tss_base = (uintptr_t)moe_alloc_object(SIZE_TSS, 1);
-    x64_tss_desc_t tss;
-    tss_init(&tss, tss_base, SIZE_TSS);
+    const size_t roundup = 0x100;
+    size_t size_tss = (sizeof(x64_tss_t) + roundup - 1) & ~(roundup - 1);
+    uint8_t *buffer = moe_alloc_object(gdt_preferred_size() + size_tss, 1);
+    x64_tss_t *tss = (x64_tss_t *)buffer;
+    void *gdt = buffer + size_tss;
+    x64_tss_desc_t tss_desc = make_tss_desc(tss, size_tss);
 
-    // const size_t ist_size = 0x4000;
-    // for (int i = 0; i < 7; i++) {
-    //     uintptr_t ist = (uintptr_t)moe_alloc_object(ist_size, 1) + ist_size;
-    //     tss->IST[i] = ist;
-    // }
+    gdt_load(gdt, &tss_desc);
 
-    void *gdt = moe_alloc_object(4096, 1);
-    gdt_load(gdt, &tss);
 }
 
 #define BSOD_BUFF_SIZE 1024
@@ -206,7 +206,7 @@ void default_int_handler(x64_context_t* regs) {
         "#### EXCEPTION on PID %d thread %d: %s (fiber:%d %s)\n"
         "ERR %02llx-%04llx-%016llx IP %02llx:%012llx F %08llx\n"
         "AX %016llx BX %016llx CX %016llx DX %016llx\n"
-        "SP %012llx BP %016llx SI %016llx DI %016llx\n"
+        "SP %016llx BP %016llx SI %016llx DI %016llx\n"
         "R8- %016llx %016llx %016llx %016llx\n"
         "R12- %016llx %016llx %016llx %016llx\n"
 
@@ -232,13 +232,13 @@ static void idt_init() {
     const size_t idt_size = MAX_IDT_NUM * sizeof(x64_idt64_t);
     idt = moe_alloc_object(idt_size, 1);
 
-    idt_set_kernel_handler(0x00, (uintptr_t)&_int00, 0); // #DE Divide Error
-    idt_set_kernel_handler(0x03, (uintptr_t)&_int03, 0); // #BP Breakpoint
-    idt_set_kernel_handler(0x06, (uintptr_t)&_int06, 0); // #UD Undefined Opcode
-    idt_set_kernel_handler(0x07, (uintptr_t)&_int07, 0); // #NM Device Not Available
-    idt_set_kernel_handler(0x08, (uintptr_t)&_int08, 0); // #DF Double Fault
-    idt_set_kernel_handler(0x0D, (uintptr_t)&_int0D, 0); // #GP General Protection Fault
-    idt_set_kernel_handler(0x0E, (uintptr_t)&_int0E, 0); // #PF Page Fault
+    idt_set_kernel_handler(0x00, (uintptr_t)&_int00, 0, 0); // #DE Divide Error
+    idt_set_kernel_handler(0x03, (uintptr_t)&_int03, 3, 0); // #BP Breakpoint
+    idt_set_kernel_handler(0x06, (uintptr_t)&_int06, 0, 0); // #UD Undefined Opcode
+    idt_set_kernel_handler(0x07, (uintptr_t)&_int07, 0, 0); // #NM Device Not Available
+    idt_set_kernel_handler(0x08, (uintptr_t)&_int08, 0, 0); // #DF Double Fault
+    idt_set_kernel_handler(0x0D, (uintptr_t)&_int0D, 0, 0); // #GP General Protection Fault
+    idt_set_kernel_handler(0x0E, (uintptr_t)&_int0E, 0, 0); // #PF Page Fault
 
     idt_load(idt, idt_size - 1);
 }
@@ -474,11 +474,11 @@ void smp_init_ap(uint8_t cpuid) {
     io_set_lazy_fpu_restore();
 
     tuple_eax_edx_t tuple = { cpuid };
-    io_wrmsr(IA32_TSC_AUX_MSR, tuple);
+    cpu_wrmsr(IA32_TSC_AUX_MSR, tuple);
 
-    tuple_eax_edx_t msr_lapic = io_rdmsr(IA32_APIC_BASE_MSR);
+    tuple_eax_edx_t msr_lapic = cpu_rdmsr(IA32_APIC_BASE_MSR);
     msr_lapic.u64 |= IA32_APIC_BASE_MSR_ENABLE;
-    io_wrmsr(IA32_APIC_BASE_MSR, msr_lapic);
+    cpu_wrmsr(IA32_APIC_BASE_MSR, msr_lapic);
 
     apic_id_t apicid = apic_read_apicid();
     apicid_to_cpuids[apicid] = cpuid;
@@ -513,9 +513,9 @@ static void apic_init() {
         gsi_table[1] = gsi_irq01;
 
         //  Setup Local APIC
-        tuple_eax_edx_t msr_lapic = io_rdmsr(IA32_APIC_BASE_MSR);
+        tuple_eax_edx_t msr_lapic = cpu_rdmsr(IA32_APIC_BASE_MSR);
         msr_lapic.u64 |= IA32_APIC_BASE_MSR_ENABLE;
-        io_wrmsr(IA32_APIC_BASE_MSR, msr_lapic);
+        cpu_wrmsr(IA32_APIC_BASE_MSR, msr_lapic);
         lapic_base = msr_lapic.u64 & ~0xFFF;
         pg_map_mmio(lapic_base, 1);
 
@@ -577,65 +577,79 @@ static void apic_init() {
         }
 
         //  Install IDT handler
-        idt_set_kernel_handler(IRQ_BASE + 0, (uintptr_t)&_irq0, 0);
-        idt_set_kernel_handler(IRQ_BASE + 1, (uintptr_t)&_irq1, 0);
-        idt_set_kernel_handler(IRQ_BASE + 2, (uintptr_t)&_irq2, 0);
-        idt_set_kernel_handler(IRQ_BASE + 3, (uintptr_t)&_irq3, 0);
-        idt_set_kernel_handler(IRQ_BASE + 4, (uintptr_t)&_irq4, 0);
-        idt_set_kernel_handler(IRQ_BASE + 5, (uintptr_t)&_irq5, 0);
-        idt_set_kernel_handler(IRQ_BASE + 6, (uintptr_t)&_irq6, 0);
-        idt_set_kernel_handler(IRQ_BASE + 7, (uintptr_t)&_irq7, 0);
-        idt_set_kernel_handler(IRQ_BASE + 8, (uintptr_t)&_irq8, 0);
-        idt_set_kernel_handler(IRQ_BASE + 9, (uintptr_t)&_irq9, 0);
-        idt_set_kernel_handler(IRQ_BASE + 10, (uintptr_t)&_irq10, 0);
-        idt_set_kernel_handler(IRQ_BASE + 11, (uintptr_t)&_irq11, 0);
-        idt_set_kernel_handler(IRQ_BASE + 12, (uintptr_t)&_irq12, 0);
-        idt_set_kernel_handler(IRQ_BASE + 13, (uintptr_t)&_irq13, 0);
-        idt_set_kernel_handler(IRQ_BASE + 14, (uintptr_t)&_irq14, 0);
-        idt_set_kernel_handler(IRQ_BASE + 15, (uintptr_t)&_irq15, 0);
-        idt_set_kernel_handler(IRQ_BASE + 16, (uintptr_t)&_irq16, 0);
-        idt_set_kernel_handler(IRQ_BASE + 17, (uintptr_t)&_irq17, 0);
-        idt_set_kernel_handler(IRQ_BASE + 18, (uintptr_t)&_irq18, 0);
-        idt_set_kernel_handler(IRQ_BASE + 19, (uintptr_t)&_irq19, 0);
-        idt_set_kernel_handler(IRQ_BASE + 20, (uintptr_t)&_irq20, 0);
-        idt_set_kernel_handler(IRQ_BASE + 21, (uintptr_t)&_irq21, 0);
-        idt_set_kernel_handler(IRQ_BASE + 22, (uintptr_t)&_irq22, 0);
-        idt_set_kernel_handler(IRQ_BASE + 23, (uintptr_t)&_irq23, 0);
-        idt_set_kernel_handler(IRQ_BASE + 24, (uintptr_t)&_irq24, 0);
-        idt_set_kernel_handler(IRQ_BASE + 25, (uintptr_t)&_irq25, 0);
-        idt_set_kernel_handler(IRQ_BASE + 26, (uintptr_t)&_irq26, 0);
-        idt_set_kernel_handler(IRQ_BASE + 27, (uintptr_t)&_irq27, 0);
-        idt_set_kernel_handler(IRQ_BASE + 28, (uintptr_t)&_irq28, 0);
-        idt_set_kernel_handler(IRQ_BASE + 29, (uintptr_t)&_irq29, 0);
-        idt_set_kernel_handler(IRQ_BASE + 30, (uintptr_t)&_irq30, 0);
-        idt_set_kernel_handler(IRQ_BASE + 31, (uintptr_t)&_irq31, 0);
-        idt_set_kernel_handler(IRQ_BASE + 32, (uintptr_t)&_irq32, 0);
-        idt_set_kernel_handler(IRQ_BASE + 33, (uintptr_t)&_irq33, 0);
-        idt_set_kernel_handler(IRQ_BASE + 34, (uintptr_t)&_irq34, 0);
-        idt_set_kernel_handler(IRQ_BASE + 35, (uintptr_t)&_irq35, 0);
-        idt_set_kernel_handler(IRQ_BASE + 36, (uintptr_t)&_irq36, 0);
-        idt_set_kernel_handler(IRQ_BASE + 37, (uintptr_t)&_irq37, 0);
-        idt_set_kernel_handler(IRQ_BASE + 38, (uintptr_t)&_irq38, 0);
-        idt_set_kernel_handler(IRQ_BASE + 39, (uintptr_t)&_irq39, 0);
-        idt_set_kernel_handler(IRQ_BASE + 40, (uintptr_t)&_irq40, 0);
-        idt_set_kernel_handler(IRQ_BASE + 41, (uintptr_t)&_irq41, 0);
-        idt_set_kernel_handler(IRQ_BASE + 42, (uintptr_t)&_irq42, 0);
-        idt_set_kernel_handler(IRQ_BASE + 43, (uintptr_t)&_irq43, 0);
-        idt_set_kernel_handler(IRQ_BASE + 44, (uintptr_t)&_irq44, 0);
-        idt_set_kernel_handler(IRQ_BASE + 45, (uintptr_t)&_irq45, 0);
-        idt_set_kernel_handler(IRQ_BASE + 46, (uintptr_t)&_irq46, 0);
-        idt_set_kernel_handler(IRQ_BASE + 47, (uintptr_t)&_irq47, 0);
+        idt_set_kernel_handler(IRQ_BASE + 0, (uintptr_t)&_irq0, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 1, (uintptr_t)&_irq1, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 2, (uintptr_t)&_irq2, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 3, (uintptr_t)&_irq3, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 4, (uintptr_t)&_irq4, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 5, (uintptr_t)&_irq5, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 6, (uintptr_t)&_irq6, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 7, (uintptr_t)&_irq7, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 8, (uintptr_t)&_irq8, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 9, (uintptr_t)&_irq9, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 10, (uintptr_t)&_irq10, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 11, (uintptr_t)&_irq11, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 12, (uintptr_t)&_irq12, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 13, (uintptr_t)&_irq13, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 14, (uintptr_t)&_irq14, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 15, (uintptr_t)&_irq15, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 16, (uintptr_t)&_irq16, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 17, (uintptr_t)&_irq17, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 18, (uintptr_t)&_irq18, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 19, (uintptr_t)&_irq19, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 20, (uintptr_t)&_irq20, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 21, (uintptr_t)&_irq21, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 22, (uintptr_t)&_irq22, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 23, (uintptr_t)&_irq23, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 24, (uintptr_t)&_irq24, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 25, (uintptr_t)&_irq25, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 26, (uintptr_t)&_irq26, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 27, (uintptr_t)&_irq27, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 28, (uintptr_t)&_irq28, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 29, (uintptr_t)&_irq29, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 30, (uintptr_t)&_irq30, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 31, (uintptr_t)&_irq31, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 32, (uintptr_t)&_irq32, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 33, (uintptr_t)&_irq33, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 34, (uintptr_t)&_irq34, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 35, (uintptr_t)&_irq35, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 36, (uintptr_t)&_irq36, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 37, (uintptr_t)&_irq37, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 38, (uintptr_t)&_irq38, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 39, (uintptr_t)&_irq39, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 40, (uintptr_t)&_irq40, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 41, (uintptr_t)&_irq41, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 42, (uintptr_t)&_irq42, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 43, (uintptr_t)&_irq43, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 44, (uintptr_t)&_irq44, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 45, (uintptr_t)&_irq45, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 46, (uintptr_t)&_irq46, 0, 0);
+        idt_set_kernel_handler(IRQ_BASE + 47, (uintptr_t)&_irq47, 0, 0);
 
-        idt_set_kernel_handler(IRQ_SCHEDULE, (uintptr_t)&_ipi_sche, 0);
-        // idt_set_kernel_handler(IRQ_INVALIDATE_TLB, (uintptr_t)&_ipi_invtlb, 0);
+        idt_set_kernel_handler(IRQ_SCHEDULE, (uintptr_t)&_ipi_sche, 0, 0);
+        // idt_set_kernel_handler(IRQ_INVALIDATE_TLB, (uintptr_t)&_ipi_invtlb, 0, 0);
 
 
-        // HPET, LAPIC Timer, and ACPI PM Timer
+        // HPET, Local APIC Timer
 
         apic_write_lapic(0x3E0, 0x0000000B);
         apic_write_lapic(0x320, 0x00010020);
 
         if (hpet_init()) {
+            // use HPET
+            const int magic_number = 100;
+            moe_measure_t deadline0 = moe_create_measure(1);
+            while (moe_measure_until(deadline0)) {
+                cpu_relax();
+            }
+            moe_measure_t deadline1 = moe_create_measure(1000000 / magic_number);
+            apic_write_lapic(0x380, UINT32_MAX);
+            while (moe_measure_until(deadline1)) {
+                cpu_relax();
+            }
+            uint32_t count = apic_read_lapic(0x390);
+            lapic_freq = ((uint64_t)UINT32_MAX - count) * magic_number;
+        } else {
             // no HPET
             moe_assert(acpi_get_pm_timer_type(), "ACPI PM TIMER NOT FOUND");
             const int magic_number = 100;
@@ -656,20 +670,6 @@ static void apic_init() {
             measure_vt.create = lapic_create_measure;
             measure_vt.until = lapic_measure_until;
             measure_vt.diff = lapic_measure_diff;
-        } else {
-            // use HPET
-            const int magic_number = 100;
-            moe_measure_t deadline0 = moe_create_measure(1);
-            while (moe_measure_until(deadline0)) {
-                cpu_relax();
-            }
-            moe_measure_t deadline1 = moe_create_measure(1000000 / magic_number);
-            apic_write_lapic(0x380, UINT32_MAX);
-            while (moe_measure_until(deadline1)) {
-                cpu_relax();
-            }
-            uint32_t count = apic_read_lapic(0x390);
-            lapic_freq = ((uint64_t)UINT32_MAX - count) * magic_number;
         }
 
         lapic_timer_div = lapic_freq / 1000;
@@ -895,10 +895,18 @@ static int hpet_init(void) {
         hpet_write_reg(0x108, HPET_DIV * 1000000000000 / hpet_main_cnt_period);
         moe_install_irq(0, &hpet_irq_handler);
 
-        return 0;
+        return 1;
     } else {
-        return -1;
+        return 0;
     }
+}
+
+
+/*********************************************************************/
+
+
+uintptr_t arch_syscall_entry(uintptr_t rax, uintptr_t rdx) {
+    return syscall(rax, rdx);
 }
 
 
@@ -915,8 +923,8 @@ _Noreturn void arch_reset() {
 void arch_init(moe_bootinfo_t* info) {
 
     tuple_eax_edx_t tuple = { 0 };
-    io_wrmsr(IA32_TSC_AUX_MSR, tuple);
-    cs_sel = gdt_init();
+    cpu_wrmsr(IA32_TSC_AUX_MSR, tuple);
+    cs_sel = cpu_init();
     gdt_setup();
     idt_init();
 

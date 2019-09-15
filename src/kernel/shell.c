@@ -1,6 +1,8 @@
 // Pseudo Shell Interface
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
+
+#include <stdatomic.h>
 #include "moe.h"
 #include "kernel.h"
 #include "hid.h"
@@ -56,6 +58,7 @@ int cmd_shutdown(int argc, char **argv) {
 int cmd_help(int argc, char **argv);
 int cmd_cpuid(int argc, char **argv);
 int cmd_ps(int argc, char **argv);
+int cmd_exp(int argc, char **argv);
 
 command_list_t commands[] = {
     { "help", cmd_help, "Display this help" },
@@ -65,6 +68,7 @@ command_list_t commands[] = {
     { "exit", cmd_shutdown, "Exit" },
     { "cpuid", cmd_cpuid, "Show cpuid information" },
     { "ps", cmd_ps, NULL },
+    { "exp", cmd_exp, NULL},
     { 0 },
 };
 
@@ -74,6 +78,27 @@ int cmd_help(int argc, char **argv) {
             printf("%s\t%s\n", commands[i].name, commands[i].tips);
         }
     }
+    return 0;
+}
+
+
+// user mode experiments
+_Atomic intptr_t uid_src = 1;
+extern void exp_user_mode(void *base, void *stack_top);
+void proc_hello(void *args) {
+    uintptr_t base = atomic_fetch_add(&uid_src, 1) << 39;
+    size_t code_size = 0x10000;
+    size_t padding = 0x400000;
+    size_t stack_size = 0x10000;
+    void *code = pg_map_user(base, code_size, 0);
+    uint8_t *data = pg_map_user(base + padding, stack_size, 0);
+    moe_usleep(100000);
+
+    exp_user_mode(code, data + stack_size);
+}
+
+int cmd_exp(int argc, char **argv) {
+    moe_create_process(&proc_hello, 0, NULL, "hello");
     return 0;
 }
 
@@ -211,7 +236,7 @@ void shell_start() {
     char con_buff[MAX_CMDLINE];
     char arg_buff[MAX_ARGBUFF];
 
-    printf("\n\n[Pseudo shell]\n");
+    printf("\n\n%s\n", get_string(string_banner));
     for (;;) {
         printf(">");
         read_cmdline(con_buff, MAX_CMDLINE);

@@ -5,4 +5,5 @@ prefix: string
 #     - help: 1
 strings:
   default:
+    banner: unCommand mode
     bad_command: Bad command or file name

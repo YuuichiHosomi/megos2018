@@ -377,8 +377,10 @@ void gradient(moe_bitmap_t *dest, uint32_t _start, uint32_t _end) {
 
 
 void gs_bsod() {
-    main_console_cursor_x = 0;
-    main_console_cursor_y = 0;
+    if (main_console_cursor_x) {
+        main_console_cursor_x = 0;
+        main_console_cursor_y++;
+    }
     moe_set_console_cursor_visible(NULL, 0);
     // blur(&back_buffer, &main_screen, 0x000000);
     // moe_blt(NULL, &back_buffer, NULL, NULL, 0);

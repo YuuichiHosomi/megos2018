@@ -69,6 +69,7 @@ int smp_send_invalidate_tlb();
 void *pg_map_mmio(uintptr_t base, size_t size);
 void *pg_valloc(uintptr_t pa, size_t size);
 void *pg_map_vram(uintptr_t base, size_t size);
+void *pg_map_user(uintptr_t base, size_t size, int reserved);
 
 
 //  ACPI

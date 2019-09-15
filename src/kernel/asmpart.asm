@@ -2,10 +2,12 @@
 ;; Copyright (c) 2018 MEG-OS project, All rights reserved.
 ;; License: MIT
 
-%define LOADER_CS32         0x08
+; %define LOADER_CS32         0x08
 %define KERNEL_CS64         0x10
 %define KERNEL_SS           0x18
-%define SEL_TSS             0x30
+%define USER_CS32           0x23
+%define USER_CS64           0x33
+%define SEL_TSS             0x40
 
 %define SMPINFO             0x0800
 %define SMPINFO_MAX_CPU     0x04
@@ -21,11 +23,21 @@
 %define SMPINFO_GDTR        0x50
 
 %define	EFLAGS_IF           0x00000200
-%define IA32_APIC_BASE_MSR  0x0000001B
-%define IA32_APIC_BASE_MSR_ENABLE   0x00000800
-%define IA32_MISC_MSR       0x000001A0
-%define IA32_EFER_MSR       0xC0000080
-%define IA32_TSC_AUX_MSR    0xC0000103
+%define EFLAGS_DF           0x00000400
+%define IA32_APIC_BASE      0x0000001B
+%define IA32_APIC_BASE_ENABLE   0x00000800
+%define IA32_MISC           0x000001A0
+%define IA32_EFER           0xC0000080
+%define IA32_STAR           0xC0000081
+%define IA32_LSTAR          0xC0000082
+%define IA32_CSTAR          0xC0000083
+%define IA32_FMASK          0xC0000084
+%define IA32_FS_BASE        0xC0000100
+%define IA32_GS_BASE        0xC0000101
+%define IA32_KERNEL_GS_BASE 0xC0000102
+%define IA32_TSC_AUX        0xC0000103
+
+%define TSS64_RSP0          0x0004
 
 
 [BITS 64]
@@ -38,11 +50,12 @@
     extern thread_on_start
     extern fiber_on_start
     extern moe_exit_thread
+    extern arch_syscall_entry
 
 
-;; int gdt_init();
-    global gdt_init
-gdt_init:
+;; int cpu_init();
+    global cpu_init
+cpu_init:
 
     ; load GDTR
     lea rax, [rel __GDT]
@@ -69,6 +82,32 @@ gdt_init:
     mov gs, ecx
     lldt cx
 
+    mov ecx, IA32_EFER
+    rdmsr
+    bts eax, 0 ; SCE
+    wrmsr
+
+    call _setup_syscall
+
+    mov eax, KERNEL_CS64
+    ret
+
+
+;; void idt_load(void* idt, size_t limit);
+    global idt_load
+idt_load:
+    shl rdx, 48
+    push rcx
+    push rdx
+    lidt [rsp+6]
+    add rsp, byte 16
+    ret
+
+
+; size_t gdt_preferred_size();
+    global gdt_preferred_size
+gdt_preferred_size:
+    mov eax, (__end_common_GDT - __GDT)
     ret
 
 
@@ -105,41 +144,62 @@ gdt_load:
     ret
 
 
-;; void idt_load(void* idt, size_t limit);
-    global idt_load
-idt_load:
-    shl rdx, 48
+;; void *cpu_get_tss();
+    global cpu_get_tss
+cpu_get_tss:
     push rcx
-    push rdx
-    lidt [rsp+6]
-    add rsp, byte 16
-    ret
-
-
-;; void *io_get_tss();
-    global io_get_tss
-io_get_tss:
     sub rsp, byte 0x10
 
     sgdt [rsp + 6]
-    mov r11, [rsp + 8]
-    lea r11, [r11 + SEL_TSS]
-    mov rcx, [r11]
-    mov rax, rcx
-    shr rax, 16
-    and eax, 0x00FFFFFF
-    shr rcx, 24 + 32
-    add rax, rcx
-    mov rdx, [r11 + 8]
-    shl rdx, 32
-    add rax, rdx
+    mov rax, [rsp + 8]
+    mov rcx, dword 0xFFFFF000
+    and rax, rcx
 
     add rsp, byte 0x10
+    pop rcx
     ret
 
 
-; moe_thread_t *_do_switch_context(cpu_context_t *from, cpu_context_t *to);
-; %define CTX_IP  0x00
+_setup_syscall:
+
+    xor eax, eax
+    mov edx, USER_CS32 << 16 | KERNEL_CS64
+    mov ecx, IA32_STAR
+    wrmsr
+
+    lea rax, [rel _syscall_entry64]
+    mov rdx, rax
+    shr rdx, 32
+    mov ecx, IA32_LSTAR
+    wrmsr
+
+    mov eax, EFLAGS_DF
+    xor edx, edx
+    mov ecx, IA32_FMASK
+    wrmsr
+
+    ret
+
+
+_syscall_entry64:
+    push rcx
+    push r11
+    push rsp
+    mov rbp, rsp
+    and rsp, byte 0xF0
+
+    movsx ecx, al
+    and ecx, eax
+    call arch_syscall_entry
+
+    mov rsp, rbp
+    pop rbp
+    pop r11
+    pop rcx
+    o64 sysret
+
+
+; void _do_switch_context(cpu_context_t *from, cpu_context_t *to);
 %define CTX_SP  0x08
 %define CTX_BP  0x10
 %define CTX_BX  0x18
@@ -149,6 +209,7 @@ io_get_tss:
 %define CTX_R13 0x38
 %define CTX_R14 0x40
 %define CTX_R15 0x48
+%define CTX_TSS_RSP0    0x50
     global _do_switch_context
 _do_switch_context:
     call io_set_lazy_fpu_restore
@@ -163,6 +224,12 @@ _do_switch_context:
     mov [rcx + CTX_R14], r14
     mov [rcx + CTX_R15], r15
 
+    call cpu_get_tss
+    mov r11, [rax + TSS64_RSP0]
+    mov r10, [rdx + CTX_TSS_RSP0]
+    mov [rcx + CTX_TSS_RSP0], r11
+    mov [rax + TSS64_RSP0], r10
+
     mov rsp, [rdx + CTX_SP]
     mov rbp, [rdx + CTX_BP]
     mov rbx, [rdx + CTX_BX]
@@ -173,7 +240,7 @@ _do_switch_context:
     mov r14, [rdx + CTX_R14]
     mov r15, [rdx + CTX_R15]
 
-    mov rax, rcx
+    xor eax, eax
     xor ecx, ecx
     xor edx, edx
     xor r8d, r8d
@@ -182,6 +249,7 @@ _do_switch_context:
     xor r11d, r11d
 
     ret
+
 
 ; void io_setup_new_thread(cpu_context_t *context, uintptr_t* new_sp, moe_thread_start start, void *args);
     global io_setup_new_thread
@@ -629,13 +697,13 @@ smp_setup_init:
     mov rdx, cr3
     mov [r10 + SMPINFO_CR3], rdx
     sidt [r10 + SMPINFO_IDT]
-    mov ecx, IA32_EFER_MSR
+    mov ecx, IA32_EFER
     rdmsr
     mov [r10 + SMPINFO_EFER], eax
-    mov ecx, IA32_MISC_MSR
+    mov ecx, IA32_MISC
     rdmsr
-    mov [r10 + IA32_MISC_MSR], eax
-    mov [r10 + IA32_MISC_MSR + 4], edx
+    mov [r10 + IA32_MISC], eax
+    mov [r10 + IA32_MISC + 4], edx
 
     lea ecx, [r11 + _startup64 - _smp_rm_payload]
     mov edx, KERNEL_CS64
@@ -658,6 +726,8 @@ _startup_ap:
     imul eax, [rbx + SMPINFO_STACK_SIZE]
     mov rcx, [rbx + SMPINFO_STACK_BASE]
     lea rsp, [rcx + rax]
+
+    call _setup_syscall
 
     ; init APIC
     mov ecx, ebp
@@ -722,10 +792,10 @@ _smp_rm_payload:
 
     mov eax, [bx + SMPINFO_MSR_MISC]
     mov edx, [bx + SMPINFO_MSR_MISC + 4]
-    mov ecx, IA32_MISC_MSR
+    mov ecx, IA32_MISC
     wrmsr
 
-    mov ecx, IA32_EFER_MSR
+    mov ecx, IA32_EFER
     xor edx, edx
     mov eax, [bx+ SMPINFO_EFER]
     wrmsr
@@ -746,16 +816,64 @@ _startup64:
 _end_smp_rm_payload:
 
 
+; void exp_user_mode(void *base, void *stack_top);
+    global exp_user_mode
+exp_user_mode:
+    mov rbp, rsp
+    mov r15, rcx
+    mov r14, rdx
+
+    mov rdi, rcx
+    lea rsi, [rel _user_mode_exp_payload]
+    mov ecx, _end_user_mode_exp_payload - _user_mode_exp_payload
+    rep movsb
+
+    call cpu_get_tss
+    mov [rax + TSS64_RSP0], rbp
+
+    push byte USER_CS64 + 8
+    push r14
+    mov eax, EFLAGS_IF
+    push rax
+    push byte USER_CS64
+    push r15
+    iretq
+
+
+_user_mode_exp_payload:
+
+    lea rsi, [rel _hello]
+.loop:
+    mov dl, [rsi]
+    or dl, dl
+    jz .end
+    mov eax, 126
+    syscall
+    inc rsi
+    jmp .loop
+.end:
+    mov eax, 0x114514
+    xor edx, edx
+    syscall
+    int3
+
+_hello: db "Hello world!", 13, 10, 0
+
+_end_user_mode_exp_payload:
+
+
 [section .data]
 align 16
 __GDT:
     dw 0, 0, 0, 0                       ; 00 NULL
-    dw 0xFFFF, 0x0000, 0x9A00, 0x00CF   ; 08 32bit KERNEL TEXT FLAT
-    dw 0xFFFF, 0x0000, 0x9A00, 0x00AF   ; 10 64bit KERNEL TEXT FLAT
-    dw 0xFFFF, 0x0000, 0x9200, 0x00CF   ; 18 32bit KERNEL DATA FLAT
-    dw 0xFFFF, 0x0000, 0xFA00, 0x00AF   ; 23 64bit USER TEXT FLAT
-    dw 0xFFFF, 0x0000, 0xF200, 0x00CF   ; 2B 32bit USER DATA FLAT
+    dw 0xFFFF, 0x0000, 0x9A00, 0x00CF   ; 08 32bit DPL0 CODE FLAT HISTORICAL
+    dw 0xFFFF, 0x0000, 0x9A00, 0x00AF   ; 10 64bit DPL0 CODE FLAT
+    dw 0xFFFF, 0x0000, 0x9200, 0x00CF   ; 18 32bit DPL0 DATA FLAT MANDATORY
+    dw 0xFFFF, 0x0000, 0xFA00, 0x00CF   ; 23 32bit DPL3 CODE FLAT MANDATORY
+    dw 0xFFFF, 0x0000, 0xF200, 0x00CF   ; 2B 32bit DPL3 DATA FLAT MANDATORY
+    dw 0xFFFF, 0x0000, 0xFA00, 0x00AF   ; 33 64bit DPL3 CODE FLAT
+    dw 0xFFFF, 0x0000, 0xF200, 0x00CF   ; 3B 32bit DPL3 DATA FLAT MANDATORY
 __end_common_GDT:
-    dw 0, 0, 0, 0, 0, 0, 0, 0           ; 30:38 64bit TSS
+    dw 0, 0, 0, 0, 0, 0, 0, 0           ; 40:48 64bit TSS
 
 __end_GDT:

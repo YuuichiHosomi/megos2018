@@ -97,7 +97,7 @@ typedef struct {
     };
     uint32_t :32, :32;
     uint32_t :16;
-    uint32_t IOMAP_BASE:16;
+    uint32_t IOPB:16;
 } __attribute__((packed)) x64_tss_t;
 
 #define DESC_TYPE_TSS64             0x09

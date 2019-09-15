@@ -82,7 +82,7 @@ void _zputs(const char *s) {
 moe_bootinfo_t bootinfo;
 
 void *moe_kname(char *buffer, size_t limit) {
-    snprintf(buffer, limit, "MEG-OS v0.6.2 (codename warbler) [%d Cores, Memory %dMB]\n",
+    snprintf(buffer, limit, "MEG-OS v0.7.0 (codename Neapolis) [%d Cores, Memory %dMB]\n",
         moe_get_number_of_active_cpus(), (int)(bootinfo.total_memory >> 8));
     return buffer;
 }

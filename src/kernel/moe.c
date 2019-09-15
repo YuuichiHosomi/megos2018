@@ -108,7 +108,7 @@ static struct {
     atomic_flag lock;
 } moe;
 
-extern moe_thread_t *_do_switch_context(cpu_context_t *from, cpu_context_t *to);
+extern void _do_switch_context(cpu_context_t *from, cpu_context_t *to);
 extern void io_setup_new_thread(cpu_context_t *context, uintptr_t* new_sp, moe_thread_start start, void *args);
 extern void io_setup_new_fiber(cpu_context_t *context, uintptr_t* new_sp, moe_thread_start start, void *args);
 extern int smp_get_current_cpuid();
