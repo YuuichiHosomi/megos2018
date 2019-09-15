@@ -701,14 +701,6 @@ static void apic_init() {
 
 
 /*********************************************************************/
-
-
-void _int07_main() {
-    // TODO:
-}
-
-
-/*********************************************************************/
 //  Peripheral Component Interconnect
 
 #define PCI_CONFIG_ADDRESS  0x0CF8

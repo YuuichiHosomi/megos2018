@@ -37,7 +37,8 @@ typedef struct moe_thread_t {
         uintptr_t flags;
         struct {
             unsigned priority:4;
-            unsigned :2;
+            unsigned fpu_dirty:1;
+            unsigned fpu_used:1;
             unsigned running:1;
             unsigned zombie:1;
             unsigned last_cpuid:8;
@@ -66,6 +67,9 @@ typedef struct moe_fiber_t {
     union {
         uintptr_t flags;
         struct {
+            unsigned :4;
+            unsigned fpu_dirty:1;
+            unsigned fpu_used:1;
             unsigned zombie:1;
             unsigned running:1;
         };
@@ -109,12 +113,56 @@ static struct {
 } moe;
 
 extern void _do_switch_context(cpu_context_t *from, cpu_context_t *to);
+extern void cpu_finit(void);
+extern void cpu_fsave(cpu_context_t *ctx);
+extern void cpu_fload(cpu_context_t *ctx);
 extern void io_setup_new_thread(cpu_context_t *context, uintptr_t* new_sp, moe_thread_start start, void *args);
 extern void io_setup_new_fiber(cpu_context_t *context, uintptr_t* new_sp, moe_thread_start start, void *args);
 extern int smp_get_current_cpuid();
 
 
 /*********************************************************************/
+
+
+static int thread_index_of(moe_thread_t *thread) {
+    for (size_t i = 0; i < MAX_THREADS; i++) {
+        if (moe.thread_list[i] == thread) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int thread_retain(moe_thread_t *thread) {
+    int delta = 1;
+    int ref_cnt = thread->ref_cnt;
+    while (ref_cnt > 0) {
+        if (atomic_compare_exchange_weak(&thread->ref_cnt, &ref_cnt, ref_cnt + delta)) {
+            return ref_cnt + delta;
+        } else {
+            cpu_relax();
+        }
+    }
+    return 0;
+}
+
+static int thread_release(moe_thread_t *thread) {
+    int index = thread_index_of(thread);
+    if (index < 0) return -1;
+    int delta = -1;
+    int old_ref_cnt = atomic_fetch_add(&thread->ref_cnt, delta);
+    if (old_ref_cnt == 1) {
+        if (atomic_compare_exchange_strong(&moe.thread_list[index], &thread, NULL)) {
+            // TODO: remove thread
+            return 0;
+        } else {
+            // TODO: WTF?
+            return -1;
+        }
+    }
+    return 0;
+}
+
 
 static moe_affinity_t AFFINITY(int n) {
     if (sizeof(moe_affinity_t) * 8 > n) {
@@ -148,7 +196,7 @@ static int sch_add(moe_thread_t *thread) {
 static int sch_retire(moe_thread_t *thread) {
     if (!thread) return 0;
     if (thread->zombie) {
-        // TODO: remove thread
+        thread_release(thread);
         return 0;
     }
     if (thread->priority) {
@@ -199,6 +247,14 @@ static moe_thread_t *sch_next() {
 static void _next_thread(core_specific_data_t *csd, moe_thread_t *current) {
     moe_thread_t *next = sch_next();
     if (current != next) {
+        moe_fiber_t *fiber = current->current_fiber;
+        if (fiber && fiber->fpu_dirty) {
+            cpu_fsave(&fiber->context);
+            fiber->fpu_dirty = 0;
+        } else if (current->fpu_dirty) {
+            cpu_fsave(&current->context);
+            current->fpu_dirty = 0;
+        }
         int64_t load = moe_measure_diff(current->measure);
         atomic_fetch_add(&current->cputime, load);
         atomic_fetch_add(&current->load0, load);
@@ -226,8 +282,33 @@ void thread_on_start() {
     core_specific_data_t *csd = _get_current_csd();
     moe_thread_t *current = csd->current;
     current->last_cpuid = csd->cpuid;
+    current->weak_affinity = AFFINITY(csd->cpuid);
     current->measure = moe_create_measure(0);
     sch_retire(atomic_exchange(&csd->retired, NULL));
+}
+
+
+void thread_lazy_fpu_restore() {
+    core_specific_data_t *csd = _get_current_csd();
+    moe_thread_t *current = csd->current;
+    moe_fiber_t *fiber = current->current_fiber;
+    if (fiber) {
+        if (fiber->fpu_used) {
+            cpu_fload(&fiber->context);
+        } else {
+            cpu_finit();
+            fiber->fpu_used = 1;
+        }
+        current->fpu_used = 1;
+    } else {
+        if (current->fpu_used) {
+            cpu_fload(&current->context);
+        } else {
+            cpu_finit();
+            current->fpu_used = 1;
+        }
+        current->fpu_dirty = 1;
+    }
 }
 
 
@@ -425,6 +506,10 @@ void moe_yield() {
         next = current->parent_thread->primary_fiber;
     }
     if (current != next) {
+        if (current->fpu_dirty) {
+            cpu_fsave(&current->context);
+            current->fpu_dirty = 0;
+        }
         current->running = 0;
         next->running = 1;
         current_thread->current_fiber = next;
@@ -719,19 +804,22 @@ int cmd_ps(int argc, char **argv) {
     for (int i = 0; i < MAX_THREADS; i++) {
         moe_thread_t* p = moe.thread_list[i];
         if (!p) continue;
-        uint64_t cputime = p->cputime;
-        uint64_t time = cputime / 1000000;
-        uint32_t time_ms = (cputime / 10000) % 100;
-        uint32_t time_s = time % 60;
-        uint32_t time_m = (time / 60) % 60;
-        uint32_t time_h = (time / 3600);
-        int usage = p->load / 1000;
-        if (usage > 999) usage = 999;
-        int usage0 = usage % 10, usage1 = usage / 10;
-        printf("%4u %3u %04zx %08x %2u.%u%% %2u:%02u:%02u.%02u %s\n",
-            (int)p->thid, (int)p->pid, p->flags,
-            p->strong_affinity, usage1, usage0, time_h, time_m, time_s, time_ms,
-            p->name);
+        if (thread_retain(p)) {
+            uint64_t cputime = p->cputime;
+            uint64_t time = cputime / 1000000;
+            uint32_t time_ms = (cputime / 10000) % 100;
+            uint32_t time_s = time % 60;
+            uint32_t time_m = (time / 60) % 60;
+            uint32_t time_h = (time / 3600);
+            int usage = p->load / 1000;
+            if (usage > 999) usage = 999;
+            int usage0 = usage % 10, usage1 = usage / 10;
+            printf("%4u %3u %04zx %08x %2u.%u%% %2u:%02u:%02u.%02u %s\n",
+                (int)p->thid, (int)p->pid, p->flags,
+                p->strong_affinity, usage1, usage0, time_h, time_m, time_s, time_ms,
+                p->name);
+            thread_release(p);
+        }
     }
     return 0;
 }

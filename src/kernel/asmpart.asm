@@ -43,7 +43,7 @@
 [BITS 64]
 [section .text]
     extern default_int_handler
-    extern _int07_main
+    extern thread_lazy_fpu_restore
     extern _irq_main
     extern smp_init_ap
     extern ipi_sche_main
@@ -187,6 +187,7 @@ _syscall_entry64:
     push rsp
     mov rbp, rsp
     and rsp, byte 0xF0
+    push byte 0
 
     movsx ecx, al
     and ecx, eax
@@ -210,6 +211,7 @@ _syscall_entry64:
 %define CTX_R14 0x40
 %define CTX_R15 0x48
 %define CTX_TSS_RSP0    0x50
+%define CTX_FPU_BASE    0x80
     global _do_switch_context
 _do_switch_context:
     call io_set_lazy_fpu_restore
@@ -249,6 +251,46 @@ _do_switch_context:
     xor r11d, r11d
 
     ret
+
+
+; void cpu_finit(void);
+    global cpu_finit
+cpu_finit:
+    clts
+    fninit
+    xorps xmm0, xmm0
+    xorps xmm1, xmm1
+    xorps xmm2, xmm2
+    xorps xmm3, xmm3
+    xorps xmm4, xmm4
+    xorps xmm5, xmm5
+    xorps xmm6, xmm6
+    xorps xmm7, xmm7
+    xorps xmm8, xmm8
+    xorps xmm9, xmm9
+    xorps xmm10, xmm10
+    xorps xmm11, xmm11
+    xorps xmm12, xmm12
+    xorps xmm13, xmm13
+    xorps xmm14, xmm14
+    xorps xmm15, xmm15
+    ret
+
+
+; void cpu_fsave(cpu_context_t *ctx);
+    global cpu_fsave
+cpu_fsave:
+    fxsave64 [rcx + CTX_FPU_BASE]
+    ret
+
+
+; void cpu_fload(cpu_context_t *ctx);
+    global cpu_fload
+cpu_fload:
+    clts
+    fxrstor64 [rcx + CTX_FPU_BASE]
+    ret
+
 
 
 ; void io_setup_new_thread(cpu_context_t *context, uintptr_t* new_sp, moe_thread_start start, void *args);
@@ -395,30 +437,25 @@ _iretq:
 
     global _int07
 _int07: ; #NM
-    push BYTE 0
-    push BYTE 0x07
-    jmp short _intXX
-    ; push rax
-    ; push rcx
-    ; push rdx
-    ; push r8
-    ; push r9
-    ; push r10
-    ; push r11
-    ; cld
-    ; clts
+    push rax
+    push rcx
+    push rdx
+    push r8
+    push r9
+    push r10
+    push r11
+    cld
 
-    ; mov ecx, 512
-    ; call _int07_main
+    call thread_lazy_fpu_restore
  
-    ; pop r11
-    ; pop r10
-    ; pop r9
-    ; pop r8
-    ; pop rdx
-    ; pop rcx
-    ; pop rax
-    ; iretq
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdx
+    pop rcx
+    pop rax
+    iretq
 
 
     global _irq0, _irq1, _irq2, _irq3, _irq4, _irq5, _irq6, _irq7
@@ -852,7 +889,12 @@ _user_mode_exp_payload:
     inc rsi
     jmp .loop
 .end:
-    mov eax, 0x114514
+
+    mov rax, 0x123456789abcdef
+    movq xmm0, rax
+    movq xmm1, rsp
+
+    mov eax, 1
     xor edx, edx
     syscall
     int3
@@ -866,14 +908,14 @@ _end_user_mode_exp_payload:
 align 16
 __GDT:
     dw 0, 0, 0, 0                       ; 00 NULL
-    dw 0xFFFF, 0x0000, 0x9A00, 0x00CF   ; 08 32bit DPL0 CODE FLAT HISTORICAL
-    dw 0xFFFF, 0x0000, 0x9A00, 0x00AF   ; 10 64bit DPL0 CODE FLAT
-    dw 0xFFFF, 0x0000, 0x9200, 0x00CF   ; 18 32bit DPL0 DATA FLAT MANDATORY
-    dw 0xFFFF, 0x0000, 0xFA00, 0x00CF   ; 23 32bit DPL3 CODE FLAT MANDATORY
-    dw 0xFFFF, 0x0000, 0xF200, 0x00CF   ; 2B 32bit DPL3 DATA FLAT MANDATORY
-    dw 0xFFFF, 0x0000, 0xFA00, 0x00AF   ; 33 64bit DPL3 CODE FLAT
-    dw 0xFFFF, 0x0000, 0xF200, 0x00CF   ; 3B 32bit DPL3 DATA FLAT MANDATORY
+    dw 0xFFFF, 0x0000, 0x9A00, 0x00CF   ; 08 DPL0 CODE32 FLAT HISTORICAL
+    dw 0xFFFF, 0x0000, 0x9A00, 0x00AF   ; 10 DPL0 CODE64 FLAT
+    dw 0xFFFF, 0x0000, 0x9200, 0x00CF   ; 18 DPL0 DATA FLAT MANDATORY
+    dw 0xFFFF, 0x0000, 0xFA00, 0x00CF   ; 23 DPL3 CODE32 FLAT MANDATORY
+    dw 0xFFFF, 0x0000, 0xF200, 0x00CF   ; 2B DPL3 DATA FLAT MANDATORY
+    dw 0xFFFF, 0x0000, 0xFA00, 0x00AF   ; 33 DPL3 CODE64 FLAT
+    dw 0xFFFF, 0x0000, 0xF200, 0x00CF   ; 3B DPL3 DATA FLAT MANDATORY
 __end_common_GDT:
-    dw 0, 0, 0, 0, 0, 0, 0, 0           ; 40:48 64bit TSS
+    dw 0, 0, 0, 0, 0, 0, 0, 0           ; 40:48 TSS64
 
 __end_GDT:
