@@ -841,10 +841,14 @@ static int port_initialize(xhci_t *self, int port_id) {
 
         } else {
             if (self->port2slot[port_id]) {
+                int slot_id = self->port2slot[port_id];
+                usb_host_interface_t *hci = self->usb_devices[slot_id].hci;
+                if (hci && hci->dealloc) {
+                    hci->dealloc(hci);
+                }
                 atomic_store(portsc, (port_status & PORTSC_MAGIC_WORD) | USB_PORTSC_CSC);
                 xhci_trb_t cmd = trb_create(TRB_DISABLE_SLOT_COMMAND);
                 xhci_trb_t result;
-                int slot_id = self->port2slot[port_id];
                 cmd.enable_slot_command.slot_id = slot_id;
                 int status = execute_command(self, self->sem_urb, &cmd, &result, timeout);
                 self->port2slot[port_id] = 0;

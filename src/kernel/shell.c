@@ -56,9 +56,10 @@ int cmd_shutdown(int argc, char **argv) {
 }
 
 int cmd_help(int argc, char **argv);
-int cmd_cpuid(int argc, char **argv);
-int cmd_ps(int argc, char **argv);
+int cmd_cpuid(int argc, char **argv) __attribute__((weak));
+int cmd_ps(int argc, char **argv) __attribute__((weak));
 int cmd_exp(int argc, char **argv);
+int cmd_lsusb(int argc, char **argv) __attribute__((weak));
 
 command_list_t commands[] = {
     { "help", cmd_help, "Display this help" },
@@ -67,14 +68,15 @@ command_list_t commands[] = {
     { "reboot", cmd_reboot, "Restart computer" },
     { "exit", cmd_shutdown, "Exit" },
     { "cpuid", cmd_cpuid, "Show cpuid information" },
+    { "lsusb", cmd_lsusb, "Show usb informations" },
     { "ps", cmd_ps, NULL },
-    { "exp", cmd_exp, NULL},
+    { "exp", cmd_exp, NULL },
     { 0 },
 };
 
 int cmd_help(int argc, char **argv) {
     for (int i = 0; commands[i].name; i++) {
-        if (commands[i].tips) {
+        if (commands[i].tips && commands[i].proc) {
             printf("%s\t%s\n", commands[i].name, commands[i].tips);
         }
     }
@@ -306,7 +308,7 @@ void shell_start() {
                 break;
             }
         }
-        if (cmd_to_run) {
+        if (cmd_to_run && cmd_to_run->proc) {
             cmd_to_run->proc(argc, argv);
         } else {
             printf("%s\n", get_string(string_bad_command));

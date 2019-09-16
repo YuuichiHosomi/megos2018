@@ -155,11 +155,16 @@ typedef int (*UHI_CONTROL)
 typedef int (*UHI_DATA_TRANSFER)
 (usb_host_interface_t *self, int dci, uintptr_t buffer, uint16_t length, int64_t timeout);
 
+typedef void (*UHI_DEALLOC)
+(usb_host_interface_t *self);
+
 // USB virtual host controller interface
 typedef struct usb_host_interface_t {
     void *context;
+    void *device_context;
     moe_semaphore_t *semaphore;
     int slot_id;
+    UHI_DEALLOC dealloc;
     UHI_CONFIGURE_EP configure_ep;
     UHI_RESET_EP reset_ep;
     UHI_GET_MAX_PACKET_SIZE get_max_packet_size;

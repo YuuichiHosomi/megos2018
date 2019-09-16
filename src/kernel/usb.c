@@ -10,15 +10,25 @@
 #include "hid.h"
 
 
+#define MAX_IFS 16
 #define MAX_USB_BUFFER 2048
 typedef struct {
     uint8_t buffer[MAX_USB_BUFFER];
+    uint8_t strings[MAX_USB_BUFFER];
 
     usb_host_interface_t *hci;
     MOE_PHYSICAL_ADDRESS base_buffer;
 
+    _Atomic int isAlive;
     uint32_t dev_class;
     uint16_t vid, pid, usb_ver;
+    uint16_t string_index, iManufacture, iProduct, iSerialNumber;
+    wchar_t *sManufacture, *sProduct, *sSerialNumber;
+
+    struct {
+        uint32_t if_class;
+        wchar_t *sInterface;
+    } ifs[MAX_IFS];
 
     usb_device_descriptor_t dev_desc;
     usb_configuration_descriptor_t current_config;
@@ -40,7 +50,8 @@ typedef struct {
 
 #define USB_TIMEOUT 3000000
 #define ERROR_TIMEOUT -1
-usb_device **usb_devices;
+#define MAX_USB_DEVICES 127
+usb_device *usb_devices[MAX_USB_DEVICES];
 
 
 uint32_t usb_interface_class(usb_interface_descriptor_t *desc) {
@@ -111,7 +122,7 @@ void usb_hid_thread(void *args) {
             moe_hid_kbd_state_t state;
             DEBUG_PRINT("\n[Installed USB Keyboard SLOT %d IF %d DCI %d]\n", self->usb->hci->slot_id, self->hid_if, self->hid_dci);
 
-            for (;;) {
+            while (self->usb->isAlive) {
                 status = usb_data_transfer(self->usb, self->hid_dci, self->packet_size, MOE_FOREVER);
                 if (status >= 0) {
                     _Atomic uint64_t *p = buffer;
@@ -135,7 +146,7 @@ void usb_hid_thread(void *args) {
             hid_raw_mos_report_t report;
             DEBUG_PRINT("\n[Installed USB Mouse SLOT %d IF %d DCI %d]\n", self->usb->hci->slot_id, self->hid_if, self->hid_dci);
 
-            for (;;) {
+            while (self->usb->isAlive) {
                 status = usb_data_transfer(self->usb, self->hid_dci, self->packet_size, MOE_FOREVER);
                 if (status >= 0) {
                     uint8_t *p = buffer;
@@ -154,7 +165,7 @@ void usb_hid_thread(void *args) {
         {
             DEBUG_PRINT("\n[USB HID SLOT %d IF %d EP %d CLASS %06x]", self->usb->hci->slot_id, self->hid_if, self->hid_dci, self->if_class);
 
-            for (;;) {
+            while (self->usb->isAlive) {
                 status = usb_data_transfer(self->usb, self->hid_dci, self->packet_size, MOE_FOREVER);
                 if (status >= 0) {
                     uint8_t *p = buffer;
@@ -213,14 +224,42 @@ hid_device *configure_hid(usb_device *self, usb_interface_descriptor_t *hid_if, 
     return hid;
 }
 
+static int read_string(usb_device *self, int index) {
+    int status;
+    if (index == 0) return 0;
+    status = usb_get_descriptor(self, USB_STRING_DESCRIPTOR, index, 8);
+    if (status < 0) return status;
+    usb_string_descriptor_t *desc = (usb_string_descriptor_t *)&self->buffer;
+    if (desc->bLength > 8) {
+        status = usb_get_descriptor(self, USB_STRING_DESCRIPTOR, index, desc->bLength);
+        if (status < 0) return status;
+    }
+    int bLength = desc->bLength;
+    int string_index = self->string_index;
+    memcpy(self->strings + string_index, desc, bLength);
+    self->string_index = string_index + bLength + 2;
+    return string_index + 2;
+}
+
+
+void uhci_dealloc(usb_host_interface_t *hci) {
+    usb_device *self = hci->device_context;
+    self->isAlive = false;
+    usb_devices[self->hci->slot_id] = NULL;
+    // TODO:
+}
+
 
 int usb_new_device(usb_host_interface_t *hci) {
     uintptr_t ptr = moe_alloc_physical_page(sizeof(usb_device));
     usb_device *self = MOE_PA2VA(ptr);
     memset(self, 0, sizeof(usb_device));
+    self->isAlive = true;
     self->base_buffer = ptr;
     self->hci = hci;
-    // usb_devices[slot_id] = device;
+    self->hci->device_context = self;
+    self->hci->dealloc = &uhci_dealloc;
+    usb_devices[self->hci->slot_id] = self;
 
     int status;
 
@@ -241,6 +280,18 @@ int usb_new_device(usb_host_interface_t *hci) {
     self->vid = (dd->idVendor[1] << 8) | (dd->idVendor[0]);
     self->pid = (dd->idProduct[1] << 8) | (dd->idProduct[0]);
     self->dev_class = (dd->bDeviceClass << 16) | (dd->bDeviceSubClass << 8) | dd->bDeviceProtocol;
+    if (self->dev_desc.iManufacturer) {
+        self->iManufacture = read_string(self, self->dev_desc.iManufacturer);
+        self->sManufacture = (wchar_t *)(self->strings + self->iManufacture);
+    }
+    if (self->dev_desc.iProduct) {
+        self->iProduct = read_string(self, self->dev_desc.iProduct);
+        self->sProduct = (wchar_t *)(self->strings + self->iProduct);
+    }
+    if (self->dev_desc.iSerialNumber) {
+        self->iSerialNumber = read_string(self, self->dev_desc.iSerialNumber);
+        self->sSerialNumber = (wchar_t *)(self->strings + self->iSerialNumber);
+    }
 #ifdef DEBUG
     int usb_ver = (dd->bcdUSB[1] << 8) | (dd->bcdUSB[0]);
     DEBUG_PRINT("\n#USB_DEVICE %d USB %d.%d LEN %d SZ %d VID %04x PID %04x CLASS %06x CONF %d\n", self->hci->slot_id, usb_ver >> 8, (usb_ver >> 4) & 15, dd->bLength, dd->bMaxPacketSize0, self->vid, self->pid, self->dev_class, dd->bNumConfigurations);
@@ -276,7 +327,15 @@ int usb_new_device(usb_host_interface_t *hci) {
                     break;
 
                 case USB_INTERFACE_DESCRIPTOR:
+                {
                     c_if = (usb_interface_descriptor_t *)(p + index);
+                    int if_index = c_if->bInterfaceNumber;
+                    self->ifs[if_index].if_class = usb_interface_class(c_if);
+                    int sindex = read_string(self, c_if->iInterface);
+                    if (sindex > 0) {
+                        self->ifs[if_index].sInterface = (wchar_t *)(self->strings + sindex);
+                    }
+                }
                     if (self->dev_class == 0) {
                         DEBUG_PRINT("#%d IF %d ALT %d #EP %d CLASS %06x\n", self->hci->slot_id, c_if->bInterfaceNumber, c_if->bAlternateSetting, c_if->bNumEndpoints, usb_interface_class(c_if));
                     }
@@ -329,5 +388,24 @@ int usb_new_device(usb_host_interface_t *hci) {
         }
     }
 
+    return 0;
+}
+
+
+int cmd_lsusb(int argc, char **argv) {
+    for (size_t i = 0; i < MAX_USB_DEVICES; i++) {
+        usb_device *device = usb_devices[i];
+        if (!device) continue;
+        usb_configuration_descriptor_t *config = &device->current_config;
+        printf("Device %d ID %04x:%04x Class %06x IF#%d Attr %02x %dmA %S\n",
+            i, device->vid, device->pid, device->dev_class,
+            config->bNumInterface, config->bmAttributes, config->bMaxPower * 2, device->sProduct
+        );
+        for (int j = 0; j < device->current_config.bNumInterface; j++) {
+            uint32_t if_class = device->ifs[j].if_class;
+            wchar_t *if_string = device->ifs[j].sInterface;
+            printf(" IF#%d Class %06x %S\n", j, if_class, if_string);
+        }
+    }
     return 0;
 }
