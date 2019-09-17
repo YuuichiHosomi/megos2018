@@ -81,7 +81,6 @@ void *moe_alloc_object(size_t size, size_t count);
 
 //  Threading Service
 typedef struct moe_thread_t moe_thread_t;
-typedef struct moe_fiber_t moe_fiber_t;
 typedef enum {
     priority_idle = 0,
     priority_low,
@@ -102,14 +101,6 @@ int moe_get_number_of_active_cpus(void);
 int moe_get_pid(void);
 int moe_raise_pid(void);
 int moe_create_process(moe_thread_start start, moe_priority_level_t priority, void *args, const char *name);
-
-moe_fiber_t *moe_create_fiber(moe_thread_start start, void *args, size_t stack_size, const char *name);
-moe_fiber_t *moe_get_primary_fiber(void);
-moe_fiber_t *moe_get_current_fiber(void);
-_Noreturn void moe_exit_fiber(uint32_t exit_code);
-int moe_get_current_fiber_id(void);
-const char *moe_get_current_fiber_name(void);
-void moe_yield(void);
 
 
 typedef _Atomic uintptr_t moe_spinlock_t;

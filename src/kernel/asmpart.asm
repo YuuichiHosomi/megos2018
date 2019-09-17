@@ -48,7 +48,6 @@
     extern smp_init_ap
     extern ipi_sche_main
     extern thread_on_start
-    extern fiber_on_start
     extern moe_exit_thread
     extern arch_syscall_entry
 
@@ -312,25 +311,6 @@ _new_thread:
     call rax
     mov rcx, rax
     call moe_exit_thread
-    ud2
-
-; void io_setup_new_fiber(cpu_context_t *context, uintptr_t* new_sp, moe_thread_start start, void *args);
-    global io_setup_new_fiber
-io_setup_new_fiber:
-    lea rax, [rel _new_fiber]
-    sub rdx, BYTE 0x18
-    mov [rdx], rax
-    mov [rdx + 0x08], r8
-    mov [rdx + 0x10], r9
-    mov [rcx + CTX_SP], rdx
-    ret
-
-_new_fiber:
-    call fiber_on_start
-    sti
-    pop rax
-    pop rcx
-    call rax
     ud2
 
 

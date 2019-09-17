@@ -203,7 +203,7 @@ void default_int_handler(x64_context_t* regs) {
     moe_spinlock_acquire(&lock);
 
     snprintf(bsod_buff, BSOD_BUFF_SIZE,
-        "#### EXCEPTION on PID %d thread %d: %s (fiber:%d %s)\n"
+        "#### EXCEPTION on PID %d thread %d: %s\n"
         "ERR %02llx-%04llx-%016llx IP %02llx:%012llx F %08llx\n"
         "AX %016llx BX %016llx CX %016llx DX %016llx\n"
         "SP %016llx BP %016llx SI %016llx DI %016llx\n"
@@ -212,7 +212,6 @@ void default_int_handler(x64_context_t* regs) {
 
         , moe_get_pid()
         , moe_get_current_thread_id(), moe_get_current_thread_name()
-        , moe_get_current_fiber_id(), moe_get_current_fiber_name()
         , regs->intnum, regs->err, regs->intnum == 0x0E ? regs->cr2 : 0, regs->cs, regs->rip, regs->rflags
         , regs->rax, regs->rbx, regs->rcx, regs->rdx, regs->rsp, regs->rbp, regs->rsi, regs->rdi
         , regs->r8, regs->r9, regs->r10, regs->r11, regs->r12, regs->r13, regs->r14, regs->r15

@@ -183,8 +183,8 @@ int read_cmdline(char* buffer, size_t max_len) {
 /*********************************************************************/
 
 
-_Noreturn void fiber_test_1(void *args) {
-    int k = moe_get_current_fiber_id();
+_Noreturn void thread_test_1(void *args) {
+    int k = moe_get_current_thread_id();
     int padding = 2;
     int w = 10;
     moe_rect_t rect = {{k * w, padding}, {w - padding, w - padding}};
@@ -192,23 +192,19 @@ _Noreturn void fiber_test_1(void *args) {
     for (;;) {
         moe_fill_rect(NULL, &rect, color);
         color += k;
-        moe_yield();
+        moe_usleep(10000);
     }
 }
 
-_Noreturn void fiber_test_thread(void *args) {
+void fiber_test_thread(void *args) {
     for (int i = 0; i < 20; i++) {
         char name[32];
         snprintf(name, 32, "test_#%d", 1 + i);
-        moe_create_fiber(&fiber_test_1, NULL, 0, name);
+        moe_create_thread(&thread_test_1, 0, NULL, name);
         putchar('.');
-        moe_yield();
         moe_usleep(10000);
     }
-    for (;;) {
-        moe_usleep(10000);
-        moe_yield();
-    }
+    moe_usleep(MOE_FOREVER);
 }
 
 
@@ -225,7 +221,7 @@ void shell_start() {
 
     cmd_ver(0, NULL);
 
-    moe_create_thread(&fiber_test_thread, 0, NULL, "fiber_test");
+    // moe_create_thread(&fiber_test_thread, 0, NULL, "fiber_test");
     moe_usleep(1000000);
 
     // const char *autoexec = "ps\n";

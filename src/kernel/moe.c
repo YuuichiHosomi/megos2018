@@ -31,8 +31,6 @@ typedef struct moe_thread_t {
     int exit_code;
     _Atomic int ref_cnt;
 
-    moe_fiber_t *current_fiber;
-    moe_fiber_t *primary_fiber, *last_fiber;
     union {
         uintptr_t flags;
         struct {
@@ -56,28 +54,6 @@ typedef struct moe_thread_t {
     uint8_t quantum;
 
 } moe_thread_t;
-
-
-typedef struct moe_fiber_t {
-    cpu_context_t context;
-    char name[THREAD_NAME_SIZE];
-
-    moe_thread_t *parent_thread;
-    moe_fiber_t *next_sibling, *prev_sibling;
-    union {
-        uintptr_t flags;
-        struct {
-            unsigned :4;
-            unsigned fpu_dirty:1;
-            unsigned fpu_used:1;
-            unsigned zombie:1;
-            unsigned running:1;
-        };
-    };
-    context_id fiber_id;
-    int exit_code;
-
-} moe_fiber_t;
 
 
 typedef enum {
@@ -117,7 +93,6 @@ extern void cpu_finit(void);
 extern void cpu_fsave(cpu_context_t *ctx);
 extern void cpu_fload(cpu_context_t *ctx);
 extern void io_setup_new_thread(cpu_context_t *context, uintptr_t* new_sp, moe_thread_start start, void *args);
-extern void io_setup_new_fiber(cpu_context_t *context, uintptr_t* new_sp, moe_thread_start start, void *args);
 extern int smp_get_current_cpuid();
 
 
@@ -247,11 +222,7 @@ static moe_thread_t *sch_next() {
 static void _next_thread(core_specific_data_t *csd, moe_thread_t *current) {
     moe_thread_t *next = sch_next();
     if (current != next) {
-        moe_fiber_t *fiber = current->current_fiber;
-        if (fiber && fiber->fpu_dirty) {
-            cpu_fsave(&fiber->context);
-            fiber->fpu_dirty = 0;
-        } else if (current->fpu_dirty) {
+        if (current->fpu_dirty) {
             cpu_fsave(&current->context);
             current->fpu_dirty = 0;
         }
@@ -291,24 +262,13 @@ void thread_on_start() {
 void thread_lazy_fpu_restore() {
     core_specific_data_t *csd = _get_current_csd();
     moe_thread_t *current = csd->current;
-    moe_fiber_t *fiber = current->current_fiber;
-    if (fiber) {
-        if (fiber->fpu_used) {
-            cpu_fload(&fiber->context);
-        } else {
-            cpu_finit();
-            fiber->fpu_used = 1;
-        }
-        current->fpu_used = 1;
+    if (current->fpu_used) {
+        cpu_fload(&current->context);
     } else {
-        if (current->fpu_used) {
-            cpu_fload(&current->context);
-        } else {
-            cpu_finit();
-            current->fpu_used = 1;
-        }
-        current->fpu_dirty = 1;
+        cpu_finit();
+        current->fpu_used = 1;
     }
+    current->fpu_dirty = 1;
 }
 
 
@@ -427,103 +387,6 @@ int moe_usleep(int64_t us) {
         }
         return 0;
     }
-}
-
-
-moe_fiber_t *_create_fiber(moe_thread_start start, void *args, size_t stack_size, const char *name) {
-    moe_thread_t *current_thread = _get_current_thread();
-    moe_fiber_t *new_fiber = moe_alloc_object(sizeof(moe_fiber_t), 1);
-    new_fiber->parent_thread = current_thread;
-    new_fiber->fiber_id = atomic_fetch_add(&moe.next_fibid, 1);
-    if (name) {
-        strncpy(&new_fiber->name[0], name, THREAD_NAME_SIZE - 1);
-    }
-    if (start) {
-        stack_size = stack_size ? stack_size : 0x10000;
-        uintptr_t stack_count = stack_size / sizeof(uintptr_t);
-        uintptr_t* stack = moe_alloc_object(stack_size, 1);
-        uintptr_t* sp = stack + stack_count;
-        *--sp = 0;
-        *--sp = 0x00007fffdeadbeef;
-        io_setup_new_fiber(&new_fiber->context, sp, start, args);
-    }
-    return new_fiber;
-}
-
-
-moe_fiber_t *moe_get_primary_fiber() {
-    moe_thread_t *current_thread = _get_current_thread();
-    if (current_thread->primary_fiber == 0) {
-        moe_fiber_t *new_fiber = _create_fiber(NULL, NULL, 0, current_thread->name);
-        current_thread->primary_fiber = new_fiber;
-        current_thread->last_fiber = new_fiber;
-        current_thread->current_fiber = new_fiber;
-    }
-    return current_thread->primary_fiber;
-}
-
-moe_fiber_t *moe_create_fiber(moe_thread_start start, void *args, size_t stack_size, const char *name) {
-    moe_thread_t *current_thread = _get_current_thread();
-    // moe_fiber_t *primary_fiber = 
-    moe_get_primary_fiber();
-    moe_fiber_t *new_fiber =_create_fiber(start, args, stack_size, name);
-
-    moe_fiber_t *last_fiber = current_thread->last_fiber;
-    last_fiber->next_sibling = new_fiber;
-    new_fiber->prev_sibling = last_fiber;
-    current_thread->last_fiber = new_fiber;
-
-    return new_fiber;
-}
-
-void fiber_on_start() {
-    // __asm__ volatile ("int3");
-    // moe_fiber_t *current = moe_get_current_fiber();
-    // current->running = 1;
-}
-
-
-moe_fiber_t *moe_get_current_fiber() {
-    return _get_current_thread()->current_fiber;
-}
-
-int moe_get_current_fiber_id() {
-    moe_fiber_t *current = moe_get_current_fiber();
-    return current ? current->fiber_id : 0;
-}
-
-const char *moe_get_current_fiber_name() {
-    moe_fiber_t *current = moe_get_current_fiber();
-    return current ? current->name : NULL;
-}
-
-void moe_yield() {
-    moe_thread_t *current_thread = _get_current_thread();
-    moe_fiber_t *current = current_thread->current_fiber;
-    if (!current) return;
-    moe_fiber_t *next = current->next_sibling;
-    if (!next) {
-        next = current->parent_thread->primary_fiber;
-    }
-    if (current != next) {
-        if (current->fpu_dirty) {
-            cpu_fsave(&current->context);
-            current->fpu_dirty = 0;
-        }
-        current->running = 0;
-        next->running = 1;
-        current_thread->current_fiber = next;
-        _do_switch_context(&current->context, &next->context);
-    }
-}
-
-_Noreturn void moe_exit_fiber(uint32_t exit_code) {
-    moe_fiber_t *current = moe_get_current_fiber();
-    current->zombie = 1;
-    current->exit_code = exit_code;
-    // TODO: everything
-    moe_yield();
-    for (;;) moe_usleep(MOE_FOREVER);
 }
 
 
