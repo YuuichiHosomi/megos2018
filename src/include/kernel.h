@@ -38,6 +38,7 @@ typedef struct {
     _Atomic uint32_t static_start;
     uint32_t boottime[4];
     _Atomic uint32_t gates_memory_bitmap[MAX_GATES_INDEX];
+    uint64_t cmdline;
 } moe_bootinfo_t;
 
 

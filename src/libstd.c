@@ -72,6 +72,13 @@ int strncmp(const char *s1, const char *s2, size_t n) {
 }
 
 
+size_t wcslen(const wchar_t *s) {
+    size_t count = 0;
+    for (; s[count]; count++) {}
+    return count;
+}
+
+
 /*********************************************************************/
 
 

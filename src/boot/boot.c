@@ -3,6 +3,7 @@
 // License: MIT
 
 #include "boot.h"
+#include "efish.h"
 
 #define	INVALID_UNICHAR	0xFFFE
 #define	ZWNBSP	0xFEFF
@@ -18,7 +19,7 @@ CONST EFI_GUID EfiSimpleFileSystemProtocolGuid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL
 CONST EFI_GUID EfiGraphicsOutputProtocolGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 CONST EFI_GUID efi_acpi_20_table_guid = EFI_ACPI_20_TABLE_GUID;
 CONST EFI_GUID smbios3_table_guid = SMBIOS3_TABLE_GUID;
-
+CONST EFI_GUID EfiShellParametersProtocolGuid = EFI_SHELL_PARAMETERS_PROTOCOL_GUID;
 
 int is_valid_arch(void);
 
@@ -63,6 +64,13 @@ static void free(void* p) {
         gBS->FreePool(p);
     }
 }
+
+size_t wcslen(const wchar_t *s) {
+    size_t count = 0;
+    for (; s[count]; count++) {}
+    return count;
+}
+
 
 static EFI_STATUS efi_get_file_content(IN EFI_FILE_HANDLE fs, IN CONST CHAR16* path, OUT struct iovec* result) {
     EFI_STATUS status;
@@ -151,6 +159,42 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
         if (!is_valid_arch()) {
             EFI_PRINT("This operating system needs 64bit processor\r\n");
             return EFI_UNSUPPORTED;
+        }
+    }
+
+    // Command line
+    {
+        EFI_SHELL_PARAMETERS_PROTOCOL *params;
+        status = gBS->OpenProtocol(image, &EfiShellParametersProtocolGuid, (void **)&params, image, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+        if (!EFI_ERROR(status)) {
+            size_t size = 0;
+            for (size_t i = 1; i < params->Argc; i++) {
+                size += 1 + wcslen(params->Argv[i]);
+            }
+            size = (size + 1) *  sizeof(wchar_t);
+            wchar_t *buffer = malloc(size);
+            size_t index = 0;
+            for (size_t i = 1; i < params->Argc; i++) {
+                buffer[index++] = ' ';
+                size_t delta = wcslen(params->Argv[i]);
+                memcpy(buffer + index, params->Argv[i], delta * sizeof(wchar_t));
+                index += delta;
+            }
+            buffer[index] = 0;
+            bootinfo.cmdline = (uintptr_t)buffer;
+        } else {
+            EFI_LOADED_IMAGE_PROTOCOL* li;
+            status = gBS->OpenProtocol(image, &EfiLoadedImageProtocolGuid, (void **)&li, image, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+            if (!EFI_ERROR(status)) {
+                size_t option_size = li->LoadOptionsSize;
+                if (option_size) {
+                    size_t size = option_size + sizeof(wchar_t);
+                    wchar_t *buffer = malloc(size);
+                    memcpy(buffer, li->LoadOptions, option_size);
+                    buffer[option_size / sizeof(wchar_t)] = 0;
+                    bootinfo.cmdline = (uintptr_t)buffer;
+                }
+            }
         }
     }
 

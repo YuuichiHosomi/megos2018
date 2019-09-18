@@ -215,7 +215,7 @@ void fiber_test_thread(void *args) {
 #define MAX_ARGV    256
 #define MAX_ARGBUFF 256
 
-void shell_start() {
+void shell_start(const wchar_t *cmdline) {
 
     cin = moe_queue_create(256);
 
@@ -235,6 +235,7 @@ void shell_start() {
     char arg_buff[MAX_ARGBUFF];
 
     printf("\n\n%s\n", get_string(string_banner));
+    printf("CMDLINE: [%S]\n", cmdline);
     for (;;) {
         printf(">");
         read_cmdline(con_buff, MAX_CMDLINE);

@@ -15,7 +15,7 @@ extern void page_init(moe_bootinfo_t *bootinfo);
 extern void xhci_init(void);
 extern void pg_enter_strict_mode(void);
 extern void hid_init(void);
-extern void shell_start(void);
+extern void shell_start(const wchar_t *cmdline);
 
 extern int vsnprintf(char *buffer, size_t limit, const char *format, va_list args);
 extern int putchar(int);
@@ -88,11 +88,13 @@ void *moe_kname(char *buffer, size_t limit) {
 }
 
 void sysinit(void *args) {
+    moe_bootinfo_t *info = args;
 
     hid_init();
     xhci_init();
 
-    shell_start();
+    MOE_PHYSICAL_ADDRESS pa_cmdline = info->cmdline;
+    shell_start(pa_cmdline ? MOE_PA2VA(pa_cmdline) : NULL);
 }
 
 static _Noreturn void start_kernel() {
@@ -105,7 +107,7 @@ static _Noreturn void start_kernel() {
     pg_enter_strict_mode();
     sem_zpf = moe_sem_create(1);
 
-    moe_create_process(&sysinit, 0, NULL, "sysinit");
+    moe_create_process(&sysinit, 0, &bootinfo, "sysinit");
     // moe_create_thread(&sysinit, 0, NULL, "sysinit");
 
     // Idle thread
