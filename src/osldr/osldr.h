@@ -9,17 +9,17 @@
 #include <stdint.h>
 #include "efi.h"
 
-#define	INVALID_UNICHAR	0xFFFE
-#define	ZWNBSP	0xFEFF
+#define INVALID_UNICHAR 0xFFFE
+#define ZWNBSP          0xFEFF
 
 #if defined(__x86_64__)
-#define EFI_SUFFIX	"X64"
+#define EFI_SUFFIX  "X64"
 #elif defined(__i386__)
-#define EFI_SUFFIX	"IA32"
+#define EFI_SUFFIX  "IA32"
 #elif defined(__arm__)
-#define EFI_SUFFIX	"ARM"
+#define EFI_SUFFIX  "ARM"
 #elif defined(__aarch64__)
-#define EFI_SUFFIX	"AA64"
+#define EFI_SUFFIX  "AA64"
 #endif
 
 extern EFI_SYSTEM_TABLE* gST;
@@ -36,14 +36,14 @@ struct iovec {
 };
 
 typedef struct {
-	const char* label;
-	uintptr_t item_id;
+    const char* label;
+    uintptr_t item_id;
 } menuitem;
 
 typedef struct {
-	menuitem* items;
-	char* string_pool;
-	int item_count, max_items, selected_index, pool_size, pool_used;
+    menuitem* items;
+    char* string_pool;
+    int item_count, max_items, selected_index, pool_size, pool_used;
 } menu_buffer;
 
 EFI_STATUS cp932_tbl_init(struct iovec);
@@ -60,3 +60,32 @@ EFI_STATUS menu_add_format(menu_buffer* buffer, uintptr_t menu_id, const char* f
 size_t strwidth(const char* s);
 void print_center(int rows, const char* message);
 void draw_title_bar(const char* title);
+
+//  Minimal Graphics Subsystem
+typedef struct moe_point_t {
+    int x, y;
+} moe_point_t;
+
+typedef struct moe_size_t {
+    int width, height;
+} moe_size_t;
+
+typedef struct moe_rect_t {
+    moe_point_t origin;
+    moe_size_t size;
+} moe_rect_t;
+
+typedef struct moe_bitmap_t {
+    uint32_t *bitmap;
+    int width, height;
+    uint32_t flags, delta, color_key;
+} moe_bitmap_t;
+
+#define MOE_BMP_ALPHA           0x0001
+#define MOE_BMP_ROTATE          0x0002
+#define MOE_BMP_IGNORE_ROTATE   0x10000
+
+void moe_bitmap_init(moe_bitmap_t *self, uint32_t *bitmap, int width, int height, int delta, int flags);
+// moe_bitmap_t *moe_create_bitmap(moe_size_t *size, uint32_t flags, uint32_t color);
+void moe_blt(moe_bitmap_t *dest, moe_bitmap_t *src, moe_point_t *origin, moe_rect_t *rect, uint32_t options);
+void moe_fill_rect(moe_bitmap_t *dest, moe_rect_t *rect, uint32_t color);

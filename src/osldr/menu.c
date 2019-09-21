@@ -124,31 +124,29 @@ void print_center(int rows, const char* message) {
     UINTN len = strwidth(message);
     UINTN con_cols, con_rows;
     cout->QueryMode(cout, cout->Mode->Mode, &con_cols, &con_rows);
-    if(rows < 0) { rows += con_rows; }
-    cout->SetCursorPosition(cout, (con_cols-len)/2, rows);
+    if (rows < 0) { rows += con_rows; }
+    cout->SetCursorPosition(cout, (con_cols - len) / 2, rows);
     printf("%s", message);
 }
 
 
 void draw_title_bar(const char* title) {
-    uint32_t prev_color = cout->Mode->Attribute;
-    const uint32_t title_color = 0x30;
-    UINTN con_cols, con_rows;
-    cout->QueryMode(cout, cout->Mode->Mode, &con_cols, &con_rows);
-    cout->SetAttribute(cout, title_color);
-    cout->SetCursorPosition(cout, 0, 0);
-    for(int i=0; i<con_cols; i++) {
-        putchar(' ');
+    // UINTN con_cols, con_rows;
+    // cout->QueryMode(cout, cout->Mode->Mode, &con_cols, &con_rows);
+    cout->SetCursorPosition(cout, 2, 0);
+    printf("%s\n", title);
+    cout->SetCursorPosition(cout, 2, 1);
+    size_t line_width = strwidth(title);
+    for(size_t i = 0; i < line_width; i++) {
+        putchar('-');
     }
-    print_center(0, title);
-    cout->SetAttribute(cout, prev_color);
 }
 
 
 uintptr_t show_menu(menu_buffer* items, const char* title, const char* caption) {
 
     const int cur_left = 2;
-    const int cur_top = 2;
+    const int cur_top = 3;
     const int cur_left_item = 2;
     const int cur_padding = 1;
 

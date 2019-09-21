@@ -250,6 +250,12 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
         bootinfo.screen.width = gop->Mode->Info->HorizontalResolution;
         bootinfo.screen.height = gop->Mode->Info->VerticalResolution;
         bootinfo.screen.delta = gop->Mode->Info->PixelsPerScanLine;
+        if (bootinfo.screen.width > bootinfo.screen.delta) {
+            // GPD Micro PC Pseudo Landscape Mode
+            int temp = bootinfo.screen.width;
+            bootinfo.screen.width = bootinfo.screen.height;
+            bootinfo.screen.height = temp;
+        }
     }
 
     // EFI TIME

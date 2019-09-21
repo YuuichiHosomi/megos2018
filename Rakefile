@@ -28,7 +28,6 @@ PATH_VAR        = "var/"
 PATH_EFI_BOOT   = "#{PATH_MNT}EFI/BOOT/"
 PATH_EFI_VENDOR = "#{PATH_MNT}EFI/#{VENDOR_NAME}/"
 PATH_INC        = "#{PATH_SRC}include/"
-CP932_BIN       = "#{PATH_EFI_VENDOR}cp932.bin"
 TARGET_ISO      = "#{PATH_VAR}moe.iso"
 
 case ARCH.to_sym
@@ -73,7 +72,6 @@ INCS  = [FileList["#{PATH_SRC}*.h"], FileList["#{PATH_INC}*.h"]]
 
 CLEAN.include(FileList["#{PATH_BIN}**/*"])
 CLEAN.include(FileList["#{PATH_OBJ}**/*"])
-CLEAN.include(CP932_BIN)
 
 directory PATH_MNT
 directory PATH_OBJ
@@ -131,18 +129,6 @@ end
 desc "Format"
 task :format do
   sh "clang-format -i #{ FileList["#{PATH_SRC}**/*.c"] } #{ FileList["#{PATH_SRC}**/*.h"] }"
-end
-
-
-file CP932_BIN => [ PATH_EFI_VENDOR, "#{PATH_SRC}cp932.txt"] do |t|
-  bin = []
-  File.open(t.prerequisites[1]) do |file|
-    file.each_line do |line|
-      bin << Base64.decode64(line)
-    end
-  end
-  File.binwrite(t.name, bin.join(''))
-  raise unless File.exist?(t.name)
 end
 
 def convert_arch(s)
@@ -338,6 +324,6 @@ namespace :main do
     end
   end
 
-  task :install => [:build, PATH_VAR, PATH_EFI_BOOT, PATH_EFI_VENDOR, PATH_OVMF, CP932_BIN, install_targets].flatten
+  task :install => [:build, PATH_VAR, PATH_EFI_BOOT, PATH_EFI_VENDOR, PATH_OVMF, install_targets].flatten
 
 end

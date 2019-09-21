@@ -20,7 +20,6 @@
 #define EFI_VENDOR_PATH "\\EFI\\MEGOS\\"
 #endif
 CONST CHAR16 *KERNEL_PATH = L"" EFI_VENDOR_PATH "BOOT" EFI_SUFFIX ".EFI";
-CONST CHAR16 *cp932_bin_path = L"" EFI_VENDOR_PATH "CP932.BIN";
 CONST CHAR16 *cp932_fnt_path = L"" EFI_VENDOR_PATH "CP932.FNT";
 CONST CHAR16 *SHELL_PATH = L"\\EFI\\BOOT\\SHELL" EFI_SUFFIX ".EFI";
 
@@ -240,15 +239,6 @@ void efi_console_control(BOOLEAN textMode) {
 }
 
 
-void gop_cls(EFI_GRAPHICS_OUTPUT_PROTOCOL *gop) {
-    if (gop){
-        EFI_GRAPHICS_OUTPUT_BLT_PIXEL color = { 0, 0, 0, 0 };
-        gop->Blt(gop, &color, EfiBltVideoFill, 0, 0, 0, 0, gop->Mode->Info->HorizontalResolution, gop->Mode->Info->VerticalResolution, 0);
-    } else {
-        cout->ClearScreen(cout);
-    }
-}
-
 void change_resolution_menu() {
 
     menu_buffer *items = init_menu();
@@ -402,8 +392,10 @@ void option_menu() {
             menu_add(items, get_string(rsrc_display_settings), menu_item_chgres);
             menu_add_separator(items);
         }
-        menu_add(items, get_string(rsrc_other_devices), menu_item_device);
-        menu_add(items, get_string(rsrc_system_info), menu_item_sysinfo);
+        // menu_add(items, get_string(rsrc_peaceful_mode), 0);
+        // menu_add_separator(items);
+        // menu_add(items, get_string(rsrc_other_devices), menu_item_device);
+        // menu_add(items, get_string(rsrc_system_info), menu_item_sysinfo);
         menu_add(items, get_string(rsrc_shell), menu_item_shell);
         menu_add_separator(items);
         {
@@ -560,8 +552,8 @@ void efi_blt_bmp(uint8_t *bmp, int offset_x, int offset_y) {
     const uint8_t *msdib = bmp + *((uint32_t *)(bmp + 10));
 
     UINTN blt_delta = bmp_w * sizeof(EFI_GRAPHICS_OUTPUT_BLT_PIXEL);
-    EFI_GRAPHICS_OUTPUT_BLT_PIXEL *blt_buffer = malloc(blt_delta * bmp_h);
-    uint32_t *q = (uint32_t *)blt_buffer;
+    uint32_t *blt_buffer = malloc(blt_delta * bmp_h);
+    uint32_t *q = blt_buffer;
 
     switch (bmp_bpp) {
         case 24:
@@ -576,7 +568,10 @@ void efi_blt_bmp(uint8_t *bmp, int offset_x, int offset_y) {
             break;
     }
 
-    gop->Blt(gop, blt_buffer, EfiBltBufferToVideo, 0, 0, offset_x, offset_y, bmp_w, bmp_h, blt_delta);
+    moe_bitmap_t bitmap;
+    moe_bitmap_init(&bitmap, blt_buffer, bmp_w, bmp_h, bmp_w, MOE_BMP_IGNORE_ROTATE);
+    moe_point_t origin = {offset_x, offset_y};
+    moe_blt(NULL, &bitmap, &origin, NULL, 0);
 
     free(blt_buffer);
 }
@@ -623,14 +618,6 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE _image, IN EFI_SYSTEM_TABLE *st) {
     init_gop(image);
     efi_console_control(!gop);
     if (gop) {
-
-        struct iovec cp932_bin_vec;
-        status = efi_get_file_content(sysdrv, cp932_bin_path, &cp932_bin_vec);
-        if (EFI_ERROR(status)) {
-            printf("ERROR: can't read %S (%zx)\n", cp932_bin_path, status);
-            goto cp932_exit;
-        }
-        cp932_tbl_init(cp932_bin_vec);
 
         struct iovec cp932_fnt_vec;
         status = efi_get_file_content(sysdrv, cp932_fnt_path, &cp932_fnt_vec);
