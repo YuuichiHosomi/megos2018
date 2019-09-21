@@ -13,7 +13,8 @@ typedef void * SHELL_FILE_HANDLE;
     { 0x6302d008, 0x7f9b, 0x4f30, { 0x87, 0xac, 0x60, 0xc9, 0xfe, 0xf5, 0xda, 0x4e }}
 
 typedef struct _EFI_SHELL_PROTOCOL {
-    // TODO:
+    // TODO: everything
+    int _fixme;
 } EFI_SHELL_PROTOCOL;
 
 

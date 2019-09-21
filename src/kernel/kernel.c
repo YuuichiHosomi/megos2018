@@ -9,6 +9,7 @@
 
 extern void acpi_init(void *);
 extern void arch_init(moe_bootinfo_t* info);
+extern void arch_delayed_init(void);
 extern void gs_init(moe_bootinfo_t *bootinfo);
 extern void mm_init(moe_bootinfo_t *bootinfo);
 extern void page_init(moe_bootinfo_t *bootinfo);
@@ -92,6 +93,7 @@ void sysinit(void *args) {
 
     hid_init();
     xhci_init();
+    arch_delayed_init();
 
     MOE_PHYSICAL_ADDRESS pa_cmdline = info->cmdline;
     shell_start(pa_cmdline ? MOE_PA2VA(pa_cmdline) : NULL);

@@ -294,15 +294,13 @@ typedef struct {
 } xhci_opr_t;
 
 typedef struct {
-    _Atomic uint32_t iman, imod, erstsz;
-    uint32_t _rsrv;
-    _Atomic uint64_t erstba, erdp;
-} xhci_rts_irs;
-
-typedef struct {
     _Atomic uint32_t mfindex;
     uint32_t _rsrc1[7];
-    xhci_rts_irs irs[1];
+    struct {
+        _Atomic uint32_t iman, imod, erstsz;
+        uint32_t _rsrv;
+        _Atomic uint64_t erstba, erdp;
+    } irs[1];
 } xhci_rts_t;
 
 /*********************************************************************/

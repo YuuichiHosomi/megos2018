@@ -1,6 +1,7 @@
-// Architecture Specific
+// Architecture Specific (GDT, IDT, APIC, HPET, etc)
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
+
 #include <stdatomic.h>
 #include "moe.h"
 #include "kernel.h"
@@ -923,9 +924,11 @@ void arch_init(moe_bootinfo_t* info) {
     apic_init();
     acpi_enable(1);
 
-    lpc_init();
-
     // cpuid_t regs = {0x80000001};
     // io_cpuid(&regs);
     // printf("CPUID %08x %08x %08x %08x\n", regs.eax, regs.ecx, regs.edx, regs.ebx);
+}
+
+void arch_delayed_init(void) {
+    lpc_init();
 }
