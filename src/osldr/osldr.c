@@ -569,7 +569,11 @@ void efi_blt_bmp(uint8_t *bmp, int offset_x, int offset_y) {
     }
 
     moe_bitmap_t bitmap;
-    moe_bitmap_init(&bitmap, blt_buffer, bmp_w, bmp_h, bmp_w, MOE_BMP_IGNORE_ROTATE);
+    if (bmp_w > bmp_h) {
+        moe_bitmap_init(&bitmap, blt_buffer, bmp_w, bmp_h, bmp_w, 0);
+    } else {
+        moe_bitmap_init(&bitmap, blt_buffer, bmp_w, bmp_h, bmp_w, MOE_BMP_IGNORE_ROTATE);
+    }
     moe_point_t origin = {offset_x, offset_y};
     moe_blt(NULL, &bitmap, &origin, NULL, 0);
 

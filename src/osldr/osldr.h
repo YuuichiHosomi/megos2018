@@ -83,7 +83,7 @@ typedef struct moe_bitmap_t {
 
 #define MOE_BMP_ALPHA           0x0001
 #define MOE_BMP_ROTATE          0x0002
-#define MOE_BMP_IGNORE_ROTATE   0x10000
+#define MOE_BMP_IGNORE_ROTATE   0x1000
 
 void moe_bitmap_init(moe_bitmap_t *self, uint32_t *bitmap, int width, int height, int delta, int flags);
 // moe_bitmap_t *moe_create_bitmap(moe_size_t *size, uint32_t flags, uint32_t color);

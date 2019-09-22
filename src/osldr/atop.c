@@ -132,13 +132,14 @@ void moe_bitmap_init(moe_bitmap_t *self, uint32_t *bitmap, int width, int height
 
 void moe_blt(moe_bitmap_t* dest, moe_bitmap_t* src, moe_point_t *origin, moe_rect_t *rect, uint32_t options) {
 
+    moe_bitmap_t temp_dest;
     if (!dest) dest = &main_screen;
     if (!src) src = &main_screen;
 
     int rotate = 0;
     if (dest->flags & MOE_BMP_ROTATE) {
         if (src->flags & MOE_BMP_IGNORE_ROTATE) {
-            moe_bitmap_t temp_dest = *dest;
+            temp_dest = *dest;
             int temp = temp_dest.width;
             temp_dest.width = temp_dest.height;
             temp_dest.height = temp;
