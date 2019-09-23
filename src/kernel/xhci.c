@@ -885,6 +885,7 @@ _Noreturn void xhci_config_thread(void *args) {
                     hci->slot_id = slot_id;
                     hci->semaphore = moe_sem_create(0);
                     usb_new_device(hci);
+                    moe_usleep(100000);
                 }
             }
         } while (port_id > 0);

@@ -1,6 +1,7 @@
 // Minimal Memory Manager
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
+
 #include <stdatomic.h>
 #include "moe.h"
 #include "kernel.h"
@@ -13,6 +14,34 @@ static _Atomic uint32_t gates_memory_bitmap[MAX_GATES_INDEX];
 
 static uintptr_t ceil_pagesize(size_t n) {
     return (((n) + 0xFFF) & ~0xFFF);
+}
+
+
+// Reference counting object
+moe_shared_t *moe_retain(moe_shared_t *self) {
+    if (!self) return NULL;
+    int delta = 1;
+    int ref_cnt = self->ref_cnt;
+    while (ref_cnt > 0) {
+        if (atomic_compare_exchange_weak(&self->ref_cnt, &ref_cnt, ref_cnt + delta)) {
+            return self;
+        } else {
+            cpu_relax();
+        }
+    }
+    return NULL;
+}
+
+void moe_release(moe_shared_t *self, MOE_DEALLOC dealloc) {
+    if (!self) return;
+    int old_cnt = atomic_fetch_add(&self->ref_cnt, -1);
+    if (old_cnt == 1) {
+        if (dealloc) {
+            dealloc(self->context);
+        }
+    } else if (old_cnt <= 0) {
+        // TODO: double free
+    }
 }
 
 

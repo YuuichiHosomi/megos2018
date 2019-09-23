@@ -31,6 +31,8 @@ enum {
     USB_DEVICE_QUALIFIER,
     USB_HID_CLASS_DESCRIPTOR = 0x21,
     USB_HID_REPORT_DESCRIPTOR,
+    USB_HUB_DESCRIPTOR = 0x29,
+    USB_SS_HUB_DESCRIPTOR = 0x2A,
 
     URB_TRT_NO_DATA = 0,
     URB_TRT_CONTROL_OUT = 2,
@@ -121,6 +123,17 @@ typedef struct {
     uint8_t bNumDescriptors;
     usb_hid_report_descriptor_t reports[1];
 } usb_hid_class_descriptor_t;
+
+
+typedef struct {
+    uint8_t bLength;
+    uint8_t bDescriptorType;
+    uint8_t bNbrPorts;
+    uint8_t wHubCharacteristics[2];
+    uint8_t bPwrOn2PwrGood;
+    uint8_t bHubContrCurrent;
+    uint8_t DeviceRemovable[2];
+} usb_hub_descriptor_t;
 
 
 typedef union {

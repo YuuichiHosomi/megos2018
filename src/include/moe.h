@@ -78,6 +78,22 @@ void *moe_alloc_object(size_t size, size_t count);
 #define PROT_EXEC   0x4
 #define PROT_NONE   0x0
 
+typedef struct {
+    void *context;
+    _Atomic int ref_cnt;
+} moe_shared_t;
+typedef void (*MOE_DEALLOC)(void *self);
+
+static inline moe_shared_t *moe_shared_init(moe_shared_t *self, void *context) {
+    if (self) {
+        self->ref_cnt = 1;
+        self->context = context;
+    }
+    return self;
+}
+moe_shared_t *moe_retain(moe_shared_t *self);
+void moe_release(moe_shared_t *self, MOE_DEALLOC dealloc);
+
 
 //  Threading Service
 typedef struct moe_thread_t moe_thread_t;

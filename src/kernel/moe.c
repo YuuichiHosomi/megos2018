@@ -23,13 +23,13 @@ typedef union {
 } cpu_context_t;
 
 typedef struct moe_thread_t {
+    moe_shared_t shared;
     cpu_context_t context;
     char name[THREAD_NAME_SIZE];
 
     context_id pid;
     context_id thid;
     int exit_code;
-    _Atomic int ref_cnt;
 
     union {
         uintptr_t flags;
@@ -108,34 +108,17 @@ static int thread_index_of(moe_thread_t *thread) {
     return -1;
 }
 
-static int thread_retain(moe_thread_t *thread) {
-    int delta = 1;
-    int ref_cnt = thread->ref_cnt;
-    while (ref_cnt > 0) {
-        if (atomic_compare_exchange_weak(&thread->ref_cnt, &ref_cnt, ref_cnt + delta)) {
-            return ref_cnt + delta;
-        } else {
-            cpu_relax();
-        }
-    }
-    return 0;
+static void thread_dealloc(void *context) {
+    moe_thread_t *self = context;
+    int index = thread_index_of(self);
+    atomic_compare_exchange_strong(&moe.thread_list[index], &self, NULL);
+    // TODO: release buffer
 }
 
-static int thread_release(moe_thread_t *thread) {
+static void thread_release(moe_thread_t *thread) {
     int index = thread_index_of(thread);
-    if (index < 0) return -1;
-    int delta = -1;
-    int old_ref_cnt = atomic_fetch_add(&thread->ref_cnt, delta);
-    if (old_ref_cnt == 1) {
-        if (atomic_compare_exchange_strong(&moe.thread_list[index], &thread, NULL)) {
-            // TODO: remove thread
-            return 0;
-        } else {
-            // TODO: WTF?
-            return -1;
-        }
-    }
-    return 0;
+    if (index < 0) return;
+    moe_release(&thread->shared, &thread_dealloc);
 }
 
 
@@ -301,7 +284,7 @@ int moe_signal_object(_Atomic (moe_thread_t *) *obj) {
 
 static moe_thread_t *_create_thread(moe_thread_start start, moe_priority_level_t priority, void *args, const char *name) {
     moe_thread_t *new_thread = moe_alloc_object(sizeof(moe_thread_t), 1);
-    new_thread->ref_cnt = 1;
+    moe_shared_init(&new_thread->shared, new_thread);
     new_thread->thid = atomic_fetch_add(&moe.next_thid, 1);
     new_thread->pid = _get_current_thread()->pid;
     new_thread->priority = priority;
@@ -667,7 +650,7 @@ int cmd_ps(int argc, char **argv) {
     for (int i = 0; i < MAX_THREADS; i++) {
         moe_thread_t* p = moe.thread_list[i];
         if (!p) continue;
-        if (thread_retain(p)) {
+        if (moe_retain(&p->shared)) {
             uint64_t cputime = p->cputime;
             uint64_t time = cputime / 1000000;
             uint32_t time_ms = (cputime / 10000) % 100;
