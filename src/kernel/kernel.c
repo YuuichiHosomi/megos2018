@@ -51,7 +51,7 @@ _Noreturn void moe_reboot() {
 
 _Noreturn void moe_shutdown_system() {
     acpi_enter_sleep_state(5);
-    moe_usleep(5);
+    moe_usleep(5000000);
     moe_reboot();
 }
 

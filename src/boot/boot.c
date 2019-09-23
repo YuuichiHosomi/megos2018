@@ -21,7 +21,7 @@ CONST EFI_GUID efi_acpi_20_table_guid = EFI_ACPI_20_TABLE_GUID;
 CONST EFI_GUID smbios3_table_guid = SMBIOS3_TABLE_GUID;
 CONST EFI_GUID EfiShellParametersProtocolGuid = EFI_SHELL_PARAMETERS_PROTOCOL_GUID;
 
-int is_valid_arch(void);
+int is_64bit_processor(void);
 
 #define	EFI_PRINT(s)	gST->ConOut->OutputString(st->ConOut, L ## s)
 
@@ -155,12 +155,12 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
     gRT = st->RuntimeServices;
 
     // check processor
-    {
-        if (!is_valid_arch()) {
-            EFI_PRINT("This operating system needs 64bit processor\r\n");
-            return EFI_UNSUPPORTED;
-        }
+#if defined(__i386__)
+    if (!is_64bit_processor()) {
+        EFI_PRINT("This operating system needs 64bit processor\r\n");
+        return EFI_UNSUPPORTED;
     }
+#endif
 
     // Command line
     {

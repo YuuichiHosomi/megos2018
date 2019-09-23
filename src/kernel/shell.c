@@ -234,8 +234,7 @@ void shell_start(const wchar_t *cmdline) {
     char con_buff[MAX_CMDLINE];
     char arg_buff[MAX_ARGBUFF];
 
-    printf("\n\n%s\n", get_string(string_banner));
-    printf("CMDLINE: [%S]\n", cmdline);
+    printf("\n%s\n", get_string(string_banner));
     for (;;) {
         printf(">");
         read_cmdline(con_buff, MAX_CMDLINE);
