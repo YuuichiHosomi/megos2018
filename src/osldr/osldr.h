@@ -48,7 +48,7 @@ typedef struct {
 
 EFI_STATUS cp932_tbl_init(struct iovec);
 EFI_STATUS cp932_font_init(struct iovec);
-EFIAPI EFI_STATUS ATOP_init(IN EFI_GRAPHICS_OUTPUT_PROTOCOL* gop, OUT EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL** result);
+EFIAPI EFI_STATUS console_init(IN EFI_GRAPHICS_OUTPUT_PROTOCOL* gop, OUT EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL** result);
 
 EFI_INPUT_KEY efi_wait_any_key(BOOLEAN, int);
 menu_buffer* init_menu();

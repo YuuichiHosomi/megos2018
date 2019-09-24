@@ -1,4 +1,4 @@
-// EFI Simple Text Output Protocol wrapper for MEG-OS
+// Graphical Console for EFI
 // Copyright (c) 2018 MEG-OS project, All rights reserved.
 // License: MIT
 #include "efi.h"
@@ -759,7 +759,7 @@ static EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL static_stop;
 static ATOP_Context static_context;
 
 
-EFIAPI EFI_STATUS ATOP_init(
+EFIAPI EFI_STATUS console_init(
     IN EFI_GRAPHICS_OUTPUT_PROTOCOL* gop,
     OUT EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL** result
 ) {

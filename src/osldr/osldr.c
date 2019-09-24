@@ -635,7 +635,7 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE _image, IN EFI_SYSTEM_TABLE *st) {
 
 cp932_exit:
 
-        ATOP_init(gop, &cout);
+        console_init(gop, &cout);
     }
 
 
