@@ -23,10 +23,10 @@ typedef union {
 } cpu_context_t;
 
 typedef struct moe_thread_t {
-    moe_shared_t shared;
     cpu_context_t context;
     char name[THREAD_NAME_SIZE];
 
+    moe_shared_t shared;
     context_id pid;
     context_id thid;
     int exit_code;

@@ -11,15 +11,16 @@
 
 
 #define MAX_IFS 16
-#define MAX_USB_BUFFER 2048
+#define MAX_USB_BUFFER      4096
+#define MAX_STRING_BUFFER   4096
 typedef struct {
-    uint8_t buffer[MAX_USB_BUFFER];
-    uint8_t strings[MAX_USB_BUFFER];
+    moe_shared_t shared;
 
     usb_host_interface_t *hci;
     MOE_PHYSICAL_ADDRESS base_buffer;
+    void *buffer;
+    uint8_t *strings;
 
-    moe_shared_t shared;
     _Atomic int isAlive;
     uint32_t dev_class;
     uint16_t vid, pid, usb_ver;
@@ -116,7 +117,7 @@ int usb_get_hub_descriptor(usb_device *self, uint8_t desc_type, uint8_t index, s
 
 
 int usb_config_endpoint(usb_device *self, usb_endpoint_descriptor_t *endpoint) {
-    return self->hci->configure_ep(self->hci, endpoint, USB_TIMEOUT);
+    return self->hci->configure_endpoint(self->hci, endpoint, USB_TIMEOUT);
 }
 
 
@@ -127,13 +128,11 @@ int usb_data_transfer(usb_device *self, int dci, uint16_t length, int64_t timeou
 
 void usb_hid_thread(void *args) {
     hid_device *self = args;
+    if (!self->hid_dci) return;
     moe_retain(&self->usb->shared);
 
-    if (!self->hid_dci) return;
-
     int status;
-
-    void *buffer = MOE_PA2VA(self->usb->base_buffer);
+    void *buffer = self->usb->buffer;
     switch (self->if_class) {
         case USB_CLS_HID_KBD:
         {
@@ -142,6 +141,7 @@ void usb_hid_thread(void *args) {
 
             while (self->usb->isAlive) {
                 status = usb_data_transfer(self->usb, self->hid_dci, self->packet_size, MOE_FOREVER);
+                if (!self->usb->isAlive) break;
                 if (status >= 0) {
                     _Atomic uint64_t *p = buffer;
                     _Atomic uint64_t *q = (_Atomic uint64_t *)&state.current;
@@ -166,8 +166,8 @@ void usb_hid_thread(void *args) {
 
             while (self->usb->isAlive) {
                 status = usb_data_transfer(self->usb, self->hid_dci, self->packet_size, MOE_FOREVER);
+                if (!self->usb->isAlive) break;
                 if (status >= 0) {
-                    uint8_t *p = buffer;
                     memcpy(&report, buffer, sizeof(hid_raw_mos_report_t));
                     DEBUG_PRINT("(Mouse %x %02x %02x %02x)", p[0], p[1], p[2], p[3]);
                     hid_process_mouse_report(hid_convert_mouse(&state, &report));
@@ -185,6 +185,7 @@ void usb_hid_thread(void *args) {
 
             while (self->usb->isAlive) {
                 status = usb_data_transfer(self->usb, self->hid_dci, self->packet_size, MOE_FOREVER);
+                if (!self->usb->isAlive) break;
                 if (status >= 0) {
 #ifdef DEBUG
                     uint8_t *p = buffer;
@@ -212,9 +213,11 @@ hid_device *configure_hid(usb_device *self, usb_interface_descriptor_t *hid_if, 
     uint32_t if_class = usb_interface_class(hid_if);
     int ifno = hid_if->bInterfaceNumber;
     int packet = ((endpoint->wMaxPacketSize[1] << 8) | endpoint->wMaxPacketSize[0]);
+#ifdef DEBUG
     int epno = endpoint->bEndpointAddress & 15;
     int io = (endpoint->bEndpointAddress & 0x80) ? 1 : 0;
     DEBUG_PRINT("#%d ENDPOINT %d IO %d ATTR %02x MAX PACKET %d INTERVAL %d\n", self->hci->slot_id, epno, io, endpoint->bmAttributes, packet, endpoint->bInterval);
+#endif
 
     hid_device *hid = moe_alloc_object(sizeof(hid_device), 1);
     hid->usb = self;
@@ -237,7 +240,6 @@ hid_device *configure_hid(usb_device *self, usb_interface_descriptor_t *hid_if, 
 
         default:
             // status = hid_set_protocol(self, ifno, 1);
-            // DEBUG_PRINT("#%d HID %06x SET PROTOCOL STATUS %d\n", self->hci->slot_id, if_class, status);
             status = usb_config_endpoint(self, endpoint);
             DEBUG_PRINT("#%d CONFIG ENDPOINT %d STATUS %d\n", self->hci->slot_id, epno, status);
             hid->hid_dci = status;
@@ -250,12 +252,12 @@ hid_device *configure_hid(usb_device *self, usb_interface_descriptor_t *hid_if, 
 
 void usb_hub_thread(void *args) {
     usb_hub *self = args;
-
     if (!self->hub_dci) return;
+    moe_retain(&self->usb->shared);
 
     int status;
 
-    void *buffer = MOE_PA2VA(self->usb->base_buffer);
+    void *buffer = self->usb->buffer;
     status = usb_get_hub_descriptor(self->usb, USB_HUB_DESCRIPTOR, 0, sizeof(usb_hub_descriptor_t));
     if (status > 0) {
         usb_hub_descriptor_t *hub_desc = (usb_hub_descriptor_t *)buffer;
@@ -267,8 +269,8 @@ void usb_hub_thread(void *args) {
 
     while (self->usb->isAlive) {
         status = usb_data_transfer(self->usb, self->hub_dci, self->packet_size, MOE_FOREVER);
+        if (!self->usb->isAlive) break;
         if (status >= 0) {
-            // memcpy(buffer, buffer, sizeof(hid_raw_kbd_report_t));
             uint64_t *p = (uint64_t *)buffer;
             printf("(HUB %016llx)", *p);
         } else {
@@ -276,6 +278,8 @@ void usb_hub_thread(void *args) {
             moe_usleep(100000);
         }
     }
+
+    usb_release(self->usb);
 }
 
 
@@ -298,10 +302,10 @@ usb_hub *configure_usb_hub(usb_device *self, usb_interface_descriptor_t *hub_if,
 
 static int read_string(usb_device *self, int index) {
     int status;
+    usb_string_descriptor_t *desc = (usb_string_descriptor_t *)self->buffer;
     if (index == 0) return 0;
     status = usb_get_descriptor(self, USB_STRING_DESCRIPTOR, index, 8);
     if (status < 0) return status;
-    usb_string_descriptor_t *desc = (usb_string_descriptor_t *)&self->buffer;
     if (desc->bLength > 8) {
         status = usb_get_descriptor(self, USB_STRING_DESCRIPTOR, index, desc->bLength);
         if (status < 0) return status;
@@ -322,12 +326,13 @@ void uhci_dealloc(usb_host_interface_t *hci) {
 
 
 int usb_new_device(usb_host_interface_t *hci) {
-    uintptr_t ptr = moe_alloc_physical_page(sizeof(usb_device));
-    usb_device *self = MOE_PA2VA(ptr);
-    memset(self, 0, sizeof(usb_device));
+
+    usb_device *self = moe_alloc_object(sizeof(usb_device), 1);
     moe_shared_init(&self->shared, self);
+    self->base_buffer = moe_alloc_io_buffer(MAX_USB_BUFFER);
+    self->buffer = MOE_PA2VA(self->base_buffer);
     self->isAlive = true;
-    self->base_buffer = ptr;
+    self->strings = moe_alloc_object(sizeof(MAX_STRING_BUFFER), 1);
     self->hci = hci;
     self->hci->device_context = self;
     self->hci->dealloc = &uhci_dealloc;
@@ -346,7 +351,7 @@ int usb_new_device(usb_host_interface_t *hci) {
         printf("[USB PS ERR %d %d]\n", slot_id, status);
     }
 
-    usb_device_descriptor_t *temp = MOE_PA2VA(self->base_buffer);
+    usb_device_descriptor_t *temp = self->buffer;
     if (max_packet_size != temp->bMaxPacketSize0) {
         // printf("@[%d USB %d.%d PS %d]", slot_id, temp->bcdUSB[1], temp->bcdUSB[0] >> 4, temp->bMaxPacketSize0);
         if (temp->bcdUSB[1] < 3) {
@@ -358,7 +363,7 @@ int usb_new_device(usb_host_interface_t *hci) {
 
     status = usb_get_descriptor(self, USB_DEVICE_DESCRIPTOR, 0, sizeof(usb_device_descriptor_t));
     if (status < 0) return -1;
-    usb_device_descriptor_t *dd = MOE_PA2VA(self->base_buffer);
+    usb_device_descriptor_t *dd = self->buffer;
     self->dev_desc = *dd;
     self->vid = (dd->idVendor[1] << 8) | (dd->idVendor[0]);
     self->pid = (dd->idProduct[1] << 8) | (dd->idProduct[0]);
@@ -382,13 +387,13 @@ int usb_new_device(usb_host_interface_t *hci) {
     status = usb_get_descriptor(self, USB_CONFIGURATION_DESCRIPTOR, 0, 8);
     if (status < 0) return -1;
 
-    usb_configuration_descriptor_t *config_temp = MOE_PA2VA(self->base_buffer);
+    usb_configuration_descriptor_t *config_temp = self->buffer;
     uint16_t sz = (config_temp->wTotalLength[1] << 8) | config_temp->wTotalLength[0];
     if (sz) {
         status = usb_get_descriptor(self, USB_CONFIGURATION_DESCRIPTOR, 0, sz);
 
         uint8_t buffer[MAX_USB_BUFFER];
-        memcpy(buffer, MOE_PA2VA(self->base_buffer), sz);
+        memcpy(buffer, self->buffer, sz);
         uint8_t *p = buffer;
 
         usb_configuration_descriptor_t *c_cnf = NULL;
@@ -415,9 +420,9 @@ int usb_new_device(usb_host_interface_t *hci) {
                     int if_index = c_if->bInterfaceNumber;
                     self->ifs[if_index].if_class = usb_interface_class(c_if);
                     self->ifs[if_index].n_endpoints = c_if->bNumEndpoints;
-                    int sindex = read_string(self, c_if->iInterface);
-                    if (sindex > 0) {
-                        self->ifs[if_index].sInterface = (wchar_t *)(self->strings + sindex);
+                    int s_index = read_string(self, c_if->iInterface);
+                    if (s_index > 0) {
+                        self->ifs[if_index].sInterface = (wchar_t *)(self->strings + s_index);
                     }
                 }
                     if (self->dev_class == 0) {

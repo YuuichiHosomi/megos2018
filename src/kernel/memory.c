@@ -79,6 +79,18 @@ void *moe_alloc_object(size_t size, size_t count) {
     return va;
 }
 
+
+uintptr_t moe_alloc_io_buffer(size_t size) {
+    size_t sz = ceil_pagesize(size);
+    uintptr_t pa = moe_alloc_physical_page(sz);
+    if (pa) {
+        void *va = MOE_PA2VA(pa);
+        memset(va, 0, sz);
+    }
+    return pa;
+}
+
+
 void mm_init(moe_bootinfo_t *bootinfo) {
     static_start = bootinfo->static_start;
     free_memory = bootinfo->free_memory;

@@ -52,6 +52,11 @@
     extern arch_syscall_entry
 
 
+    global __chkstk
+__chkstk:
+    ret
+
+
 ;; int cpu_init();
     global cpu_init
 cpu_init:

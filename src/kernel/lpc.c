@@ -1,6 +1,7 @@
 // Legacy PC's Low Pin Count Devices
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
+
 #include "moe.h"
 #include "kernel.h"
 #include "hid.h"
@@ -12,16 +13,6 @@ typedef enum {
     ps2_state_mouse,
     ps2_state_continued,
 } ps2_state_t;
-
-static uint8_t ps2_in8(uint16_t const port) {
-    uint8_t al;
-    __asm__ volatile("inb %1, %%al": "=a"(al): "i"(port));
-    return al;
-}
-
-static void ps2_out8(uint16_t const port, uint8_t val) {
-    __asm__ volatile("outb %%al, %0": : "i"(port), "a"(val));
-}
 
 
 /*********************************************************************/
@@ -37,7 +28,8 @@ static void ps2_out8(uint16_t const port, uint8_t val) {
 #define PS2_SCAN_EXTEND     0xE0
 #define PS2_SCAN_EXT16      0x80
 
-#define PS2_TIMEOUT         1000
+#define PS2_WRITE_TIMEOUT   INT64_C(10000)
+#define PS2_READ_TIMEOUT    INT64_C(100000)
 
 #define PS2_FIFO_KEY_MIN    0x100
 #define PS2_FIFO_KEY_MAX    0x1FF
@@ -79,10 +71,57 @@ uint8_t ps2_to_hid_usage_table[] = {
 };
 
 
-int ps2_wait_for_write(uint64_t timeout) {
-    moe_measure_t deadline = moe_create_measure(timeout);
+static uint8_t ps2_read_data(void) {
+    uint8_t al;
+    __asm__ volatile("inb %1, %b0": "=a"(al): "i"(PS2_DATA_PORT));
+    return al;
+}
+
+static void ps2_write_data(uint8_t val) {
+    __asm__ volatile("outb %b1, %0": : "i"(PS2_DATA_PORT), "a"(val));
+}
+
+static uint8_t ps2_read_status(void) {
+    uint8_t al;
+    __asm__ volatile("inb %1, %b0": "=a"(al): "i"(PS2_STATUS_PORT));
+    return al;
+}
+
+static void ps2_write_command(uint8_t val) {
+    __asm__ volatile("outb %b1, %0": : "i"(PS2_COMMAND_PORT), "a"(val));
+}
+
+static void ps2_clear_interrupt(void) {
+    // const int ps2_controll_port = 0x61;
+    // uint8_t al;
+    // __asm__ volatile(
+    //     "inb %1, %b0;"
+    //     "andb $0xF, %b0;"
+    //     "orb $0x80, %b0;"
+    //     "outb %b0, %1;"
+    //     "pause;"
+    //     "andb $0xF, %b0;"
+    //     "outb %b0, %1;"
+    // : "=a"(al): "i"(ps2_controll_port));
+}
+
+
+static inline int ps2_wait_for_write(int timeout) {
+    moe_measure_t deadline = moe_create_measure(PS2_WRITE_TIMEOUT * timeout);
     while (moe_measure_until(deadline)) {
-        if ((ps2_in8(PS2_STATUS_PORT) & 0x02) == 0x00) {
+        if ((ps2_read_status() & 0x02) == 0x00) {
+            return 0;
+        } else {
+            cpu_relax();
+        }
+    }
+    return -1;
+}
+
+static inline int ps2_wait_for_read(int timeout) {
+    moe_measure_t deadline = moe_create_measure(PS2_READ_TIMEOUT * timeout);
+    while (moe_measure_until(deadline)) {
+        if ((ps2_read_status() & 0x01) != 0x00) {
             return 0;
         } else {
             cpu_relax();
@@ -93,12 +132,16 @@ int ps2_wait_for_write(uint64_t timeout) {
 
 
 void ps2k_irq_handler(int irq) {
-    moe_queue_write(ps2_event_queue, PS2_FIFO_KEY_MIN + ps2_in8(PS2_DATA_PORT));
+    uint32_t ps2k = ps2_read_data();
+    // printf("K(%02x)", ps2k);
+    moe_queue_write(ps2_event_queue, PS2_FIFO_KEY_MIN + ps2k);
+    ps2_clear_interrupt();
 }
 
 
 void ps2m_irq_handler(int irq) {
-    moe_queue_write(ps2_event_queue, PS2_FIFO_MOUSE_MIN + ps2_in8(PS2_DATA_PORT));
+    moe_queue_write(ps2_event_queue, PS2_FIFO_MOUSE_MIN + ps2_read_data());
+    ps2_clear_interrupt();
 }
 
 
@@ -208,14 +251,13 @@ _Noreturn void ps2_hid_thread(void *args) {
 
 static int ps2_init() {
 
-    if (ps2_wait_for_write(100000) != 0) return 0;
+    if (ps2_wait_for_write(10) != 0) return 0;
+    ps2_write_command(0xAD);
+    if (ps2_wait_for_write(1) != 0) goto ps2_timeout_error;
+    ps2_write_command(0xA7);
 
-    ps2_out8(PS2_COMMAND_PORT, 0xAD);
-    ps2_wait_for_write(PS2_TIMEOUT);
-    ps2_out8(PS2_COMMAND_PORT, 0xA7);
-
-    for (int i = 0; i< 16; i++) {
-        ps2_in8(PS2_DATA_PORT);
+    for (int i = 0; i < 16; i++) {
+        ps2_read_data();
     }
 
     uintptr_t size_of_buffer = 128;
@@ -224,19 +266,28 @@ static int ps2_init() {
     moe_install_irq(1, &ps2k_irq_handler);
     moe_install_irq(12, &ps2m_irq_handler);
 
-    ps2_wait_for_write(PS2_TIMEOUT);
-    ps2_out8(PS2_COMMAND_PORT, 0x60);
-    ps2_wait_for_write(PS2_TIMEOUT);
-    ps2_out8(PS2_DATA_PORT, 0x47);
+    if (ps2_wait_for_write(1) != 0) goto ps2_timeout_error;
+    ps2_write_command(0x60);
+    if (ps2_wait_for_write(1) != 0) goto ps2_timeout_error;
+    ps2_write_data(0x47);
 
-    ps2_wait_for_write(PS2_TIMEOUT);
-    ps2_out8(PS2_COMMAND_PORT, 0xD4);
-    ps2_wait_for_write(PS2_TIMEOUT);
-    ps2_out8(PS2_DATA_PORT, 0xF4);
+    if (ps2_wait_for_write(1) != 0) goto ps2_timeout_error;
+    ps2_write_data(0xFF);
+    moe_usleep(100000);
+    if (ps2_wait_for_write(1) != 0) goto ps2_timeout_error;
+    ps2_write_data(0xF4);
 
-    moe_create_thread(&ps2_hid_thread, priority_realtime, 0, "lpc.ps2.hid");
+    // if (ps2_wait_for_write(1) != 0) goto ps2_timeout_error;
+    // ps2_write_command(0xD4);
+    // if (ps2_wait_for_write(1) != 0) goto ps2_timeout_error;
+    // ps2_write_data(0xF4);
+
+    moe_create_thread(&ps2_hid_thread, priority_realtime, 0, "ps2.hid");
 
     return 1;
+
+ps2_timeout_error:
+    moe_panic("PS/2 Timeout");
 }
 
 

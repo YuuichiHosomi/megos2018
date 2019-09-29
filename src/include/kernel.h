@@ -63,6 +63,7 @@ void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v);
 // Low Level Memory Manager
 uintptr_t moe_alloc_physical_page(size_t n);
 uintptr_t moe_alloc_gates_memory();
+uintptr_t moe_alloc_io_buffer(size_t size);
 
 uint64_t pg_get_pte(uintptr_t ptr, int level);
 void pg_set_pte(uintptr_t ptr, uint64_t pte, int level);
@@ -140,9 +141,8 @@ static inline int atomic_bit_test_and_set(void *p, size_t bit) {
     int result;
     __asm__ volatile (
         "lock bts %[bit], %[ptr];\n"
-        "sbb %0, %0;\n"
-    :"=r"(result)
-    :[ptr]"m"(*_p), [bit]"Ir"(bit));
+        :"=@ccc"(result)
+        :[ptr]"m"(*_p), [bit]"Ir"(bit));
     return result;
 }
 
@@ -151,9 +151,7 @@ static inline int atomic_bit_test_and_clear(void *p, size_t bit) {
     int result;
     __asm__ volatile (
         "lock btr %[bit], %[ptr];\n"
-        "sbb %0, %0;\n"
-    :"=r"(result)
-    :[ptr]"m"(*_p), [bit]"Ir"(bit));
+        :"=@ccc"(result)
+        :[ptr]"m"(*_p), [bit]"Ir"(bit));
     return result;
 }
-

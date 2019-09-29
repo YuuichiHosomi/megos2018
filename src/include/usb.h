@@ -150,38 +150,19 @@ typedef union {
 
 typedef struct usb_host_interface_t usb_host_interface_t;
 
-typedef int (*UHI_CONFIGURE_EP)
-(usb_host_interface_t *uhc, usb_endpoint_descriptor_t *endpoint, int64_t timeout);
-
-typedef int (*UHI_RESET_EP)
-(usb_host_interface_t *self, int epno, int64_t timeout);
-
-typedef int (*UHI_SET_MAX_PACKET_SIZE)
-(usb_host_interface_t *self, int mask_packet_size, int64_t timeout);
-
-typedef int (*UHI_GET_MAX_PACKET_SIZE)
-(usb_host_interface_t *self);
-
-typedef int (*UHI_CONTROL)
-(usb_host_interface_t *self, int dci, int trt, urb_setup_data_t setup, uintptr_t buffer, int64_t timeout);
-
-typedef int (*UHI_DATA_TRANSFER)
-(usb_host_interface_t *self, int dci, uintptr_t buffer, uint16_t length, int64_t timeout);
-
-typedef void (*UHI_DEALLOC)
-(usb_host_interface_t *self);
-
-// USB virtual host controller interface
+// USB host controller interface
 typedef struct usb_host_interface_t {
     void *context;
     void *device_context;
     moe_semaphore_t *semaphore;
     int slot_id;
-    UHI_DEALLOC dealloc;
-    UHI_CONFIGURE_EP configure_ep;
-    UHI_RESET_EP reset_ep;
-    UHI_GET_MAX_PACKET_SIZE get_max_packet_size;
-    UHI_SET_MAX_PACKET_SIZE set_max_packet_size;
-    UHI_CONTROL control;
-    UHI_DATA_TRANSFER data_transfer;
+
+    void (*dealloc)(usb_host_interface_t *self);
+    int (*configure_endpoint)(usb_host_interface_t *self, usb_endpoint_descriptor_t *endpoint, int64_t timeout);
+    int (*reset_endpoint)(usb_host_interface_t *self, int epno, int64_t timeout);
+    int (*set_max_packet_size)(usb_host_interface_t *self, int mask_packet_size, int64_t timeout);
+    int (*get_max_packet_size)(usb_host_interface_t *self);
+    int (*control)(usb_host_interface_t *self, int dci, int trt, urb_setup_data_t setup, uintptr_t buffer, int64_t timeout);
+    int (*data_transfer)(usb_host_interface_t *self, int dci, uintptr_t buffer, uint16_t length, int64_t timeout);
+
 } usb_host_interface_t;

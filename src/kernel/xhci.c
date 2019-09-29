@@ -365,7 +365,7 @@ uint32_t xhci_reset_port(xhci_t *self, int port_id) {
 }
 
 
-int uhi_configure_ep(usb_host_interface_t *uhc, usb_endpoint_descriptor_t *endpoint, int64_t timeout) {
+int uhi_configure_endpoint(usb_host_interface_t *uhc, usb_endpoint_descriptor_t *endpoint, int64_t timeout) {
     xhci_trb_t response = trb_create(0);
 
     xhci_t *self = uhc->context;
@@ -392,7 +392,7 @@ int uhi_configure_ep(usb_host_interface_t *uhc, usb_endpoint_descriptor_t *endpo
     }
 }
 
-int uhi_reset_ep(usb_host_interface_t *uhc, int epno, int64_t timeout) {
+int uhi_reset_endpoint(usb_host_interface_t *uhc, int epno, int64_t timeout) {
     xhci_trb_t response = trb_create(0);
 
     xhci_t *self = uhc->context;
@@ -536,8 +536,8 @@ int uhi_data_transfer(usb_host_interface_t *uhc, int dci, uintptr_t buffer, uint
 int xhci_init_dev(xhci_t *self) {
 
     self->hci_vt.context = self;
-    self->hci_vt.configure_ep = uhi_configure_ep;
-    self->hci_vt.reset_ep = uhi_reset_ep;
+    self->hci_vt.configure_endpoint = uhi_configure_endpoint;
+    self->hci_vt.reset_endpoint = uhi_reset_endpoint;
     self->hci_vt.get_max_packet_size = uhi_get_max_packet_size;
     self->hci_vt.set_max_packet_size = uhi_set_max_packet_size;
     self->hci_vt.control = uhi_control;
