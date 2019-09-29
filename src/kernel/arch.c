@@ -828,6 +828,29 @@ static void pci_init() {
 }
 
 
+int cmd_lspci(int argc, char **argv) {
+    int bus = 0;
+    for (int dev = 0; dev < 32; dev++) {
+        uint32_t data = _pci_read_config(pci_make_reg_addr(bus, dev, 0, 0));
+        if ((data & 0xFFFF) == 0xFFFF) continue;
+        uint32_t PCI0C = _pci_read_config(pci_make_reg_addr(bus, dev, 0, 0x0C));
+        int limit = (PCI0C & 0x00800000) ? 8 : 1;
+        for (int func = 0; func < limit; func++) {
+            uint32_t base = pci_make_reg_addr(bus, dev, func, 0);
+            uint32_t data = pci_read_config(base);
+            if ((data & 0xFFFF) != 0xFFFF) {
+                uint32_t PCI08 = pci_read_config(base + 0x08);
+                uint16_t vid = data & 0xFFFF;
+                uint16_t did = data >> 16;
+                uint32_t cls = PCI08 >> 8;
+                printf("%02d:%02d.%d %04x:%04x %06x\n", bus, dev, func, vid, did, cls);
+            }
+        }
+    }
+    return 0;
+}
+
+
 /*********************************************************************/
 //  High Precision Event Timer
 

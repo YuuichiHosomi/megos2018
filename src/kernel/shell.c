@@ -60,6 +60,7 @@ int cmd_cpuid(int argc, char **argv) __attribute__((weak));
 int cmd_ps(int argc, char **argv) __attribute__((weak));
 int cmd_exp(int argc, char **argv);
 int cmd_lsusb(int argc, char **argv) __attribute__((weak));
+int cmd_lspci(int argc, char **argv) __attribute__((weak));
 
 command_list_t commands[] = {
     { "help", cmd_help, "Display this help" },
@@ -68,6 +69,7 @@ command_list_t commands[] = {
     { "reboot", cmd_reboot, "Restart computer" },
     { "exit", cmd_shutdown, "Exit" },
     { "cpuid", cmd_cpuid, "Show cpuid information" },
+    { "lspci", cmd_lspci, "Show pci informations" },
     { "lsusb", cmd_lsusb, "Show usb informations" },
     { "ps", cmd_ps, NULL },
     { "exp", cmd_exp, NULL },
@@ -224,10 +226,10 @@ void shell_start(const wchar_t *cmdline) {
     // moe_create_thread(&fiber_test_thread, 0, NULL, "fiber_test");
     moe_usleep(1000000);
 
-    // const char *autoexec = "ps\n";
-    // for (int i = 0; autoexec[i]; i++) {
-    //     moe_queue_write(cin, autoexec[i]);
-    // }
+    const char *autoexec = "lsusb\nps\n";
+    for (int i = 0; autoexec[i]; i++) {
+        moe_queue_write(cin, autoexec[i]);
+    }
 
     int argc;
     char* argv[MAX_ARGV];
