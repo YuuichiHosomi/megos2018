@@ -5,15 +5,44 @@
 #include <stdint.h>
 
 
-#define USB_CLS_HID             0x03
-#define USB_CLS_STORAGE         0x08
-#define USB_CLS_HUB             0x09
+typedef enum {
+    USB_BASE_CLASS_COMPOSITE = 0x00,
+    USB_BASE_CLASS_AUDIO = 0x01,
+    USB_BASE_CLASS_COMM = 0x02,
+    USB_BASE_CLASS_HID = 0x03,
+    // USB_BASE_CLASS_PHYSICAL = 0x05,
+    USB_BASE_CLASS_IMAGE = 0x06,
+    USB_BASE_CLASS_PRINTER = 0x07,
+    USB_BASE_CLASS_STORAGE = 0x08,
+    USB_BASE_CLASS_HUB = 0x09,
+    // USB_BASE_CLASS_CDC_DATA = 0x0A,
+    // USB_BASE_CLASS_SMART_CARD = 0x0B,
+    USB_BASE_CLASS_CONTENT_SECURITY = 0x0C,
+    USB_BASE_CLASS_VIDEO = 0x0E,
+    USB_BASE_CLASS_PERSONAL_HEALTHCARE = 0x0F,
+    USB_BASE_CLASS_AUDIO_VIDEO = 0x10,
+    USB_BASE_CLASS_BILLBOARD = 0x11,
+    USB_BASE_CLASS_TYPE_C_BRIDGE = 0x12,
+    USB_BASE_CLASS_DIAGNOSTIC = 0xDC,
+    USB_BASE_CLASS_WIRELESS = 0xE0,
+    USB_BASE_CLASS_MISCELLANEOUS = 0xEF,
+    USB_BASE_CLASS_APPLICATION_SPECIFIC = 0xFE,
+    USB_BASE_CLASS_VENDOR_SPECIFIC = 0xFF,
+} usb_base_class;
 
-#define USB_CLS_HID_GENERIC     0x030000
-#define USB_CLS_HID_KBD         0x030101
-#define USB_CLS_HID_MOS         0x030102
-#define USB_CLS_STORAGE_BULK    0x080650
-#define USB_CLS_FLOPPY          0x080400
+typedef enum {
+    USB_CLASS_MIDI_STREAMING = 0x010300,
+    USB_CLASS_HID_GENERIC = 0x030000,
+    USB_CLASS_HID_KBD = 0x030101,
+    USB_CLASS_HID_MOS = 0x030102,
+    USB_CLASS_STORAGE_BULK = 0x080650,
+    USB_CLASS_FLOPPY = 0x080400,
+    USB_CLASS_HUB_FS = 0x090000,
+    USB_CLASS_HUB_HS_STT = 0x090001,
+    USB_CLASS_HUB_HS_MTT = 0x090002,
+    USB_CLASS_HUB_SS = 0x090003,
+    USB_CLASS_BLUETOOTH = 0xE00101,
+} usb_class;
 
 
 enum {
@@ -150,19 +179,22 @@ typedef union {
 
 typedef struct usb_host_interface_t usb_host_interface_t;
 
-// USB host controller interface
+// USB host controller to device interface
 typedef struct usb_host_interface_t {
-    void *context;
+    void *host_context;
     void *device_context;
     moe_semaphore_t *semaphore;
     int slot_id;
 
     void (*dealloc)(usb_host_interface_t *self);
+
     int (*configure_endpoint)(usb_host_interface_t *self, usb_endpoint_descriptor_t *endpoint, int64_t timeout);
     int (*reset_endpoint)(usb_host_interface_t *self, int epno, int64_t timeout);
     int (*set_max_packet_size)(usb_host_interface_t *self, int mask_packet_size, int64_t timeout);
     int (*get_max_packet_size)(usb_host_interface_t *self);
-    int (*control)(usb_host_interface_t *self, int dci, int trt, urb_setup_data_t setup, uintptr_t buffer, int64_t timeout);
+
+    int (*control)(usb_host_interface_t *self, int trt, urb_setup_data_t setup, uintptr_t buffer, int64_t timeout);
+
     int (*data_transfer)(usb_host_interface_t *self, int dci, uintptr_t buffer, uint16_t length, int64_t timeout);
 
 } usb_host_interface_t;

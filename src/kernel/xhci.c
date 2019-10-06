@@ -368,7 +368,7 @@ uint32_t xhci_reset_port(xhci_t *self, int port_id) {
 int uhi_configure_endpoint(usb_host_interface_t *uhc, usb_endpoint_descriptor_t *endpoint, int64_t timeout) {
     xhci_trb_t response = trb_create(0);
 
-    xhci_t *self = uhc->context;
+    xhci_t *self = uhc->host_context;
     int slot_id = uhc->slot_id;
     uint32_t max_packet_size = ((endpoint->wMaxPacketSize[1] << 8) | endpoint->wMaxPacketSize[0]);
     int epno = endpoint->bEndpointAddress;
@@ -395,7 +395,7 @@ int uhi_configure_endpoint(usb_host_interface_t *uhc, usb_endpoint_descriptor_t 
 int uhi_reset_endpoint(usb_host_interface_t *uhc, int epno, int64_t timeout) {
     xhci_trb_t response = trb_create(0);
 
-    xhci_t *self = uhc->context;
+    xhci_t *self = uhc->host_context;
     int slot_id = uhc->slot_id;
 
     xhci_trb_t trb = trb_create(TRB_RESET_ENDPOINT_COMMAND);
@@ -414,7 +414,7 @@ int uhi_reset_endpoint(usb_host_interface_t *uhc, int epno, int64_t timeout) {
 }
 
 int uhi_get_max_packet_size(usb_host_interface_t *uhc) {
-    xhci_t *self = uhc->context;
+    xhci_t *self = uhc->host_context;
     int slot_id = uhc->slot_id;
 
     uint64_t device_context = self->DCBAA[slot_id];
@@ -425,7 +425,7 @@ int uhi_get_max_packet_size(usb_host_interface_t *uhc) {
 
 int uhi_set_max_packet_size(usb_host_interface_t *uhc, int max_packet_size, int64_t timeout) {
     xhci_trb_t response = trb_create(0);
-    xhci_t *self = uhc->context;
+    xhci_t *self = uhc->host_context;
     int slot_id = uhc->slot_id;
 
     uint64_t input_context = self->usb_devices[slot_id].input_context;
@@ -458,9 +458,10 @@ int uhi_set_max_packet_size(usb_host_interface_t *uhc, int max_packet_size, int6
     }
 }
 
-int uhi_control(usb_host_interface_t *uhc, int dci, int trt, urb_setup_data_t setup_data, uintptr_t buffer, int64_t timeout) {
-    xhci_t *self = uhc->context;
+int uhi_control(usb_host_interface_t *uhc, int trt, urb_setup_data_t setup_data, uintptr_t buffer, int64_t timeout) {
+    xhci_t *self = uhc->host_context;
     int slot_id = uhc->slot_id;
+    int dci = 1;
 
     int has_data = (buffer != 0) && (setup_data.setup.wLength != 0);
 
@@ -505,7 +506,7 @@ int uhi_control(usb_host_interface_t *uhc, int dci, int trt, urb_setup_data_t se
 }
 
 int uhi_data_transfer(usb_host_interface_t *uhc, int dci, uintptr_t buffer, uint16_t length, int64_t timeout) {
-    xhci_t *self = uhc->context;
+    xhci_t *self = uhc->host_context;
     int slot_id = uhc->slot_id;
 
     xhci_trb_t trb = trb_create(TRB_NORMAL);
@@ -535,7 +536,7 @@ int uhi_data_transfer(usb_host_interface_t *uhc, int dci, uintptr_t buffer, uint
 
 int xhci_init_dev(xhci_t *self) {
 
-    self->hci_vt.context = self;
+    self->hci_vt.host_context = self;
     self->hci_vt.configure_endpoint = uhi_configure_endpoint;
     self->hci_vt.reset_endpoint = uhi_reset_endpoint;
     self->hci_vt.get_max_packet_size = uhi_get_max_packet_size;
