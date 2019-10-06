@@ -59,6 +59,7 @@ int cmd_help(int argc, char **argv);
 int cmd_cpuid(int argc, char **argv) __attribute__((weak));
 int cmd_ps(int argc, char **argv) __attribute__((weak));
 int cmd_exp(int argc, char **argv);
+int cmd_stall(int argc, char **argv);
 int cmd_lsusb(int argc, char **argv) __attribute__((weak));
 int cmd_lspci(int argc, char **argv) __attribute__((weak));
 
@@ -73,8 +74,10 @@ command_list_t commands[] = {
     { "lsusb", cmd_lsusb, "Show usb informations" },
     { "ps", cmd_ps, NULL },
     { "exp", cmd_exp, NULL },
+    { "stall", cmd_stall, NULL},
     { 0 },
 };
+
 
 int cmd_help(int argc, char **argv) {
     for (int i = 0; commands[i].name; i++) {
@@ -103,6 +106,13 @@ void proc_hello(void *args) {
 
 int cmd_exp(int argc, char **argv) {
     moe_create_process(&proc_hello, 0, NULL, "hello");
+    return 0;
+}
+
+int cmd_stall(int argc, char **argv) {
+    int time = argv[1][0] & 15;
+    if (!time) time = 3;
+    moe_usleep(time * 1000000);
     return 0;
 }
 
@@ -183,34 +193,6 @@ int read_cmdline(char* buffer, size_t max_len) {
 
 
 /*********************************************************************/
-
-
-_Noreturn void thread_test_1(void *args) {
-    int k = moe_get_current_thread_id();
-    int padding = 2;
-    int w = 10;
-    moe_rect_t rect = {{k * w, padding}, {w - padding, w - padding}};
-    uint32_t color = k * 0x010101;
-    for (;;) {
-        moe_fill_rect(NULL, &rect, color);
-        color += k;
-        moe_usleep(10000);
-    }
-}
-
-void fiber_test_thread(void *args) {
-    for (int i = 0; i < 20; i++) {
-        char name[32];
-        snprintf(name, 32, "test_#%d", 1 + i);
-        moe_create_thread(&thread_test_1, 0, NULL, name);
-        putchar('.');
-        moe_usleep(10000);
-    }
-    moe_usleep(MOE_FOREVER);
-}
-
-
-/*********************************************************************/
 //  Pseudo shell
 
 #define MAX_CMDLINE 80
@@ -226,10 +208,10 @@ void shell_start(const wchar_t *cmdline) {
     // moe_create_thread(&fiber_test_thread, 0, NULL, "fiber_test");
     moe_usleep(1000000);
 
-    const char *autoexec = "lsusb\nps\n";
-    for (int i = 0; autoexec[i]; i++) {
-        moe_queue_write(cin, autoexec[i]);
-    }
+    // const char *autoexec = "lsusb\n";
+    // for (int i = 0; autoexec[i]; i++) {
+    //     moe_queue_write(cin, autoexec[i]);
+    // }
 
     int argc;
     char* argv[MAX_ARGV];
@@ -295,8 +277,6 @@ void shell_start(const wchar_t *cmdline) {
                 }
             }
         } while (!stop);
-
-        if (argv[0][0] == '!') { __asm__ volatile ("int3"); }
 
         command_list_t *cmd_to_run = NULL;
         for (int i = 0; commands[i].name; i++) {

@@ -277,10 +277,10 @@ static int ps2_init() {
     if (ps2_wait_for_write(1) != 0) goto ps2_timeout_error;
     ps2_write_data(0xF4);
 
-    // if (ps2_wait_for_write(1) != 0) goto ps2_timeout_error;
-    // ps2_write_command(0xD4);
-    // if (ps2_wait_for_write(1) != 0) goto ps2_timeout_error;
-    // ps2_write_data(0xF4);
+    if (ps2_wait_for_write(1) != 0) goto ps2_timeout_error;
+    ps2_write_command(0xD4);
+    if (ps2_wait_for_write(1) != 0) goto ps2_timeout_error;
+    ps2_write_data(0xF4);
 
     moe_create_thread(&ps2_hid_thread, priority_realtime, 0, "ps2.hid");
 
