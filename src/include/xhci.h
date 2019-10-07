@@ -295,7 +295,7 @@ typedef struct {
 
 typedef struct {
     _Atomic uint32_t mfindex;
-    uint32_t _rsrc1[7];
+    uint32_t _rsrv1[7];
     struct {
         _Atomic uint32_t iman, imod, erstsz;
         uint32_t _rsrv;

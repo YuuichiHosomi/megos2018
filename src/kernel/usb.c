@@ -14,6 +14,7 @@
 #define MAX_ENDPOINTS       32
 #define MAX_USB_BUFFER      4096
 #define MAX_STRING_BUFFER   4096
+
 typedef struct {
     moe_shared_t shared;
 
@@ -46,7 +47,6 @@ typedef struct {
 
     usb_device_descriptor_t dev_desc;
 } usb_device;
-
 
 typedef struct {
     usb_device *device;
@@ -90,6 +90,7 @@ struct {
     { USB_CLASS_HUB_HS_MTT, "Hi speed Hub with multi TT"},
     { USB_CLASS_HUB_SS, "Super speed Hub"},
     { USB_CLASS_BLUETOOTH, "Bluetooth Interface"},
+    { USB_CLASS_XINPUT, "XInput Device"},
     { 0, NULL },
 };
 
@@ -99,6 +100,42 @@ struct {
 #define MAX_USB_DEVICES 127
 usb_device *usb_devices[MAX_USB_DEVICES];
 
+void usb_dummy_class_driver(usb_device *self);
+void hid_start_class_driver(usb_device *self, int ifno);
+void usb_hub_class_driver(usb_device *self, int ifno);
+void xinput_class_driver(usb_device *self, int ifno);
+
+typedef struct {
+    uint32_t class_code;
+    void (*start_class_driver)(usb_device *self, int ifno);
+} usb_class_driver_declaration;
+
+typedef struct {
+    uint32_t vid_pid;
+    void (*start_class_driver)(usb_device *self);
+} usb_device_driver_declaration;
+
+#define VID_PID(v, p) ((v) << 16 | (p))
+
+static usb_device_driver_declaration device_specific_driver_list[] = {
+    { 0, NULL },
+};
+
+static usb_class_driver_declaration device_class_driver_list[] = {
+    { USB_CLASS_HUB_FS, &usb_hub_class_driver },
+    { USB_CLASS_HUB_HS_STT, &usb_hub_class_driver },
+    { USB_CLASS_HUB_HS_MTT, &usb_hub_class_driver },
+    { 0, NULL },
+};
+
+static usb_class_driver_declaration interface_class_driver_list[] = {
+    { USB_CLASS_HID_GENERIC, &hid_start_class_driver },
+    { USB_CLASS_HID_KBD, &hid_start_class_driver },
+    { USB_CLASS_HID_MOS, &hid_start_class_driver },
+    { USB_CLASS_XINPUT, &xinput_class_driver },
+    { 0, NULL },
+};
+
 
 void usb_dealloc(void *context) {
     usb_device *self = context;
@@ -107,10 +144,6 @@ void usb_dealloc(void *context) {
 
 void usb_release(usb_device *self) {
     moe_release(&self->shared, &usb_dealloc);
-}
-
-static inline uint32_t usb_interface_class(usb_interface_descriptor_t *desc) {
-    return (desc->bInterfaceClass << 16) | (desc->bInterfaceSubClass << 8) | desc->bInterfaceProtocol;
 }
 
 static inline uint16_t usb_u16(uint8_t *p) {
@@ -171,6 +204,15 @@ int usb_read_data(usb_device *self, int epno, uint16_t length, int64_t timeout) 
     }
 }
 
+int usb_write_data(usb_device *self, int epno, uint16_t length, int64_t timeout) {
+    int dci = self->endpoints[(epno & 15)].dci;
+    if (dci) {
+        return self->hci->data_transfer(self->hci, dci, self->base_buffer, length, timeout);
+    } else {
+        return -114514;
+    }
+}
+
 
 static const char *read_string(usb_device *self, int index) {
     int status;
@@ -221,93 +263,13 @@ static int parse_endpoint_bitmap(uint32_t bitmap, int dir) {
 }
 
 
-void hid_thread(void *args) {
-
-    usb_function *self = args;
-    if (!moe_retain(&self->device->shared)) return;
-
-    int ifno = self->ifno;
-    uint32_t bmEndpoint = self->device->interfaces[ifno].endpoint_bitmap;
-    int epIn = parse_endpoint_bitmap(bmEndpoint, 1);
-    int ps = self->device->endpoints[epIn].ps;
-    int interval = self->device->endpoints[epIn].interval * 1000;
-
-    // printf("[HID %d %06x %d %d %d %d]\n", self->device->hci->slot_id, self->class_code, ifno, epIn, ps, interval);
-
-    switch (self->class_code) {
-        case USB_CLASS_HID_KBD:
-        {
-            moe_hid_kbd_state_t kbd;
-            while(self->device->isAlive) {
-                if (interval) moe_usleep(interval);
-                int status = usb_read_data(self->device, epIn, ps, MOE_FOREVER);
-                if (!self->device->isAlive) break;
-                if (status > 0) {
-                    _Atomic uint64_t *p = (void *)&kbd.current;
-                    _Atomic uint64_t *q = self->device->buffer;
-                    *p = *q;
-                    hid_process_key_report(&kbd);
-                } else {
-                    printf("[KBD ERR %d %d]", self->device->hci->slot_id, status);
-                    moe_usleep(50000);
-                }
-            }
-            break;
-        }
-
-        case USB_CLASS_HID_MOS:
-        {
-            moe_hid_mos_state_t mos;
-            while(self->device->isAlive) {
-                if (interval) moe_usleep(interval);
-                int status = usb_read_data(self->device, epIn, ps, MOE_FOREVER);
-                if (!self->device->isAlive) break;
-                if (status > 0) {
-                    hid_raw_mos_report_t *p = self->device->buffer;
-                    hid_raw_mos_report_t report = *p;
-                    hid_process_mouse_report(hid_convert_mouse(&mos, &report));
-                } else {
-                    printf("[MOS ERR %d %d]", self->device->hci->slot_id, status);
-                    moe_usleep(50000);
-                }
-            }
-            break;
-        }
-
-        default:
-        {
-            while(self->device->isAlive) {
-                if (interval) moe_usleep(interval);
-                int status = usb_read_data(self->device, epIn, ps, MOE_FOREVER);
-                if (!self->device->isAlive) break;
-            }
-        }
-    }
-
-    usb_release(self->device);
+usb_function *usb_create_function(usb_device *device, int ifno) {
+    usb_function *result = moe_alloc_object(sizeof(usb_function), 1);
+    result->device = device;
+    result->ifno = ifno;
+    result->class_code = device->interfaces[ifno].if_class;
+    return result;
 }
-
-
-void hid_start_class_driver(usb_device *self, int ifno) {
-    usb_function *fnc = moe_alloc_object(sizeof(usb_function), 1);
-    fnc->device = self;
-    fnc->ifno = ifno;
-    fnc->class_code = self->interfaces[ifno].if_class;
-    char buffer[32];
-    snprintf(buffer, 32, "hid.usb#%d.V%04x:%04x.%d.%06x", self->hci->slot_id, self->vid, self->pid, ifno, fnc->class_code);
-    moe_create_thread(&hid_thread, 0, fnc, buffer);
-}
-
-
-static struct {
-    uint32_t class_code;
-    void (*usb_start_class_driver)(usb_device *self, int ifno);
-} class_driver_list[] = {
-    { USB_CLASS_HID_GENERIC, &hid_start_class_driver },
-    { USB_CLASS_HID_KBD, &hid_start_class_driver },
-    { USB_CLASS_HID_MOS, &hid_start_class_driver },
-    { 0, NULL },
-};
 
 
 int usb_new_device(usb_host_interface_t *hci) {
@@ -333,6 +295,7 @@ int usb_new_device(usb_host_interface_t *hci) {
     }
     if (status < 0) {
         printf("[USB PS ERR %d %d]\n", slot_id, status);
+        return -1;
     }
 
     int max_packet_size = self->hci->get_max_packet_size(self->hci);
@@ -405,7 +368,7 @@ int usb_new_device(usb_host_interface_t *hci) {
                 {
                     c_if = (usb_interface_descriptor_t *)(p + index);
                     int if_index = c_if->bInterfaceNumber;
-                    self->interfaces[if_index].if_class = usb_interface_class(c_if);
+                    self->interfaces[if_index].if_class = (c_if->bInterfaceClass << 16) | (c_if->bInterfaceSubClass << 8) | c_if->bInterfaceProtocol;
                     self->interfaces[if_index].sInterface = read_string(self, c_if->iInterface);
                 }
                     break;
@@ -428,7 +391,9 @@ int usb_new_device(usb_host_interface_t *hci) {
                 }
                 
                 case USB_HID_CLASS_DESCRIPTOR:
+                {
                     break;
+                }
 
                 default:
                 {
@@ -451,13 +416,37 @@ int usb_new_device(usb_host_interface_t *hci) {
         }
     }
 
-    int max_ifno = self->current_config->bNumInterface;
-    for (int ifno= 0; ifno < max_ifno; ifno++) {
-        uint32_t if_class = self->interfaces[ifno].if_class;
-        for (int i = 0; class_driver_list[i].class_code != 0; i++)  {
-            if (class_driver_list[i].class_code == if_class) {
-                class_driver_list[i].usb_start_class_driver(self, ifno);
+    int issued = false;
+    {
+        uint32_t vid_pid = VID_PID(self->vid, self->pid);
+        for (int i = 0; device_specific_driver_list[i].vid_pid != 0; i++) {
+            if (device_specific_driver_list[i].vid_pid == vid_pid) {
+                device_specific_driver_list[i].start_class_driver(self);
+                issued = true;
                 break;
+            }
+        }
+    }
+    if (!issued) {
+        uint32_t dev_class = self->dev_class;
+        for (int i = 0; device_class_driver_list[i].class_code != 0; i++) {
+            if (device_class_driver_list[i].class_code == dev_class) {
+                device_class_driver_list[i].start_class_driver(self, -1);
+                issued = true;
+                break;
+            }
+        }
+    }
+    if (!issued) {
+        int max_ifno = self->current_config->bNumInterface;
+        for (int ifno= 0; ifno < max_ifno; ifno++) {
+            uint32_t if_class = self->interfaces[ifno].if_class;
+            for (int i = 0; interface_class_driver_list[i].class_code != 0; i++)  {
+                if (interface_class_driver_list[i].class_code == if_class) {
+                    interface_class_driver_list[i].start_class_driver(self, ifno);
+                    issued = true;
+                    break;
+                }
             }
         }
     }
@@ -465,6 +454,195 @@ int usb_new_device(usb_host_interface_t *hci) {
     return 0;
 }
 
+void usb_dummy_class_driver(usb_device *self) {
+
+}
+
+
+/*********************************************************************/
+// USB HUB Class Driver
+
+void usb_hub_thread(void *args) {
+    usb_function *self = args;
+}
+
+void usb_hub_class_driver(usb_device *self, int ifno) {
+    if (!moe_retain(&self->shared)) return;
+    usb_function *fnc = usb_create_function(self, 0);
+    char buffer[32];
+    snprintf(buffer, 32, "usb.hub#%d.V%04x:%04x.%06x", self->hci->slot_id, self->vid, self->pid, fnc->class_code);
+    moe_create_thread(&usb_hub_thread, 0, fnc, buffer);
+}
+
+/*********************************************************************/
+// USB HID Class Driver
+
+void hid_thread(void *args) {
+    usb_function *self = (usb_function *)args;
+
+    int ifno = self->ifno;
+    uint32_t bmEndpoint = self->device->interfaces[ifno].endpoint_bitmap;
+    int ep_in = parse_endpoint_bitmap(bmEndpoint, 1);
+    int ps = self->device->endpoints[ep_in].ps;
+    // int interval = self->device->endpoints[ep_in].interval * 1000;
+
+    // printf("[HID %d %06x %d %d %d %d]\n", self->device->hci->slot_id, self->class_code, ifno, ep_in, ps, interval);
+
+    switch (self->class_code) {
+        case USB_CLASS_HID_KBD:
+        {
+            moe_hid_kbd_state_t kbd;
+            while (self->device->isAlive) {
+                int status = usb_read_data(self->device, ep_in, ps, MOE_FOREVER);
+                if (!self->device->isAlive) break;
+                if (status > 0) {
+                    kbd.current = *(hid_raw_kbd_report_t *)self->device->buffer;
+                    hid_process_key_report(&kbd);
+                } else {
+                    printf("[KBD ERR %d %d]", self->device->hci->slot_id, status);
+                    moe_usleep(50000);
+                }
+            }
+            break;
+        }
+
+        case USB_CLASS_HID_MOS:
+        {
+            moe_hid_mos_state_t mos;
+            while (self->device->isAlive) {
+                int status = usb_read_data(self->device, ep_in, ps, MOE_FOREVER);
+                if (!self->device->isAlive) break;
+                if (status > 0) {
+                    hid_raw_mos_report_t *p = self->device->buffer;
+                    hid_raw_mos_report_t report = *p;
+                    hid_process_mouse_report(hid_convert_mouse(&mos, &report));
+                } else {
+                    printf("[MOS ERR %d %d]", self->device->hci->slot_id, status);
+                    moe_usleep(50000);
+                }
+            }
+            break;
+        }
+
+        default:
+        {
+            while(self->device->isAlive) {
+                // if (interval) moe_usleep(interval);
+                int status = usb_read_data(self->device, ep_in, ps, MOE_FOREVER);
+                if (!self->device->isAlive) break;
+                moe_usleep(50000);
+            }
+        }
+    }
+
+    usb_release(self->device);
+}
+
+void hid_start_class_driver(usb_device *self, int ifno) {
+    if (!moe_retain(&self->shared)) return;
+    usb_function *fnc = usb_create_function(self, ifno);
+    char buffer[32];
+    snprintf(buffer, 32, "hid.usb#%d.V%04x:%04x.%d.%06x", self->hci->slot_id, self->vid, self->pid, ifno, fnc->class_code);
+    moe_create_thread(&hid_thread, 0, fnc, buffer);
+}
+
+
+/*********************************************************************/
+// XInput Device
+
+// refs https://gitlab.com/xboxdrv/xboxdrv/blob/develop/PROTOCOL
+typedef struct Xbox360Msg {
+  // -------------------------
+  unsigned int type       :8; // always 0
+  unsigned int length     :8; // always 0x14 
+
+  // data[2] ------------------
+  unsigned int dpad_up     :1;
+  unsigned int dpad_down   :1;
+  unsigned int dpad_left   :1;
+  unsigned int dpad_right  :1;
+
+  unsigned int start       :1;
+  unsigned int back        :1;
+
+  unsigned int thumb_l     :1;
+  unsigned int thumb_r     :1;
+
+  // data[3] ------------------
+  unsigned int lb          :1;
+  unsigned int rb          :1;
+  unsigned int guide       :1;
+  unsigned int dummy1      :1; // always 0
+
+  unsigned int a           :1; // green
+  unsigned int b           :1; // red
+  unsigned int x           :1; // blue
+  unsigned int y           :1; // yellow
+
+  // data[4] ------------------
+  unsigned int lt          :8;
+  unsigned int rt          :8;
+
+  // data[6] ------------------
+  int x1                   :16;
+  int y1                   :16;
+
+  // data[10] -----------------
+  int x2                   :16;
+  int y2                   :16;
+
+  // data[14]; ----------------
+  unsigned int dummy2      :32; // always 0
+  unsigned int dummy3      :16; // always 0
+} __attribute__((__packed__)) Xbox360Msg;
+
+
+void xinput_thread(void *args) {
+    usb_function *self = (usb_function *)args;
+    int ifno = self->ifno;
+    uint32_t bmEndpoint = self->device->interfaces[ifno].endpoint_bitmap;
+    int ep_in = parse_endpoint_bitmap(bmEndpoint, 1);
+    int ep_out = parse_endpoint_bitmap(bmEndpoint, 0);
+    int ps = self->device->endpoints[ep_in].ps;
+    // printf("[XINPUT %d %06x %d %d]\n", self->device->hci->slot_id, self->class_code, ifno, ep_in);
+
+    while (self->device->isAlive) {
+        int status = usb_read_data(self->device, ep_in, ps, MOE_FOREVER);
+        if (!self->device->isAlive) break;
+        if (status > 0) {
+            Xbox360Msg *msg = (Xbox360Msg *)self->device->buffer;
+            switch (msg->type) {
+                case 0x00:
+                {
+                    _Atomic uint64_t *p = (void *)((uintptr_t)self->device->buffer + 2);
+                    if (*p) {
+                        printf("[XI %d %d %d %d]", msg->a, msg->b, msg->x, msg->y);
+                    }
+                    break;
+                }
+
+                default:
+                    break;
+            }
+        } else {
+            printf("[XI ERR %d %d]", self->device->hci->slot_id, status);
+            moe_usleep(50000);
+        }
+    }
+
+    usb_release(self->device);
+}
+
+void xinput_class_driver(usb_device *self, int ifno) {
+    if (!moe_retain(&self->shared)) return;
+    usb_function *fnc = usb_create_function(self, ifno);
+    char buffer[32];
+    snprintf(buffer, 32, "xinput#%d.V%04x:%04x.%d.%06x", self->hci->slot_id, self->vid, self->pid, ifno, fnc->class_code);
+    moe_create_thread(&xinput_thread, 0, fnc, buffer);
+}
+
+
+/*********************************************************************/
 
 
 int cmd_lsusb(int argc, char **argv) {
