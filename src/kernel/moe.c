@@ -320,7 +320,6 @@ _Noreturn void moe_exit_thread(uint32_t exit_code) {
     moe_thread_t *current = _get_current_thread();
     current->exit_code = exit_code;
     current->zombie = 1;
-    moe_usleep(MOE_FOREVER);
     for (;;) moe_usleep(MOE_FOREVER);
 }
 
