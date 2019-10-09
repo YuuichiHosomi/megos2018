@@ -23,26 +23,32 @@
 
 ## How to Build
 
-- build
+### build
 
 ```
-rake
+$ rake
 ```
 
-- Install to mnt/
+### build boot loader for 32bit UEFI
 
 ```
-rake install
+$ rake ARCH=i386
 ```
 
-- Run with qemu
+### Install to mnt/
 
 ```
-rake run
+$ rake install
 ```
 
-- Make an iso image
+### Run with qemu
 
 ```
-rake iso
+$ rake run
+```
+
+### Make an iso image
+
+```
+$ rake iso
 ```
