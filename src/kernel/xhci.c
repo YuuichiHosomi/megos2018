@@ -329,7 +329,7 @@ uint64_t configure_endpoint(xhci_t *self, int slot_id, uint32_t dci, uint32_t ep
             case 3: // HS
                 ep->max_packet_size = 64;
                 break;
-            default:
+            default: // LS/FS
                 ep->max_packet_size = 8;
                 break;
         }
@@ -505,7 +505,7 @@ int uhi_control(usb_host_interface_t *uhc, int trt, urb_setup_data_t setup_data,
     }
 }
 
-int uhi_data_transfer(usb_host_interface_t *uhc, int dci, uintptr_t buffer, uint16_t length, int64_t timeout) {
+int uhi_data_transfer(usb_host_interface_t *uhc, int dci, uintptr_t buffer, uint16_t length) {
     xhci_t *self = uhc->host_context;
     int slot_id = uhc->slot_id;
 
@@ -518,7 +518,7 @@ int uhi_data_transfer(usb_host_interface_t *uhc, int dci, uintptr_t buffer, uint
     ring_context *ctx = find_ep_ring(self, slot_id, dci);
     ctx->response = trb_create(0);
     xhci_write_transfer(self, NULL, slot_id, dci, &trb, 1);
-    int result = moe_sem_wait(ctx->sem, timeout);
+    int result = moe_sem_wait(ctx->sem, MOE_FOREVER);
 
     if (result < 0) return -1;
 
@@ -656,11 +656,6 @@ int xhci_init_dev(xhci_t *self) {
         moe_usleep(1000);
     }
 
-    // Reset all ports (qemu)
-    for (int i = 1; i <= self->max_port; i++) {
-        xhci_reset_port(self, i);
-    }
-
     return 0;
 }
 
@@ -742,9 +737,9 @@ static void process_event(xhci_t *self) {
 _Noreturn void xhci_event_thread(void *args) {
     xhci_t *self = args;
 
-    moe_create_thread(&xhci_config_thread, priority_normal, &xhci, "xhci.config");
-
     xhci_init_dev(self);
+
+    moe_create_thread(&xhci_config_thread, priority_normal, &xhci, "xhci.config");
 
 #ifdef DEBUG
     uint8_t SBRN = pci_read_config(self->pci_base + 0x60);
@@ -844,8 +839,8 @@ static int port_initialize(xhci_t *self, int port_id) {
             if (self->port2slot[port_id]) {
                 int slot_id = self->port2slot[port_id];
                 usb_host_interface_t *hci = self->usb_devices[slot_id].hci;
-                if (hci && hci->dealloc) {
-                    hci->dealloc(hci);
+                if (hci && hci->dispose) {
+                    hci->dispose(hci);
                 }
                 atomic_store(portsc, (port_status & PORTSC_MAGIC_WORD) | USB_PORTSC_CSC);
                 xhci_trb_t cmd = trb_create(TRB_DISABLE_SLOT_COMMAND);
@@ -871,6 +866,11 @@ static int port_initialize(xhci_t *self, int port_id) {
 // xHCI Configuration Thread
 _Noreturn void xhci_config_thread(void *args) {
     xhci_t *self = args;
+
+    // Reset all ports (qemu)
+    for (int i = 1; i <= self->max_port; i++) {
+        xhci_reset_port(self, i);
+    }
 
     for (;;) {
         moe_sem_wait(self->sem_config, MOE_FOREVER);

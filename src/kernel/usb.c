@@ -35,12 +35,12 @@ typedef struct {
     uint16_t vid, pid, usb_ver;
     const char *sProduct;
 
-    struct {
+    struct interfaces {
         uint32_t if_class, endpoint_bitmap;
         const char *sInterface;
     } interfaces[MAX_IFS];
 
-    struct {
+    struct endpoints {
         uint8_t dci, interval;
         uint16_t ps;
     } endpoints[MAX_ENDPOINTS];
@@ -112,12 +112,13 @@ typedef struct {
 
 typedef struct {
     uint32_t vid_pid;
-    void (*start_class_driver)(usb_device *self);
+    void (*start_device_driver)(usb_device *self);
 } usb_device_driver_declaration;
 
 #define VID_PID(v, p) ((v) << 16 | (p))
 
 static usb_device_driver_declaration device_specific_driver_list[] = {
+    // { VID_PID(0x067B, 0x2303), &usb_dummy_class_driver }, // PL2303
     { 0, NULL },
 };
 
@@ -195,19 +196,19 @@ int usb_config_endpoint(usb_device *self, usb_endpoint_descriptor_t *endpoint) {
 }
 
 
-int usb_read_data(usb_device *self, int epno, uint16_t length, int64_t timeout) {
+int usb_read_data(usb_device *self, int epno, uint16_t length) {
     int dci = self->endpoints[16 + (epno & 15)].dci;
     if (dci) {
-        return self->hci->data_transfer(self->hci, dci, self->base_buffer, length, timeout);
+        return self->hci->data_transfer(self->hci, dci, self->base_buffer, length);
     } else {
         return -114514;
     }
 }
 
-int usb_write_data(usb_device *self, int epno, uint16_t length, int64_t timeout) {
+int usb_write_data(usb_device *self, int epno, uint16_t length) {
     int dci = self->endpoints[(epno & 15)].dci;
     if (dci) {
-        return self->hci->data_transfer(self->hci, dci, self->base_buffer, length, timeout);
+        return self->hci->data_transfer(self->hci, dci, self->base_buffer, length);
     } else {
         return -114514;
     }
@@ -249,7 +250,7 @@ const char *usb_get_generic_name(uint32_t usb_class) {
 }
 
 
-void uhci_dealloc(usb_host_interface_t *hci) {
+void uhci_dispose(usb_host_interface_t *hci) {
     usb_device *self = hci->device_context;
     usb_devices[self->hci->slot_id] = NULL;
     self->isAlive = false;
@@ -279,10 +280,10 @@ int usb_new_device(usb_host_interface_t *hci) {
     self->base_buffer = moe_alloc_io_buffer(MAX_USB_BUFFER);
     self->buffer = MOE_PA2VA(self->base_buffer);
     self->isAlive = true;
-    self->strings = moe_alloc_object(sizeof(MAX_STRING_BUFFER), 1);
+    self->strings = moe_alloc_object(MAX_STRING_BUFFER, 1);
     self->hci = hci;
     self->hci->device_context = self;
-    self->hci->dealloc = &uhci_dealloc;
+    self->hci->dispose = &uhci_dispose;
     usb_devices[self->hci->slot_id] = self;
 
     int slot_id = self->hci->slot_id;
@@ -300,15 +301,12 @@ int usb_new_device(usb_host_interface_t *hci) {
 
     int max_packet_size = self->hci->get_max_packet_size(self->hci);
     usb_device_descriptor_t *temp = self->buffer;
-    if (max_packet_size != temp->bMaxPacketSize0) {
-        // printf("@[%d USB %d.%d PS %d]", slot_id, temp->bcdUSB[1], temp->bcdUSB[0] >> 4, temp->bMaxPacketSize0);
-        if (temp->bcdUSB[1] < 3) {
+    if (temp->bcdUSB[1] < 3) {
+        if (max_packet_size != temp->bMaxPacketSize0) {
             self->hci->set_max_packet_size(self->hci, temp->bMaxPacketSize0, USB_TIMEOUT);
-        } else {
-            self->hci->set_max_packet_size(self->hci, 1 << temp->bMaxPacketSize0, USB_TIMEOUT);
-        }
-        moe_usleep(50000);
-    };
+            moe_usleep(50000);
+        };
+    }
 
     moe_usleep(10000);
     status = usb_get_descriptor(self, USB_DEVICE_DESCRIPTOR, 0, sizeof(usb_device_descriptor_t));
@@ -421,7 +419,7 @@ int usb_new_device(usb_host_interface_t *hci) {
         uint32_t vid_pid = VID_PID(self->vid, self->pid);
         for (int i = 0; device_specific_driver_list[i].vid_pid != 0; i++) {
             if (device_specific_driver_list[i].vid_pid == vid_pid) {
-                device_specific_driver_list[i].start_class_driver(self);
+                device_specific_driver_list[i].start_device_driver(self);
                 issued = true;
                 break;
             }
@@ -493,7 +491,7 @@ void hid_thread(void *args) {
         {
             moe_hid_kbd_state_t kbd;
             while (self->device->isAlive) {
-                int status = usb_read_data(self->device, ep_in, ps, MOE_FOREVER);
+                int status = usb_read_data(self->device, ep_in, ps);
                 if (!self->device->isAlive) break;
                 if (status > 0) {
                     kbd.current = *(hid_raw_kbd_report_t *)self->device->buffer;
@@ -510,7 +508,7 @@ void hid_thread(void *args) {
         {
             moe_hid_mos_state_t mos;
             while (self->device->isAlive) {
-                int status = usb_read_data(self->device, ep_in, ps, MOE_FOREVER);
+                int status = usb_read_data(self->device, ep_in, ps);
                 if (!self->device->isAlive) break;
                 if (status > 0) {
                     hid_raw_mos_report_t *p = self->device->buffer;
@@ -527,8 +525,7 @@ void hid_thread(void *args) {
         default:
         {
             while(self->device->isAlive) {
-                // if (interval) moe_usleep(interval);
-                int status = usb_read_data(self->device, ep_in, ps, MOE_FOREVER);
+                int status = usb_read_data(self->device, ep_in, ps);
                 if (!self->device->isAlive) break;
                 moe_usleep(50000);
             }
@@ -607,7 +604,7 @@ void xinput_thread(void *args) {
     // printf("[XINPUT %d %06x %d %d]\n", self->device->hci->slot_id, self->class_code, ifno, ep_in);
 
     while (self->device->isAlive) {
-        int status = usb_read_data(self->device, ep_in, ps, MOE_FOREVER);
+        int status = usb_read_data(self->device, ep_in, ps);
         if (!self->device->isAlive) break;
         if (status > 0) {
             Xbox360Msg *msg = (Xbox360Msg *)self->device->buffer;

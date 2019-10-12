@@ -190,7 +190,7 @@ typedef struct usb_host_interface_t {
     moe_semaphore_t *semaphore;
     int slot_id;
 
-    void (*dealloc)(usb_host_interface_t *self);
+    void (*dispose)(usb_host_interface_t *self);
 
     int (*configure_endpoint)(usb_host_interface_t *self, usb_endpoint_descriptor_t *endpoint, int64_t timeout);
     int (*reset_endpoint)(usb_host_interface_t *self, int epno, int64_t timeout);
@@ -199,6 +199,6 @@ typedef struct usb_host_interface_t {
 
     int (*control)(usb_host_interface_t *self, int trt, urb_setup_data_t setup, uintptr_t buffer, int64_t timeout);
 
-    int (*data_transfer)(usb_host_interface_t *self, int dci, uintptr_t buffer, uint16_t length, int64_t timeout);
+    int (*data_transfer)(usb_host_interface_t *self, int dci, uintptr_t buffer, uint16_t length);
 
 } usb_host_interface_t;
