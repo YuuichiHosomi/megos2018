@@ -175,7 +175,7 @@ static uintptr_t alloc_ep_ring(xhci_t *self, int slot_id, int epno) {
 
 static void copy_trb(xhci_trb_t *buffer, const xhci_trb_t *trb, int cycle) {
     _Atomic uint32_t *p = (void *)buffer;
-    uint32_t *q = (void *)trb;
+    _Atomic const uint32_t *q = (void *)trb;
     atomic_store(&p[0], q[0]);
     atomic_store(&p[1], q[1]);
     atomic_store(&p[2], q[2]);

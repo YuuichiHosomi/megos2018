@@ -139,7 +139,7 @@ static usb_class_driver_declaration interface_class_driver_list[] = {
 
 
 void usb_dealloc(void *context) {
-    usb_device *self = context;
+    // usb_device *self = context;
     // TODO: release buffer
 }
 
@@ -462,6 +462,34 @@ void usb_dummy_class_driver(usb_device *self) {
 
 void usb_hub_thread(void *args) {
     usb_function *self = args;
+
+    usb_hub_descriptor_t hub_desc;
+
+    int ifno = 0;
+    uint32_t bmEndpoint = self->device->interfaces[ifno].endpoint_bitmap;
+    int ep_in = parse_endpoint_bitmap(bmEndpoint, 1);
+    int ps = self->device->endpoints[ep_in].ps;
+
+    int status;
+    status = usb_get_hub_descriptor(self->device, USB_HUB_DESCRIPTOR, 0, sizeof(usb_hub_descriptor_t));
+    if (status > 0) {
+        usb_hub_descriptor_t *p = (usb_hub_descriptor_t *)self->device->buffer;
+        hub_desc = *p;
+    }
+    // uint16_t hub_char = usb_u16(hub_desc.wHubCharacteristics);
+    // printf("[USB_HUB SLOT %d STATUS %d PORT %d FLAGS %x %d %d]\n", self->device->hci->slot_id, status, hub_desc.bNbrPorts, hub_char, hub_desc.bPwrOn2PwrGood, hub_desc.bHubContrCurrent);
+    // printf("[Installed USB HUB SLOT %d IF %d EP %d]\n", self->device->hci->slot_id, ifno, ep_in);
+
+    while(self->device->isAlive) {
+        int status = usb_read_data(self->device, ep_in, ps);
+        (void)status;
+        if (!self->device->isAlive) break;
+        _Atomic uint8_t *p = self->device->buffer;
+        printf("[Hub Status %d]\n", *p);
+        moe_usleep(50000);
+    }
+
+    usb_release(self->device);
 }
 
 void usb_hub_class_driver(usb_device *self, int ifno) {
@@ -471,6 +499,7 @@ void usb_hub_class_driver(usb_device *self, int ifno) {
     snprintf(buffer, 32, "usb.hub#%d.V%04x:%04x.%06x", self->hci->slot_id, self->vid, self->pid, fnc->class_code);
     moe_create_thread(&usb_hub_thread, 0, fnc, buffer);
 }
+
 
 /*********************************************************************/
 // USB HID Class Driver
@@ -526,6 +555,7 @@ void hid_thread(void *args) {
         {
             while(self->device->isAlive) {
                 int status = usb_read_data(self->device, ep_in, ps);
+                (void)status;
                 if (!self->device->isAlive) break;
                 moe_usleep(50000);
             }
@@ -599,7 +629,7 @@ void xinput_thread(void *args) {
     int ifno = self->ifno;
     uint32_t bmEndpoint = self->device->interfaces[ifno].endpoint_bitmap;
     int ep_in = parse_endpoint_bitmap(bmEndpoint, 1);
-    int ep_out = parse_endpoint_bitmap(bmEndpoint, 0);
+    // int ep_out = parse_endpoint_bitmap(bmEndpoint, 0);
     int ps = self->device->endpoints[ep_in].ps;
     // printf("[XINPUT %d %06x %d %d]\n", self->device->hci->slot_id, self->class_code, ifno, ep_in);
 
