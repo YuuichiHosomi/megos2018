@@ -12,10 +12,12 @@
 - Up to 32 logical processor cores
 - XX MB of system memory
 - 800x600 pixels graphics display
+- PS/2 Keyboard and mouse
+- xHCI
 
 ## Requirements
 
-- clang + lld (llvm)
+- clang + lld (llvm@9)
 - rake (ruby)
 - nasm
 - qemu (optional)
