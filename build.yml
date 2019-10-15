@@ -34,8 +34,9 @@ targets:
       - memory
       - moe
       - page
+      - pci
       - shell
+      - syscall
       - usb
       - xhci
       - cpuid
-      - syscall
