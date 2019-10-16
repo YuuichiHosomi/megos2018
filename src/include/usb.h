@@ -70,6 +70,9 @@ enum {
     URB_TRT_NO_DATA = 0,
     URB_TRT_CONTROL_OUT = 2,
     URB_TRT_CONTROL_IN = 3,
+
+    HID_BOOT_PROTOCOL = 0,
+    HID_REPORT_PROTOCOL = 1,
 };
 
 

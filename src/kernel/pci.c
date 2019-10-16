@@ -151,5 +151,3 @@ int cmd_lspci(int argc, char **argv) {
     }
     return 0;
 }
-
-

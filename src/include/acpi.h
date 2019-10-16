@@ -139,3 +139,20 @@ typedef struct {
 } __attribute__((packed)) acpi_hpet_t;
 
 #define ACPI_HPET_SIGNATURE         "HPET"
+
+//  PCIe Enhanced Configuration Mechanism
+typedef struct {
+    int64_t base_address;
+    uint16_t pci_seg_grp;
+    uint8_t start_bus;
+    uint8_t end_bus;
+    uint32_t Reserved;
+} __attribute__((packed)) acpi_mcfg_csbaas_t;
+
+typedef struct {
+    acpi_header_t   Header;
+    uint64_t Reserved;
+    acpi_mcfg_csbaas_t Entry[1];
+} __attribute__((packed)) acpi_mcfg_t;
+
+#define ACPI_MCFG_SIGNATURE         "MCFG"

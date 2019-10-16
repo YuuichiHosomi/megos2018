@@ -14,6 +14,9 @@
 #define MAX_ENDPOINTS       32
 #define MAX_USB_BUFFER      4096
 #define MAX_STRING_BUFFER   4096
+#define USB_TIMEOUT         MOE_FOREVER
+#define ERROR_TIMEOUT       -1
+#define MAX_USB_DEVICES     127
 
 typedef struct {
     moe_shared_t shared;
@@ -59,7 +62,6 @@ struct {
     uint8_t base_class;
     const char *class_string;
 } device_base_class_strings[] = {
-    { USB_BASE_CLASS_COMPOSITE, "Composite Device" },
     { USB_BASE_CLASS_AUDIO, "Audio Device" },
     { USB_BASE_CLASS_COMM, "Communication Device" },
     { USB_BASE_CLASS_HID, "Human Interface Device" },
@@ -95,9 +97,6 @@ struct {
 };
 
 
-#define USB_TIMEOUT 3000000
-#define ERROR_TIMEOUT -1
-#define MAX_USB_DEVICES 127
 usb_device *usb_devices[MAX_USB_DEVICES];
 
 void usb_dummy_class_driver(usb_device *self);
@@ -172,12 +171,6 @@ int usb_get_class_descriptor(usb_device *self, uint8_t request_type, uint8_t des
     urb_setup_data_t setup_data = setup_create(request_type, URB_GET_DESCRIPTOR, (desc_type << 8) | index, ifno, length);
     return self->hci->control(self->hci, URB_TRT_CONTROL_IN, setup_data, self->base_buffer, USB_TIMEOUT);
 }
-
-int hid_set_protocol(usb_device *self, int ifno, int value) {
-    urb_setup_data_t setup_data = setup_create(0x21, URB_HID_SET_PROTOCOL, value, ifno, 0);
-    return self->hci->control(self->hci, URB_TRT_NO_DATA, setup_data, 0, USB_TIMEOUT);
-}
-
 
 int usb_set_configuration(usb_device *self, int value) {
     urb_setup_data_t setup_data = setup_create(0x00, URB_SET_CONFIGURATION, value, 0, 0);
@@ -504,6 +497,16 @@ void usb_hub_class_driver(usb_device *self, int ifno) {
 /*********************************************************************/
 // USB HID Class Driver
 
+int hid_set_protocol(usb_device *self, int ifno, int value) {
+    urb_setup_data_t setup_data = setup_create(0x21, URB_HID_SET_PROTOCOL, value, ifno, 0);
+    return self->hci->control(self->hci, URB_TRT_NO_DATA, setup_data, 0, USB_TIMEOUT);
+}
+
+int hid_set_report(usb_device *self, int ifno, uint8_t report_type, uint8_t report_id, size_t length) {
+    urb_setup_data_t setup_data = setup_create(0x21, URB_HID_SET_REPORT, (report_type << 8) | report_id, ifno, length);
+    return self->hci->control(self->hci, URB_TRT_CONTROL_OUT, setup_data, self->base_buffer, USB_TIMEOUT);
+}
+
 void hid_thread(void *args) {
     usb_function *self = (usb_function *)args;
 
@@ -518,12 +521,24 @@ void hid_thread(void *args) {
     switch (self->class_code) {
         case USB_CLASS_HID_KBD:
         {
+            int status = hid_set_protocol(self->device, ifno, HID_BOOT_PROTOCOL);
+            for (int i = 0; i < 3; i++) {
+                // flash
+                uint8_t *p = self->device->buffer;
+                p[0] = 1 << i;
+                hid_set_report(self->device, ifno, 2, 0, 0x01);
+                moe_usleep(50000);
+                p[0] = 0x00;
+                hid_set_report(self->device, ifno, 2, 0, 0x01);
+                moe_usleep(50000);
+            }
             moe_hid_kbd_state_t kbd;
             while (self->device->isAlive) {
-                int status = usb_read_data(self->device, ep_in, ps);
+                status = usb_read_data(self->device, ep_in, ps);
                 if (!self->device->isAlive) break;
-                if (status > 0) {
-                    kbd.current = *(hid_raw_kbd_report_t *)self->device->buffer;
+                hid_raw_kbd_report_t *report = self->device->buffer;
+                if (status == ps) {
+                    kbd.current = *report;
                     hid_process_key_report(&kbd);
                 } else {
                     printf("[KBD ERR %d %d]", self->device->hci->slot_id, status);
@@ -535,14 +550,14 @@ void hid_thread(void *args) {
 
         case USB_CLASS_HID_MOS:
         {
+            int status = hid_set_protocol(self->device, ifno, HID_BOOT_PROTOCOL);
             moe_hid_mos_state_t mos;
             while (self->device->isAlive) {
-                int status = usb_read_data(self->device, ep_in, ps);
+                status = usb_read_data(self->device, ep_in, ps);
+                hid_raw_mos_report_t *report = self->device->buffer;
                 if (!self->device->isAlive) break;
-                if (status > 0) {
-                    hid_raw_mos_report_t *p = self->device->buffer;
-                    hid_raw_mos_report_t report = *p;
-                    hid_process_mouse_report(hid_convert_mouse(&mos, &report));
+                if (status == ps) {
+                    hid_process_mouse_report(hid_convert_mouse(&mos, report));
                 } else {
                     printf("[MOS ERR %d %d]", self->device->hci->slot_id, status);
                     moe_usleep(50000);
@@ -557,6 +572,8 @@ void hid_thread(void *args) {
                 int status = usb_read_data(self->device, ep_in, ps);
                 (void)status;
                 if (!self->device->isAlive) break;
+                // uint64_t *p = self->device->buffer;
+                // printf("[HID %d %04llx]", self->device->hci->slot_id, *p);
                 moe_usleep(50000);
             }
         }
@@ -680,7 +697,11 @@ int cmd_lsusb(int argc, char **argv) {
         if (config) {
             const char *product_name = device->sProduct;
             if (!product_name) {
-                product_name = usb_get_generic_name(device->dev_class);
+                if (device->dev_class > 0) {
+                    product_name = usb_get_generic_name(device->dev_class);
+                } else {
+                    product_name = "Composite Device";
+                }
             }
             printf("Device %d ID %04x:%04x Class %06x USB %x.%x IF %d %dmA %s\n",
                 i, device->vid, device->pid, device->dev_class,

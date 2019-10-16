@@ -74,6 +74,7 @@ typedef struct xhci_t {
     moe_semaphore_t *sem_event;
     moe_semaphore_t *sem_urb;
     moe_semaphore_t *sem_config;
+    moe_semaphore_t *sem_control;
 
     ring_context tr_ctx[MAX_TR];
 
@@ -488,10 +489,12 @@ int uhi_control(usb_host_interface_t *uhc, int trt, urb_setup_data_t setup_data,
     status.normal.DIR = (trt != URB_TRT_CONTROL_IN);
     status.normal.IOC = 1;
 
+    moe_sem_wait(self->sem_control, MOE_FOREVER);
     ring_context *ctx = find_ep_ring(self, slot_id, dci);
     ctx->response = trb_create(0);
     xhci_write_transfer(self, NULL, slot_id, dci, &status, 1);
     int result = moe_sem_wait(ctx->sem, timeout);
+    moe_sem_signal(self->sem_control);
 
     if (result < 0) return -1;
 
@@ -879,7 +882,9 @@ _Noreturn void xhci_config_thread(void *args) {
         do {
             port_id = moe_queue_read(self->port_change_queue, 0);
             if (port_id > 0) {
+                moe_sem_wait(self->sem_control, MOE_FOREVER);
                 int slot_id = port_initialize(self, port_id);
+                moe_sem_signal(self->sem_control);
                 if (slot_id > 0) {
                     usb_host_interface_t *hci = self->usb_devices[slot_id].hci = moe_alloc_object(sizeof(usb_host_interface_t), 1);
                     *hci = self->hci_vt;
@@ -912,6 +917,7 @@ void xhci_init() {
         xhci.sem_event = moe_sem_create(0);
         xhci.sem_config = moe_sem_create(0);
         xhci.sem_urb = moe_sem_create(0);
+        xhci.sem_control = moe_sem_create(1);
         xhci.port_change_queue = moe_queue_create(MAX_PORT_CHANGE);
         xhci.urbs = moe_alloc_object(sizeof(usb_request_block_t), MAX_URB);
 
