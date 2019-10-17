@@ -336,7 +336,26 @@ uint64_t configure_endpoint(xhci_t *self, int slot_id, uint32_t dci, uint32_t ep
         }
         ep->average_trb_len = 8;
     }
-    ep->interval = interval;
+    if (interval) {
+        switch (slot->speed) {
+            case 1: // LS
+            case 2: // FS
+            {
+                if ((ep_type & 3) == 3) { // Interrupt
+                    int iv = 32 - __builtin_clz(interval) + 3;
+                    ep->interval = iv;
+                } else {
+                    ep->interval = interval + 2;
+                }
+            }
+                break;
+
+            case 3: // HS
+            case 4: // SS
+                ep->interval = interval - 1;
+                break;
+        }
+    }
     ep->error_count = 3;
     ep->TRDP = TR;
 
