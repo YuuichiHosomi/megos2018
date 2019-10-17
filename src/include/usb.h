@@ -192,15 +192,16 @@ typedef struct usb_host_interface_t {
     void *device_context;
     moe_semaphore_t *semaphore;
     int slot_id;
+    int speed;
 
     void (*dispose)(usb_host_interface_t *self);
 
-    int (*configure_endpoint)(usb_host_interface_t *self, usb_endpoint_descriptor_t *endpoint, int64_t timeout);
-    int (*reset_endpoint)(usb_host_interface_t *self, int epno, int64_t timeout);
-    int (*set_max_packet_size)(usb_host_interface_t *self, int mask_packet_size, int64_t timeout);
+    int (*configure_endpoint)(usb_host_interface_t *self, usb_endpoint_descriptor_t *endpoint);
+    int (*reset_endpoint)(usb_host_interface_t *self, int epno);
+    int (*set_max_packet_size)(usb_host_interface_t *self, int mask_packet_size);
     int (*get_max_packet_size)(usb_host_interface_t *self);
 
-    int (*control)(usb_host_interface_t *self, int trt, urb_setup_data_t setup, uintptr_t buffer, int64_t timeout);
+    int (*control)(usb_host_interface_t *self, int trt, urb_setup_data_t setup, uintptr_t buffer);
 
     int (*data_transfer)(usb_host_interface_t *self, int dci, uintptr_t buffer, uint16_t length);
 

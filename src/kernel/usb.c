@@ -14,7 +14,6 @@
 #define MAX_ENDPOINTS       32
 #define MAX_USB_BUFFER      4096
 #define MAX_STRING_BUFFER   4096
-#define USB_TIMEOUT         MOE_FOREVER
 #define ERROR_TIMEOUT       -1
 #define MAX_USB_DEVICES     127
 
@@ -35,7 +34,13 @@ typedef struct {
     _Atomic int isAlive;
 
     uint32_t dev_class;
-    uint16_t vid, pid, usb_ver;
+    union {
+        uint32_t vid_pid;
+        struct {
+            uint16_t pid, vid;
+        };
+    };
+    uint16_t usb_ver;
     const char *sProduct;
 
     struct interfaces {
@@ -164,28 +169,28 @@ static urb_setup_data_t setup_create(uint8_t type, uint8_t request, uint16_t val
 
 int usb_get_descriptor(usb_device *self, uint8_t desc_type, uint8_t index, size_t length) {
     urb_setup_data_t setup_data = setup_create(0x80, URB_GET_DESCRIPTOR, (desc_type << 8) | index, 0, length);
-    return self->hci->control(self->hci, URB_TRT_CONTROL_IN, setup_data, self->base_buffer, USB_TIMEOUT);
+    return self->hci->control(self->hci, URB_TRT_CONTROL_IN, setup_data, self->base_buffer);
 }
 
 int usb_get_class_descriptor(usb_device *self, uint8_t request_type, uint8_t desc_type, uint8_t index, int ifno, size_t length) {
     urb_setup_data_t setup_data = setup_create(request_type, URB_GET_DESCRIPTOR, (desc_type << 8) | index, ifno, length);
-    return self->hci->control(self->hci, URB_TRT_CONTROL_IN, setup_data, self->base_buffer, USB_TIMEOUT);
+    return self->hci->control(self->hci, URB_TRT_CONTROL_IN, setup_data, self->base_buffer);
 }
 
 int usb_set_configuration(usb_device *self, int value) {
     urb_setup_data_t setup_data = setup_create(0x00, URB_SET_CONFIGURATION, value, 0, 0);
-    return self->hci->control(self->hci, URB_TRT_NO_DATA, setup_data, 0, USB_TIMEOUT);
+    return self->hci->control(self->hci, URB_TRT_NO_DATA, setup_data, 0);
 }
 
 
 int usb_get_hub_descriptor(usb_device *self, uint8_t desc_type, uint8_t index, size_t length) {
     urb_setup_data_t setup_data = setup_create(0xA0, URB_GET_DESCRIPTOR, (desc_type << 8) | index, 0, length);
-    return self->hci->control(self->hci, URB_TRT_CONTROL_IN, setup_data, self->base_buffer, USB_TIMEOUT);
+    return self->hci->control(self->hci, URB_TRT_CONTROL_IN, setup_data, self->base_buffer);
 }
 
 
 int usb_config_endpoint(usb_device *self, usb_endpoint_descriptor_t *endpoint) {
-    return self->hci->configure_endpoint(self->hci, endpoint, USB_TIMEOUT);
+    return self->hci->configure_endpoint(self->hci, endpoint);
 }
 
 
@@ -296,7 +301,7 @@ int usb_new_device(usb_host_interface_t *hci) {
     usb_device_descriptor_t *temp = self->buffer;
     if (temp->bcdUSB[1] < 3) {
         if (max_packet_size != temp->bMaxPacketSize0) {
-            self->hci->set_max_packet_size(self->hci, temp->bMaxPacketSize0, USB_TIMEOUT);
+            self->hci->set_max_packet_size(self->hci, temp->bMaxPacketSize0);
             moe_usleep(50000);
         };
     }
@@ -372,7 +377,7 @@ int usb_new_device(usb_host_interface_t *hci) {
                     int ep_idx = (ep_adr & 15) | ((ep_adr & 0x80) ? 0x10 : 0);
                     self->interfaces[if_index].endpoint_bitmap |= (1 << ep_idx);
                     moe_usleep(50000);
-                    status = self->hci->configure_endpoint(self->hci, endpoint, USB_TIMEOUT);
+                    status = self->hci->configure_endpoint(self->hci, endpoint);
                     if (status > 0) {
                         self->endpoints[ep_idx].dci = status;
                         self->endpoints[ep_idx].interval = endpoint->bInterval;
@@ -499,12 +504,12 @@ void usb_hub_class_driver(usb_device *self, int ifno) {
 
 int hid_set_protocol(usb_device *self, int ifno, int value) {
     urb_setup_data_t setup_data = setup_create(0x21, URB_HID_SET_PROTOCOL, value, ifno, 0);
-    return self->hci->control(self->hci, URB_TRT_NO_DATA, setup_data, 0, USB_TIMEOUT);
+    return self->hci->control(self->hci, URB_TRT_NO_DATA, setup_data, 0);
 }
 
 int hid_set_report(usb_device *self, int ifno, uint8_t report_type, uint8_t report_id, size_t length) {
     urb_setup_data_t setup_data = setup_create(0x21, URB_HID_SET_REPORT, (report_type << 8) | report_id, ifno, length);
-    return self->hci->control(self->hci, URB_TRT_CONTROL_OUT, setup_data, self->base_buffer, USB_TIMEOUT);
+    return self->hci->control(self->hci, URB_TRT_CONTROL_OUT, setup_data, self->base_buffer);
 }
 
 void hid_thread(void *args) {
@@ -522,7 +527,11 @@ void hid_thread(void *args) {
         case USB_CLASS_HID_KBD:
         {
             int status = hid_set_protocol(self->device, ifno, HID_BOOT_PROTOCOL);
-            for (int i = 0; i < 3; i++) {
+            int f = 2;
+            if (self->device->vid_pid == VID_PID(0x0603, 0x0002)) { // GPD WIN Keyboard
+                f = 0;
+            }
+            for (int i = 0; i < f; i++) {
                 // flash
                 uint8_t *p = self->device->buffer;
                 p[0] = 1 << i;
@@ -703,8 +712,8 @@ int cmd_lsusb(int argc, char **argv) {
                     product_name = "Composite Device";
                 }
             }
-            printf("Device %d ID %04x:%04x Class %06x USB %x.%x IF %d %dmA %s\n",
-                i, device->vid, device->pid, device->dev_class,
+            printf("Device %d ID %04x:%04x Class %06x SPEED %d USB %x.%x IF %d %dmA %s\n",
+                i, device->vid, device->pid, device->dev_class, device->hci->speed,
                 device->dev_desc.bcdUSB[1], device->dev_desc.bcdUSB[0],
                 config->bNumInterface, config->bMaxPower * 2, product_name
             );
