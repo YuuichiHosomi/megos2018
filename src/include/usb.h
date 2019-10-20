@@ -197,7 +197,7 @@ typedef struct usb_host_interface_t {
     void *device_context;
     moe_semaphore_t *semaphore;
     int slot_id;
-    int speed;
+    int psiv;
 
     void (*dispose)(usb_host_interface_t *self);
 

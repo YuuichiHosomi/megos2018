@@ -287,35 +287,35 @@ int usb_new_device(usb_host_interface_t *hci) {
     int slot_id = self->hci->slot_id;
     int status;
 
-    for (int i = 0; i < 20; i++) {
-        moe_usleep(50000);
-        status = usb_get_descriptor(self, USB_DEVICE_DESCRIPTOR, 0, 8);
-        if (status > 0) break;
-    }
-    if (status < 0) {
-        printf("[USB PS ERR %d %d]\n", slot_id, status);
-        return -1;
-    }
-
-    int max_packet_size = self->hci->get_max_packet_size(self->hci);
-    usb_device_descriptor_t *temp = self->buffer;
-    if (temp->bcdUSB[1] < 3) {
+    if (self->hci->psiv == USB_PSIV_FS) {
+        for (int i = 0; i < 5; i++) {
+            moe_usleep(50000);
+            status = usb_get_descriptor(self, USB_DEVICE_DESCRIPTOR, 0, 8);
+            if (status > 0) break;
+        }
+        if (status < 0) {
+            printf("[USB PS ERR %d %d]\n", slot_id, status);
+            return -1;
+        }
+        usb_device_descriptor_t *temp = self->buffer;
+        int max_packet_size = self->hci->get_max_packet_size(self->hci);
         if (max_packet_size != temp->bMaxPacketSize0) {
             self->hci->set_max_packet_size(self->hci, temp->bMaxPacketSize0);
-            moe_usleep(50000);
         };
     }
 
-    moe_usleep(10000);
-    status = usb_get_descriptor(self, USB_DEVICE_DESCRIPTOR, 0, sizeof(usb_device_descriptor_t));
+    for (int i = 0; i < 5; i++) {
+        moe_usleep(50000);
+        status = usb_get_descriptor(self, USB_DEVICE_DESCRIPTOR, 0, sizeof(usb_device_descriptor_t));
+        if (status > 0) break;
+    }
     if (status < 0) {
         printf("[USB DEV_DESC ERR %d %d]", slot_id, status);
         return -1;
     }
     usb_device_descriptor_t *dd = self->buffer;
     self->dev_desc = *dd;
-    self->vid = usb_u16(dd->idVendor);
-    self->pid = usb_u16(dd->idProduct);
+    self->vid_pid = VID_PID(usb_u16(dd->idVendor), usb_u16(dd->idProduct));
     self->dev_class = (dd->bDeviceClass << 16) | (dd->bDeviceSubClass << 8) | dd->bDeviceProtocol;
     if (self->dev_desc.iProduct) {
         self->sProduct = read_string(self, self->dev_desc.iProduct);
@@ -414,7 +414,7 @@ int usb_new_device(usb_host_interface_t *hci) {
 
     int issued = false;
     {
-        uint32_t vid_pid = VID_PID(self->vid, self->pid);
+        uint32_t vid_pid = self->vid_pid;
         for (int i = 0; device_specific_driver_list[i].vid_pid != 0; i++) {
             if (device_specific_driver_list[i].vid_pid == vid_pid) {
                 device_specific_driver_list[i].start_device_driver(self);
@@ -529,7 +529,7 @@ void hid_thread(void *args) {
             int status = hid_set_protocol(self->device, ifno, HID_BOOT_PROTOCOL);
             int f = 2;
             if (self->device->vid_pid == VID_PID(0x0603, 0x0002)) { // GPD WIN Keyboard
-                f = 0;
+                f = 0; // Workaround: disable flash
             }
             for (int i = 0; i < f; i++) {
                 // flash
@@ -712,8 +712,9 @@ int cmd_lsusb(int argc, char **argv) {
                     product_name = "Composite Device";
                 }
             }
-            printf("Device %d ID %04x:%04x Class %06x SPEED %d USB %x.%x IF %d %dmA %s\n",
-                i, device->vid, device->pid, device->dev_class, device->hci->speed,
+            printf("Device %d ID %04x:%04x Class %06x PSIV %d PS %d USB %x.%x IF %d %dmA %s\n",
+                i, device->vid, device->pid, device->dev_class,
+                device->hci->psiv, device->dev_desc.bMaxPacketSize0,
                 device->dev_desc.bcdUSB[1], device->dev_desc.bcdUSB[0],
                 config->bNumInterface, config->bMaxPower * 2, product_name
             );
