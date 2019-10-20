@@ -318,18 +318,16 @@ uint64_t configure_endpoint(xhci_t *self, int slot_id, uint32_t dci, uint32_t ep
         // ep->average_trb_len = ps;
         // ep->max_esit_payload_lo = ps;
     } else {
-        // TODO: PSIV
         switch(slot->speed) {
-            case 7:
-            case 6:
-            case 5:
-            case 4: // SS
+            case USB_PSIV_SS:
+            default:
                 ep->max_packet_size = 512;
                 break;
-            case 3: // HS
+            case USB_PSIV_HS:
                 ep->max_packet_size = 64;
                 break;
-            default: // LS/FS
+            case USB_PSIV_LS:
+            case USB_PSIV_FS:
                 ep->max_packet_size = 8;
                 break;
         }
@@ -337,8 +335,8 @@ uint64_t configure_endpoint(xhci_t *self, int slot_id, uint32_t dci, uint32_t ep
     }
     if (interval) {
         switch (slot->speed) {
-            case 1: // LS
-            case 2: // FS
+            case USB_PSIV_LS:
+            case USB_PSIV_FS:
             {
                 if ((ep_type & 3) == 3) { // Interrupt
                     int iv = 32 - __builtin_clz(interval) + 3;
@@ -349,16 +347,11 @@ uint64_t configure_endpoint(xhci_t *self, int slot_id, uint32_t dci, uint32_t ep
             }
                 break;
 
-            case 3: // HS
-            case 4: // SS
-            case 5:
-            case 6:
-            case 7:
+            case USB_PSIV_HS:
+            case USB_PSIV_SS:
+            default:
                 ep->interval = interval - 1;
                 break;
-            
-            default: // unknown
-                ep->interval = interval - 1;
         }
     }
     ep->error_count = 3;

@@ -50,6 +50,11 @@ typedef enum {
 
 
 enum {
+    USB_PSIV_FS = 1,
+    USB_PSIV_LS = 2,
+    USB_PSIV_HS = 3,
+    USB_PSIV_SS = 4,
+
     URB_GET_DESCRIPTOR = 6,
     URB_SET_CONFIGURATION = 9,
     URB_HID_GET_REPORT = 1,
