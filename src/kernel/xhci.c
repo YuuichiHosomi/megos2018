@@ -477,6 +477,44 @@ int uhi_set_max_packet_size(usb_host_interface_t *uhc, int max_packet_size) {
     }
 }
 
+
+int uhi_configure_hub(usb_host_interface_t *uhc, usb_hub_descriptor_t *hub_desc) {
+    xhci_trb_t response = trb_create(0);
+    xhci_t *self = uhc->host_context;
+    int slot_id = uhc->slot_id;
+
+    uint64_t input_context = self->usb_devices[slot_id].input_context;
+    xhci_slot_ctx_data_t *slot = MOE_PA2VA(input_context + self->context_size);
+    xhci_input_control_ctx_t *icc = MOE_PA2VA(input_context);
+    memset(icc, 0, self->context_size);
+    icc->add = 1;
+
+    uint64_t device_context = self->DCBAA[slot_id];
+    void *q = MOE_PA2VA(device_context);
+    memcpy(slot, q, self->context_size * 2);
+
+    slot->hub = 1;
+    if (hub_desc) {
+        slot->number_of_ports = hub_desc->bNbrPorts;
+    }
+
+    xhci_trb_t trb = trb_create(TRB_EVALUATE_CONTEXT_COMMAND);
+    trb.transfer_event.ptr = input_context;
+    trb.transfer_event.slot_id = slot_id;
+    trb.transfer_event.endpoint_id = 1;
+    execute_command(self, uhc->semaphore, &trb, &response);
+
+    switch (response.cce.completion) {
+        case TRB_CC_NULL:
+            return -1;
+        case TRB_CC_SUCCESS:
+            return 0;
+        default:
+            return -(response.transfer_event.completion);
+    }
+}
+
+
 int uhi_control(usb_host_interface_t *uhc, int trt, urb_setup_data_t setup_data, uintptr_t buffer) {
     xhci_t *self = uhc->host_context;
     int slot_id = uhc->slot_id;
@@ -555,6 +593,24 @@ int uhi_data_transfer(usb_host_interface_t *uhc, int dci, uintptr_t buffer, uint
 }
 
 
+int uhi_hub_new_device(usb_host_interface_t *hub, int port_id) {
+    // TODO: everything
+
+    // xhci_t *self = hub->host_context;
+
+    uint32_t new_route = hub->route_string;
+    for (int i = 0; i < 5; i++) {
+        unsigned shift = i * 4;
+        if ((new_route & (0xF << shift)) == 0) {
+            new_route |= (port_id << shift);
+            break;
+        }
+    }
+
+    return -1;
+}
+
+
 int xhci_init_dev(xhci_t *self) {
 
     self->hci_vt.host_context = self;
@@ -564,6 +620,8 @@ int xhci_init_dev(xhci_t *self) {
     self->hci_vt.set_max_packet_size = uhi_set_max_packet_size;
     self->hci_vt.control = uhi_control;
     self->hci_vt.data_transfer = uhi_data_transfer;
+    self->hci_vt.configure_hub = uhi_configure_hub;
+    self->hci_vt.hub_new_device = uhi_hub_new_device;
 
     self->cap = MOE_PA2VA(self->base_address);
     uint8_t CAP_LENGTH = self->cap->caplength & 0xFF;
@@ -592,6 +650,19 @@ int xhci_init_dev(xhci_t *self) {
                 data = (data & 0x000E1FEE) | 0xE0000000;
                 WRITE_PHYSICAL_UINT32(xecp_base + 4, data);
                 break;
+
+            // case 0x02: // Supported Protocol
+            // {
+            //     // TODO: PSIV
+            //     xhci_xecp_supported_protocol_t *sp = MOE_PA2VA(xecp_base);
+            //     printf("Protcol [%.4s %x.%x] port %d %d\n", sp->name, sp->rev_major, sp->rev_minor, sp->com_port_no, sp->n_com_ports);
+            //     xhci_psi_t *psi = sp->speed_ids;
+            //     for (int i = 0; i < sp->PSIC; i++) {
+            //         printf(" PSIV %d PSIE %d PLT %d PFD %d LP %d PSIM %d\n", psi[i].PSIV, psi[i].PSIE, psi[i].PLT, psi[i].PFD, psi[i].LP, psi[i].PSIM);
+            //     }
+            // }
+            //     break;
+
         }
         xecp_ptr = ((xecp >> 8) & 255) << 2;
         xecp_base += xecp_ptr;
@@ -768,7 +839,7 @@ _Noreturn void xhci_event_thread(void *args) {
     uint32_t HCSPARAMS1 = self->cap->hcsparams1;
     int MAX_DEV_SLOT = HCSPARAMS1 & 255;
     int MAX_INT = (HCSPARAMS1 >> 8) & 0x7FF;
-    DEBUG_PRINT("xHC v%d.%d.%d USB v%d.%d BASE %012llx IRQ# %d SLOT %d/%d INT %d PORT %d\n"
+    printf("xHC v%d.%d.%d USB v%d.%d BASE %012llx IRQ# %d SLOT %d/%d INT %d PORT %d\n"
         "# USB DEBUG MODE\n",
         (ver >> 8), (ver >> 4) & 15, (ver & 15), (SBRN >> 4) & 15, SBRN & 15,
         self->base_address, self->irq,

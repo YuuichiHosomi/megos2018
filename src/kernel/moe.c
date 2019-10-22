@@ -493,7 +493,7 @@ int moe_sem_wait(moe_semaphore_t *self, int64_t us) {
 
     moe_measure_t deadline = moe_create_measure(us);
     const int64_t timeout_min = 100;
-    const int64_t timeout_max = 100000;
+    const int64_t timeout_max = 1000000;
     int64_t timeout = timeout_min;
     moe_thread_t *current = _get_current_thread();
     do {

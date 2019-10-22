@@ -45,8 +45,8 @@ typedef struct {
     uint32_t max_exit_latency:16;
     uint32_t root_hub_port_no:8;
     uint32_t number_of_ports:8;
-    uint32_t TT_hub_slot_id:8;
-    uint32_t TT_port_no:8;
+    uint32_t parent_hub_slot_id:8;
+    uint32_t parent_port_no:8;
     uint32_t TTT:2;
     uint32_t :4;
     uint32_t INT:10;
@@ -302,6 +302,39 @@ typedef struct {
         _Atomic uint64_t erstba, erdp;
     } irs[1];
 } xhci_rts_t;
+
+
+/*********************************************************************/
+
+
+typedef struct {
+    uint32_t PSIV:4;
+    uint32_t PSIE:2;
+    uint32_t PLT:2;
+    uint32_t PFD:1;
+    uint32_t :5;
+    uint32_t LP:2;
+    uint32_t PSIM:16;
+} xhci_psi_t;
+
+
+typedef struct {
+    uint32_t cap_id:8;
+    uint32_t next_ptr:8;
+    uint32_t rev_minor:8;
+    uint32_t rev_major:8;
+    union {
+        uint32_t name_u32;
+        char name[4];
+    };
+    uint32_t com_port_no:8;
+    uint32_t n_com_ports:8;
+    uint32_t prot_def:12;
+    uint32_t PSIC:4;
+    uint32_t prot_slot_type:5;
+    uint32_t :27;
+    xhci_psi_t speed_ids[1];
+} xhci_xecp_supported_protocol_t;
 
 
 /*********************************************************************/

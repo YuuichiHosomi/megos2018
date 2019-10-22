@@ -55,8 +55,20 @@ enum {
     USB_PSIV_HS = 3,
     USB_PSIV_SS = 4,
 
+    URB_GET_STATUS = 0,
+    URB_CLEAR_FEATURE = 1,
+    URB_SET_FEATURE = 3,
+    // URB_SET_ADDRESS = 5,
     URB_GET_DESCRIPTOR = 6,
+    URB_SET_DESCRIPTOR = 7,
+    URB_GET_CONFIGURATION = 8,
     URB_SET_CONFIGURATION = 9,
+    URB_GET_INTERFACE = 0x0A,
+    URB_SET_INTERFACE = 0x0B,
+    // URB_SYNC_FRAME = 0x0C,
+    URB_SET_SEL = 0x30,
+    URB_SET_ISOCH_DELAY = 0x31,
+
     URB_HID_GET_REPORT = 1,
     URB_HID_SET_REPORT = 9,
     URB_HID_SET_PROTOCOL = 11,
@@ -78,6 +90,23 @@ enum {
 
     HID_BOOT_PROTOCOL = 0,
     HID_REPORT_PROTOCOL = 1,
+
+    C_HUB_LOCAL_POWER = 0,
+    C_HUB_OVER_CURRENT = 1,
+    PORT_CONNECTION = 0,
+    PORT_ENABLE = 1,
+    PORT_SUSPEND = 2,
+    PORT_OVER_CURRENT = 3,
+    PORT_RESET = 4,
+    PORT_POWER = 8,
+    PORT_LOW_SPEED = 9,
+    C_PORT_CONNECTION = 16,
+    C_PORT_ENABLE = 17,
+    C_PORT_SUSPEND = 18,
+    C_PORT_OVER_CURRENT = 19,
+    C_PORT_RESET = 20,
+    PORT_TEST = 21,
+    PORT_INDICATOR = 22,
 };
 
 
@@ -178,6 +207,45 @@ typedef struct {
 
 
 typedef union {
+    uint16_t u16;
+    struct {
+        uint16_t PORT_CONNECTION:1;
+        uint16_t PORT_ENABLE:1;
+        uint16_t PORT_SUSPEND:1;
+        uint16_t PORT_OVER_CURRENT:1;
+        uint16_t PORT_RESET:1;
+        uint16_t :3;
+        uint16_t PORT_POWER:1;
+        uint16_t PORT_LOW_SPEED:1;
+        uint16_t PORT_HIGH_SPEED:1;
+        uint16_t PORT_TEST:1;
+        uint16_t PORT_INDICATOR:1;
+        uint16_t :3;
+    };
+} wPortStatus;
+
+typedef union {
+    uint16_t u16;
+    struct {
+        uint16_t C_PORT_CONNECTION:1;
+        uint16_t C_PORT_ENABLE:1;
+        uint16_t C_PORT_SUSPEND:1;
+        uint16_t C_PORT_OVER_CURRENT:1;
+        uint16_t C_PORT_RESET:1;
+        uint16_t :11;
+    };
+} wPortStatusChange;
+
+typedef union {
+    uint32_t u32;
+    struct {
+        wPortStatus status;
+        wPortStatusChange changes;
+    };
+} usb_hub_port_status_t;
+
+
+typedef union {
     uint32_t u32[2];
     struct {
         uint32_t bmRequestType:8;
@@ -196,8 +264,13 @@ typedef struct usb_host_interface_t {
     void *host_context;
     void *device_context;
     moe_semaphore_t *semaphore;
-    int slot_id;
-    int psiv;
+
+    struct {
+        uint32_t route_string:20;
+        uint32_t psiv:4;
+        uint32_t port_id:8;
+        uint32_t slot_id:8;
+    };
 
     void (*dispose)(usb_host_interface_t *self);
 
@@ -205,6 +278,9 @@ typedef struct usb_host_interface_t {
     int (*reset_endpoint)(usb_host_interface_t *self, int epno);
     int (*set_max_packet_size)(usb_host_interface_t *self, int mask_packet_size);
     int (*get_max_packet_size)(usb_host_interface_t *self);
+
+    int (*configure_hub)(usb_host_interface_t *self, usb_hub_descriptor_t *hub);
+    int (*hub_new_device)(usb_host_interface_t *self, int port_id);
 
     int (*control)(usb_host_interface_t *self, int trt, urb_setup_data_t setup, uintptr_t buffer);
 

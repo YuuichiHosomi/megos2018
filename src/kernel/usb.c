@@ -183,12 +183,6 @@ int usb_set_configuration(usb_device *self, int value) {
 }
 
 
-int usb_get_hub_descriptor(usb_device *self, uint8_t desc_type, uint8_t index, size_t length) {
-    urb_setup_data_t setup_data = setup_create(0xA0, URB_GET_DESCRIPTOR, (desc_type << 8) | index, 0, length);
-    return self->hci->control(self->hci, URB_TRT_CONTROL_IN, setup_data, self->base_buffer);
-}
-
-
 int usb_config_endpoint(usb_device *self, usb_endpoint_descriptor_t *endpoint) {
     return self->hci->configure_endpoint(self->hci, endpoint);
 }
@@ -324,8 +318,9 @@ int usb_new_device(usb_host_interface_t *hci) {
     int usb_ver = usb_u16(dd->bcdUSB);
     DEBUG_PRINT("\n#USB_DEVICE %d USB %d.%d LEN %d SZ %d VID %04x PID %04x CLASS %06x CONF %d\n", slot_id, usb_ver >> 8, (usb_ver >> 4) & 15, dd->bLength, dd->bMaxPacketSize0, self->vid, self->pid, self->dev_class, dd->bNumConfigurations);
 #endif
+
     moe_usleep(10000);
-    status = usb_get_descriptor(self, USB_CONFIGURATION_DESCRIPTOR, 0, 8);
+    status = usb_get_descriptor(self, USB_CONFIGURATION_DESCRIPTOR, 0, sizeof(usb_configuration_descriptor_t));
     if (status < 0) {
         printf("[USB CONFIG_DESC ERR %d %d]", slot_id, status);
         return -1;
@@ -458,21 +453,58 @@ void usb_dummy_class_driver(usb_device *self) {
 /*********************************************************************/
 // USB HUB Class Driver
 
+int usb_hub_get_descriptor(usb_device *self, uint8_t desc_type, uint8_t index, size_t length) {
+    urb_setup_data_t setup_data = setup_create(0xA0, URB_GET_DESCRIPTOR, (desc_type << 8) | index, 0, length);
+    return self->hci->control(self->hci, URB_TRT_CONTROL_IN, setup_data, self->base_buffer);
+}
+
+int usb_hub_set_feature(usb_device *self, uint16_t feature_sel, uint8_t port) {
+    urb_setup_data_t setup_data = setup_create(0x23, URB_SET_FEATURE, feature_sel, port, 0);
+    return self->hci->control(self->hci, URB_TRT_NO_DATA, setup_data, 0);
+}
+
+int usb_hub_clear_feature(usb_device *self, uint16_t feature_sel, uint8_t port) {
+    urb_setup_data_t setup_data = setup_create(0x23, URB_CLEAR_FEATURE, feature_sel, port, 0);
+    return self->hci->control(self->hci, URB_TRT_NO_DATA, setup_data, 0);
+}
+
+int usb_hub_get_port_status(usb_device *self, uint8_t port) {
+    urb_setup_data_t setup_data = setup_create(0xA3, URB_GET_STATUS, 0, port, 4);
+    return self->hci->control(self->hci, URB_TRT_CONTROL_IN, setup_data, self->base_buffer);
+}
+
 void usb_hub_thread(void *args) {
     usb_function *self = args;
 
     usb_hub_descriptor_t hub_desc;
 
+    int slot_id = self->device->hci->slot_id;
     int ifno = 0;
     uint32_t bmEndpoint = self->device->interfaces[ifno].endpoint_bitmap;
     int ep_in = parse_endpoint_bitmap(bmEndpoint, 1);
     int ps = self->device->endpoints[ep_in].ps;
 
     int status;
-    status = usb_get_hub_descriptor(self->device, USB_HUB_DESCRIPTOR, 0, sizeof(usb_hub_descriptor_t));
+    status = usb_hub_get_descriptor(self->device, USB_HUB_DESCRIPTOR, 0, sizeof(usb_hub_descriptor_t));
     if (status > 0) {
         usb_hub_descriptor_t *p = (usb_hub_descriptor_t *)self->device->buffer;
         hub_desc = *p;
+        self->device->hci->configure_hub(self->device->hci, &hub_desc);
+        for (int i = 1; i <= hub_desc.bNbrPorts; i++) {
+            status = usb_hub_set_feature(self->device, PORT_POWER, i);
+        }
+        for (int i = 1; i <= hub_desc.bNbrPorts; i++) {
+            status = usb_hub_clear_feature(self->device, C_PORT_CONNECTION, i);
+        }
+        for (int i = 1; i <= hub_desc.bNbrPorts; i++) {
+            status = usb_hub_get_port_status(self->device, i);
+            if (status == 4) {
+                uint32_t *p = self->device->buffer;
+                printf("USB HUB PORT %d STATUS %08x\n", i, *p);
+            } else {
+                printf("USB HUB PORT ERROR %d %d %d\n", slot_id, i, status);
+            }
+        }
     }
     // uint16_t hub_char = usb_u16(hub_desc.wHubCharacteristics);
     // printf("[USB_HUB SLOT %d STATUS %d PORT %d FLAGS %x %d %d]\n", self->device->hci->slot_id, status, hub_desc.bNbrPorts, hub_char, hub_desc.bPwrOn2PwrGood, hub_desc.bHubContrCurrent);
@@ -483,7 +515,37 @@ void usb_hub_thread(void *args) {
         (void)status;
         if (!self->device->isAlive) break;
         _Atomic uint8_t *p = self->device->buffer;
-        printf("[Hub Status %d]\n", *p);
+        uint8_t port_change_bitmap = *p;
+        printf("[Hub Status %d]", port_change_bitmap);
+        if (port_change_bitmap & 0xFE) {
+            int port_id = __builtin_ctz(port_change_bitmap & 0xFE);
+            status = usb_hub_get_port_status(self->device, port_id);
+            if (status == sizeof(usb_hub_port_status_t)) {
+                usb_hub_port_status_t port_status = *(usb_hub_port_status_t *)(self->device->buffer);
+
+                if (port_status.changes.C_PORT_CONNECTION) {
+                    usb_hub_clear_feature(self->device, C_PORT_CONNECTION, port_id);
+                    if (port_status.status.PORT_CONNECTION) {
+                        printf("[HUB %d CONNECTED %d]", slot_id, port_id);
+                        usb_hub_set_feature(self->device, PORT_RESET, port_id);
+                        usb_hub_clear_feature(self->device, C_PORT_RESET, port_id);
+                        status = usb_hub_get_port_status(self->device, port_id);
+                        port_status = *(usb_hub_port_status_t *)(self->device->buffer);
+                        printf("[PSC %d %08x]", port_id, port_status.u32);
+                    } else {
+                        // eject
+                        printf("[HUB %d EJECTED %d]", slot_id, port_id);
+                    }
+                } else if (port_status.changes.C_PORT_RESET) {
+                    usb_hub_clear_feature(self->device, C_PORT_RESET, port_id);
+                } else {
+                    printf("[HUB_UNK %d %08x]", port_id, port_status.u32);
+                }
+
+            } else {
+                printf("[HUB_ERR %d %d %d]", slot_id, port_id, status);
+            }
+        }
         moe_usleep(50000);
     }
 
@@ -750,10 +812,15 @@ int cmd_lsusb(int argc, char **argv) {
                 int interval = device->endpoints[i].interval;
                 int ps = device->endpoints[i].ps;
                 int epno = i & 15;
-                printf(" EP#%d dci %d size %d interval %d\n", epno, dci, ps, interval);
+                printf(" EP#%d%c dci %d size %d interval %d\n", epno, (i < 16) ? 'o' : 'i', dci, ps, interval);
             }
         } else {
-            printf("Device %d NOT CONFIGURED\n", i);
+            printf("Device %d ID %04x:%04x Class %06x PSIV %d PS %d USB %x.%x [NOT CONFIGURED]\n",
+                i, device->vid, device->pid, device->dev_class,
+                device->hci->psiv, device->dev_desc.bMaxPacketSize0,
+                device->dev_desc.bcdUSB[1], device->dev_desc.bcdUSB[0]
+            );
+            // printf("Device %d NOT CONFIGURED\n", i);
         }
     }
     return 0;
