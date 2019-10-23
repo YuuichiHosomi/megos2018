@@ -268,9 +268,10 @@ typedef struct usb_host_interface_t {
     struct {
         uint32_t route_string:20;
         uint32_t psiv:4;
-        uint32_t port_id:8;
-        uint32_t slot_id:8;
     };
+    uint8_t port_id;
+    uint8_t slot_id;
+    uint8_t parent_slot_id;
 
     void (*dispose)(usb_host_interface_t *self);
 
@@ -279,8 +280,8 @@ typedef struct usb_host_interface_t {
     int (*set_max_packet_size)(usb_host_interface_t *self, int mask_packet_size);
     int (*get_max_packet_size)(usb_host_interface_t *self);
 
-    int (*configure_hub)(usb_host_interface_t *self, usb_hub_descriptor_t *hub);
-    int (*hub_new_device)(usb_host_interface_t *self, int port_id);
+    int (*configure_hub)(usb_host_interface_t *self, usb_hub_descriptor_t *hub, int mtt);
+    int (*hub_new_device)(usb_host_interface_t *self, int port_id, int speed);
 
     int (*control)(usb_host_interface_t *self, int trt, urb_setup_data_t setup, uintptr_t buffer);
 

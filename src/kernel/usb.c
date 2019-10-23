@@ -473,6 +473,16 @@ int usb_hub_get_port_status(usb_device *self, uint8_t port) {
     return self->hci->control(self->hci, URB_TRT_CONTROL_IN, setup_data, self->base_buffer);
 }
 
+static int usb_hub_get_port_psiv(usb_hub_port_status_t port_status) {
+    if (port_status.status.PORT_LOW_SPEED) {
+        return USB_PSIV_LS;
+    } else if (port_status.status.PORT_HIGH_SPEED) {
+        return USB_PSIV_HS;
+    } else {
+        return USB_PSIV_FS;
+    }
+}
+
 void usb_hub_thread(void *args) {
     usb_function *self = args;
 
@@ -489,26 +499,37 @@ void usb_hub_thread(void *args) {
     if (status > 0) {
         usb_hub_descriptor_t *p = (usb_hub_descriptor_t *)self->device->buffer;
         hub_desc = *p;
-        self->device->hci->configure_hub(self->device->hci, &hub_desc);
+        self->device->hci->configure_hub(self->device->hci, &hub_desc, (self->device->dev_class == USB_CLASS_HUB_HS_MTT));
         for (int i = 1; i <= hub_desc.bNbrPorts; i++) {
             status = usb_hub_set_feature(self->device, PORT_POWER, i);
         }
         for (int i = 1; i <= hub_desc.bNbrPorts; i++) {
             status = usb_hub_clear_feature(self->device, C_PORT_CONNECTION, i);
         }
+        moe_usleep(100000);
         for (int i = 1; i <= hub_desc.bNbrPorts; i++) {
             status = usb_hub_get_port_status(self->device, i);
-            if (status == 4) {
-                uint32_t *p = self->device->buffer;
-                printf("USB HUB PORT %d STATUS %08x\n", i, *p);
+            if (status == sizeof(usb_hub_port_status_t)) {
+                usb_hub_port_status_t port_status = *(usb_hub_port_status_t *)(self->device->buffer);
+                if (port_status.status.PORT_CONNECTION) {
+                    usb_hub_set_feature(self->device, PORT_RESET, i);
+                    // moe_usleep(10000);
+                    // status = usb_hub_get_port_status(self->device, i);
+                    // usb_hub_port_status_t port_status = *(usb_hub_port_status_t *)(self->device->buffer);
+                    // if (port_status.status.PORT_ENABLE) {
+                    //     status = usb_hub_get_port_status(self->device, i);
+                    //     port_status = *(usb_hub_port_status_t *)(self->device->buffer);
+                    //     int speed = usb_hub_get_port_psiv(port_status);
+                    //     status = self->device->hci->hub_new_device(self->device->hci, i, speed);
+                    // }
+                }
+                // printf("USB HUB PORT %d STATUS %08x\n", i, port_status.u32);
             } else {
                 printf("USB HUB PORT ERROR %d %d %d\n", slot_id, i, status);
             }
         }
+        moe_usleep(100000);
     }
-    // uint16_t hub_char = usb_u16(hub_desc.wHubCharacteristics);
-    // printf("[USB_HUB SLOT %d STATUS %d PORT %d FLAGS %x %d %d]\n", self->device->hci->slot_id, status, hub_desc.bNbrPorts, hub_char, hub_desc.bPwrOn2PwrGood, hub_desc.bHubContrCurrent);
-    // printf("[Installed USB HUB SLOT %d IF %d EP %d]\n", self->device->hci->slot_id, ifno, ep_in);
 
     while(self->device->isAlive) {
         int status = usb_read_data(self->device, ep_in, ps);
@@ -516,7 +537,7 @@ void usb_hub_thread(void *args) {
         if (!self->device->isAlive) break;
         _Atomic uint8_t *p = self->device->buffer;
         uint8_t port_change_bitmap = *p;
-        printf("[Hub Status %d]", port_change_bitmap);
+        // printf("[Hub Status %d]", port_change_bitmap);
         if (port_change_bitmap & 0xFE) {
             int port_id = __builtin_ctz(port_change_bitmap & 0xFE);
             status = usb_hub_get_port_status(self->device, port_id);
@@ -524,17 +545,23 @@ void usb_hub_thread(void *args) {
                 usb_hub_port_status_t port_status = *(usb_hub_port_status_t *)(self->device->buffer);
 
                 if (port_status.changes.C_PORT_CONNECTION) {
+                    moe_usleep(100000);
                     usb_hub_clear_feature(self->device, C_PORT_CONNECTION, port_id);
                     if (port_status.status.PORT_CONNECTION) {
-                        printf("[HUB %d CONNECTED %d]", slot_id, port_id);
+                        // printf("[HUB %d Attached %d]", slot_id, port_id);
                         usb_hub_set_feature(self->device, PORT_RESET, port_id);
+                        moe_usleep(10000);
                         usb_hub_clear_feature(self->device, C_PORT_RESET, port_id);
+                        moe_usleep(100000);
+
                         status = usb_hub_get_port_status(self->device, port_id);
                         port_status = *(usb_hub_port_status_t *)(self->device->buffer);
-                        printf("[PSC %d %08x]", port_id, port_status.u32);
+                        if (port_status.status.PORT_ENABLE) {
+                            int speed = usb_hub_get_port_psiv(port_status);
+                            status = self->device->hci->hub_new_device(self->device->hci, port_id, speed);
+                        }
                     } else {
-                        // eject
-                        printf("[HUB %d EJECTED %d]", slot_id, port_id);
+                        // printf("[HUB %d Detached %d]", slot_id, port_id);
                     }
                 } else if (port_status.changes.C_PORT_RESET) {
                     usb_hub_clear_feature(self->device, C_PORT_RESET, port_id);
@@ -760,10 +787,13 @@ void xinput_class_driver(usb_device *self, int ifno) {
 /*********************************************************************/
 
 
-int cmd_lsusb(int argc, char **argv) {
+void lsusb_sub(uint32_t parent, int nest) {
     for (int i = 0; i < MAX_USB_DEVICES; i++) {
         usb_device *device = usb_devices[i];
-        if (!device) continue;
+        if (!device || device->hci->parent_slot_id != parent) continue;
+        for (int j = 0; j < nest; j++) {
+            printf("  ");
+        }
         usb_configuration_descriptor_t *config = device->current_config;
         if (config) {
             const char *product_name = device->sProduct;
@@ -780,40 +810,40 @@ int cmd_lsusb(int argc, char **argv) {
                 device->dev_desc.bcdUSB[1], device->dev_desc.bcdUSB[0],
                 config->bNumInterface, config->bMaxPower * 2, product_name
             );
-            for (int j = 0; j < device->current_config->bNumInterface; j++) {
-                const size_t size_buffer = 256;
-                char ep_strings[size_buffer];
-                uint32_t if_class = device->interfaces[j].if_class;
-                int ep_bmp = device->interfaces[j].endpoint_bitmap;
-                intptr_t ep_index = 0;
-                for (int i = 0; i < MAX_ENDPOINTS; i++) {
-                    if (ep_bmp & (1 << i)) {
-                        if (ep_index > 0) {
-                            ep_strings[ep_index++] = ',';
-                        }
-                        int epno = i & 15;
-                        if (i > 16) {
-                            ep_index += snprintf(ep_strings + ep_index, size_buffer - ep_index, "%di", epno);
-                        } else {
-                            ep_index += snprintf(ep_strings + ep_index, size_buffer - ep_index, "%do", epno);
-                        }
-                    }
-                }
-                ep_strings[ep_index] = '\0';
-                const char *if_string = device->interfaces[j].sInterface;
-                if (!if_string) {
-                    if_string = usb_get_generic_name(device->interfaces[j].if_class);
-                }
-                printf(" IF#%d Class %06x ep (%s) %s\n", j, if_class, ep_strings, if_string);
-            }
-            for (int i = 0; i < MAX_ENDPOINTS; i++) {
-                int dci = device->endpoints[i].dci;
-                if (!dci) continue;
-                int interval = device->endpoints[i].interval;
-                int ps = device->endpoints[i].ps;
-                int epno = i & 15;
-                printf(" EP#%d%c dci %d size %d interval %d\n", epno, (i < 16) ? 'o' : 'i', dci, ps, interval);
-            }
+            // for (int j = 0; j < device->current_config->bNumInterface; j++) {
+            //     const size_t size_buffer = 256;
+            //     char ep_strings[size_buffer];
+            //     uint32_t if_class = device->interfaces[j].if_class;
+            //     int ep_bmp = device->interfaces[j].endpoint_bitmap;
+            //     intptr_t ep_index = 0;
+            //     for (int i = 0; i < MAX_ENDPOINTS; i++) {
+            //         if (ep_bmp & (1 << i)) {
+            //             if (ep_index > 0) {
+            //                 ep_strings[ep_index++] = ',';
+            //             }
+            //             int epno = i & 15;
+            //             if (i > 16) {
+            //                 ep_index += snprintf(ep_strings + ep_index, size_buffer - ep_index, "%di", epno);
+            //             } else {
+            //                 ep_index += snprintf(ep_strings + ep_index, size_buffer - ep_index, "%do", epno);
+            //             }
+            //         }
+            //     }
+            //     ep_strings[ep_index] = '\0';
+            //     const char *if_string = device->interfaces[j].sInterface;
+            //     if (!if_string) {
+            //         if_string = usb_get_generic_name(device->interfaces[j].if_class);
+            //     }
+            //     printf(" IF#%d Class %06x ep (%s) %s\n", j, if_class, ep_strings, if_string);
+            // }
+            // for (int i = 0; i < MAX_ENDPOINTS; i++) {
+            //     int dci = device->endpoints[i].dci;
+            //     if (!dci) continue;
+            //     int interval = device->endpoints[i].interval;
+            //     int ps = device->endpoints[i].ps;
+            //     int epno = i & 15;
+            //     printf(" EP#%d%c dci %d size %d interval %d\n", epno, (i < 16) ? 'o' : 'i', dci, ps, interval);
+            // }
         } else {
             printf("Device %d ID %04x:%04x Class %06x PSIV %d PS %d USB %x.%x [NOT CONFIGURED]\n",
                 i, device->vid, device->pid, device->dev_class,
@@ -822,6 +852,15 @@ int cmd_lsusb(int argc, char **argv) {
             );
             // printf("Device %d NOT CONFIGURED\n", i);
         }
+        if (device->dev_desc.bDeviceClass == USB_BASE_CLASS_HUB) {
+            lsusb_sub(i, nest + 1);
+        }
     }
+
+}
+
+
+int cmd_lsusb(int argc, char **argv) {
+    lsusb_sub(0, 0);
     return 0;
 }
