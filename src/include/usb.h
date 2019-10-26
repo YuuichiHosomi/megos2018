@@ -236,7 +236,7 @@ typedef union {
     };
 } wPortStatusChange;
 
-typedef union {
+typedef union usb_hub_port_status_t {
     uint32_t u32;
     struct {
         wPortStatus status;
@@ -280,11 +280,13 @@ typedef struct usb_host_interface_t {
     int (*set_max_packet_size)(usb_host_interface_t *self, int mask_packet_size);
     int (*get_max_packet_size)(usb_host_interface_t *self);
 
-    int (*configure_hub)(usb_host_interface_t *self, usb_hub_descriptor_t *hub, int mtt);
-    int (*hub_new_device)(usb_host_interface_t *self, int port_id, int speed);
-
     int (*control)(usb_host_interface_t *self, int trt, urb_setup_data_t setup, uintptr_t buffer);
-
     int (*data_transfer)(usb_host_interface_t *self, int dci, uintptr_t buffer, uint16_t length);
+
+    int (*configure_hub)(usb_host_interface_t *self, usb_hub_descriptor_t *hub, int mtt);
+    usb_host_interface_t *(*hub_attach_device)(usb_host_interface_t *self, int port_id, int speed);
+    void (*hub_detach_device)(usb_host_interface_t *self);
+    void (*enter_configuration)(usb_host_interface_t *self);
+    void (*leave_configuration)(usb_host_interface_t *self);
 
 } usb_host_interface_t;

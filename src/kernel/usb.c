@@ -10,6 +10,7 @@
 #include "hid.h"
 
 
+#define MAX_HUB_PORTS       16
 #define MAX_IFS             16
 #define MAX_ENDPOINTS       32
 #define MAX_USB_BUFFER      4096
@@ -148,6 +149,7 @@ void usb_dealloc(void *context) {
 }
 
 void usb_release(usb_device *self) {
+    if (!self) return;
     moe_release(&self->shared, &usb_dealloc);
 }
 
@@ -483,16 +485,47 @@ static int usb_hub_get_port_psiv(usb_hub_port_status_t port_status) {
     }
 }
 
+usb_device *usb_hub_configure_port(usb_function *self, int port_id, usb_hub_port_status_t port_status) {
+
+    usb_device *result = NULL;
+    int status;
+
+    if (port_status.status.PORT_CONNECTION) {
+        // printf("[HUB %d Attached %d]", slot_id, port_id);
+        self->device->hci->enter_configuration(self->device->hci);
+        usb_hub_set_feature(self->device, PORT_RESET, port_id);
+        for (int i = 0; i < 3; i++) {
+            moe_usleep(10000);
+            status = usb_hub_get_port_status(self->device, port_id);
+            port_status = *(usb_hub_port_status_t *)(self->device->buffer);
+            if (port_status.changes.C_PORT_RESET) break;
+        }
+        usb_hub_clear_feature(self->device, C_PORT_RESET, port_id);
+        if (port_status.status.PORT_ENABLE) {
+            int speed = usb_hub_get_port_psiv(port_status);
+            usb_host_interface_t *child_hci = self->device->hci->hub_attach_device(self->device->hci, port_id, speed);
+            if (child_hci) {
+                result = child_hci->device_context;
+            }
+        }
+        self->device->hci->leave_configuration(self->device->hci);
+    } else {
+        // printf("[HUB %d Detached %d]", slot_id, port_id);
+    }
+    return result;
+}
+
 void usb_hub_thread(void *args) {
     usb_function *self = args;
 
     usb_hub_descriptor_t hub_desc;
+    usb_device *children[MAX_HUB_PORTS] = {NULL};
 
-    int slot_id = self->device->hci->slot_id;
     int ifno = 0;
     uint32_t bmEndpoint = self->device->interfaces[ifno].endpoint_bitmap;
     int ep_in = parse_endpoint_bitmap(bmEndpoint, 1);
     int ps = self->device->endpoints[ep_in].ps;
+    int n_ports = 0;
 
     int status;
     status = usb_hub_get_descriptor(self->device, USB_HUB_DESCRIPTOR, 0, sizeof(usb_hub_descriptor_t));
@@ -500,34 +533,13 @@ void usb_hub_thread(void *args) {
         usb_hub_descriptor_t *p = (usb_hub_descriptor_t *)self->device->buffer;
         hub_desc = *p;
         self->device->hci->configure_hub(self->device->hci, &hub_desc, (self->device->dev_class == USB_CLASS_HUB_HS_MTT));
-        for (int i = 1; i <= hub_desc.bNbrPorts; i++) {
+        n_ports = hub_desc.bNbrPorts;
+        for (int i = 1; i <= n_ports; i++) {
             status = usb_hub_set_feature(self->device, PORT_POWER, i);
         }
-        for (int i = 1; i <= hub_desc.bNbrPorts; i++) {
-            status = usb_hub_clear_feature(self->device, C_PORT_CONNECTION, i);
-        }
-        moe_usleep(100000);
-        for (int i = 1; i <= hub_desc.bNbrPorts; i++) {
-            status = usb_hub_get_port_status(self->device, i);
-            if (status == sizeof(usb_hub_port_status_t)) {
-                usb_hub_port_status_t port_status = *(usb_hub_port_status_t *)(self->device->buffer);
-                if (port_status.status.PORT_CONNECTION) {
-                    usb_hub_set_feature(self->device, PORT_RESET, i);
-                    // moe_usleep(10000);
-                    // status = usb_hub_get_port_status(self->device, i);
-                    // usb_hub_port_status_t port_status = *(usb_hub_port_status_t *)(self->device->buffer);
-                    // if (port_status.status.PORT_ENABLE) {
-                    //     status = usb_hub_get_port_status(self->device, i);
-                    //     port_status = *(usb_hub_port_status_t *)(self->device->buffer);
-                    //     int speed = usb_hub_get_port_psiv(port_status);
-                    //     status = self->device->hci->hub_new_device(self->device->hci, i, speed);
-                    // }
-                }
-                // printf("USB HUB PORT %d STATUS %08x\n", i, port_status.u32);
-            } else {
-                printf("USB HUB PORT ERROR %d %d %d\n", slot_id, i, status);
-            }
-        }
+        // for (int i = 1; i <= n_ports; i++) {
+        //     status = usb_hub_clear_feature(self->device, C_PORT_CONNECTION, i);
+        // }
         moe_usleep(100000);
     }
 
@@ -535,45 +547,51 @@ void usb_hub_thread(void *args) {
         int status = usb_read_data(self->device, ep_in, ps);
         (void)status;
         if (!self->device->isAlive) break;
-        _Atomic uint8_t *p = self->device->buffer;
-        uint8_t port_change_bitmap = *p;
-        // printf("[Hub Status %d]", port_change_bitmap);
-        if (port_change_bitmap & 0xFE) {
-            int port_id = __builtin_ctz(port_change_bitmap & 0xFE);
-            status = usb_hub_get_port_status(self->device, port_id);
-            if (status == sizeof(usb_hub_port_status_t)) {
-                usb_hub_port_status_t port_status = *(usb_hub_port_status_t *)(self->device->buffer);
-
-                if (port_status.changes.C_PORT_CONNECTION) {
-                    moe_usleep(100000);
-                    usb_hub_clear_feature(self->device, C_PORT_CONNECTION, port_id);
-                    if (port_status.status.PORT_CONNECTION) {
-                        // printf("[HUB %d Attached %d]", slot_id, port_id);
-                        usb_hub_set_feature(self->device, PORT_RESET, port_id);
-                        moe_usleep(10000);
-                        usb_hub_clear_feature(self->device, C_PORT_RESET, port_id);
+        _Atomic uint16_t *p = self->device->buffer;
+        uint16_t port_change_bitmap = *p;
+        for (int i = 1; i <= n_ports; i++) {
+            if (port_change_bitmap & (1 << i)) {
+                int port_id = i;
+                status = usb_hub_get_port_status(self->device, port_id);
+                if (status == sizeof(usb_hub_port_status_t)) {
+                    usb_hub_port_status_t port_status = *(usb_hub_port_status_t *)(self->device->buffer);
+                    if (port_status.changes.C_PORT_CONNECTION) {
                         moe_usleep(100000);
-
-                        status = usb_hub_get_port_status(self->device, port_id);
-                        port_status = *(usb_hub_port_status_t *)(self->device->buffer);
-                        if (port_status.status.PORT_ENABLE) {
-                            int speed = usb_hub_get_port_psiv(port_status);
-                            status = self->device->hci->hub_new_device(self->device->hci, port_id, speed);
+                        usb_hub_clear_feature(self->device, C_PORT_CONNECTION, port_id);
+                        usb_device *child = usb_hub_configure_port(self, port_id, port_status);
+                        if (child) {
+                            moe_retain(&child->shared);
+                            children[port_id] = child;
+                        } else {
+                            usb_device *child = children[port_id];
+                            if (child) {
+                                child->hci->hub_detach_device(child->hci);
+                                usb_release(child);
+                                children[port_id] = NULL;
+                            }
                         }
-                    } else {
-                        // printf("[HUB %d Detached %d]", slot_id, port_id);
+                    } else if (port_status.changes.C_PORT_RESET) {
+                        usb_hub_clear_feature(self->device, C_PORT_RESET, port_id);
+                    } else if (port_status.changes.u16) {
+                        printf("[HUB_UNK %d %08x]", port_id, port_status.u32);
                     }
-                } else if (port_status.changes.C_PORT_RESET) {
-                    usb_hub_clear_feature(self->device, C_PORT_RESET, port_id);
-                } else {
-                    printf("[HUB_UNK %d %08x]", port_id, port_status.u32);
-                }
 
-            } else {
-                printf("[HUB_ERR %d %d %d]", slot_id, port_id, status);
+                } else {
+                    int slot_id = self->device->hci->slot_id;
+                    printf("[HUB_ERR %d %d %d]", slot_id, port_id, status);
+                }
             }
         }
         moe_usleep(50000);
+    }
+
+    for (int i = 1; i <= n_ports; i++) {
+        usb_device *child = children[i];
+        if (child) {
+            child->hci->hub_detach_device(child->hci);
+            usb_release(child);
+            children[i] = NULL;
+        }
     }
 
     usb_release(self->device);
