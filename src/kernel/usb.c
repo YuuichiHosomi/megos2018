@@ -158,7 +158,7 @@ static inline uint16_t usb_u16(uint8_t *p) {
 }
 
 
-static urb_setup_data_t setup_create(uint8_t type, uint8_t request, uint16_t value, uint16_t index, uint16_t length) {
+static inline urb_setup_data_t setup_create(uint8_t type, uint8_t request, uint16_t value, uint16_t index, uint16_t length) {
     urb_setup_data_t result;
     result.setup.bmRequestType = type;
     result.setup.bRequest = request;
@@ -195,7 +195,7 @@ int usb_read_data(usb_device *self, int epno, uint16_t length) {
     if (dci) {
         return self->hci->data_transfer(self->hci, dci, self->base_buffer, length);
     } else {
-        return -114514;
+        return -1;
     }
 }
 
@@ -204,7 +204,7 @@ int usb_write_data(usb_device *self, int epno, uint16_t length) {
     if (dci) {
         return self->hci->data_transfer(self->hci, dci, self->base_buffer, length);
     } else {
-        return -114514;
+        return -1;
     }
 }
 
@@ -373,7 +373,7 @@ int usb_new_device(usb_host_interface_t *hci) {
                     int ep_adr = endpoint->bEndpointAddress;
                     int ep_idx = (ep_adr & 15) | ((ep_adr & 0x80) ? 0x10 : 0);
                     self->interfaces[if_index].endpoint_bitmap |= (1 << ep_idx);
-                    moe_usleep(50000);
+                    moe_usleep(10000);
                     status = self->hci->configure_endpoint(self->hci, endpoint);
                     if (status > 0) {
                         self->endpoints[ep_idx].dci = status;
@@ -383,11 +383,6 @@ int usb_new_device(usb_host_interface_t *hci) {
                     break;
                 }
                 
-                case USB_HID_CLASS_DESCRIPTOR:
-                {
-                    break;
-                }
-
                 default:
                 {
 #ifdef DEBUG
@@ -411,9 +406,8 @@ int usb_new_device(usb_host_interface_t *hci) {
 
     int issued = false;
     {
-        uint32_t vid_pid = self->vid_pid;
         for (int i = 0; device_specific_driver_list[i].vid_pid != 0; i++) {
-            if (device_specific_driver_list[i].vid_pid == vid_pid) {
+            if (device_specific_driver_list[i].vid_pid == self->vid_pid) {
                 device_specific_driver_list[i].start_device_driver(self);
                 issued = true;
                 break;
@@ -622,26 +616,25 @@ int hid_set_report(usb_device *self, int ifno, uint8_t report_type, uint8_t repo
 void hid_thread(void *args) {
     usb_function *self = (usb_function *)args;
 
+    int status;
     int ifno = self->ifno;
     uint32_t bmEndpoint = self->device->interfaces[ifno].endpoint_bitmap;
     int ep_in = parse_endpoint_bitmap(bmEndpoint, 1);
     int ps = self->device->endpoints[ep_in].ps;
     // int interval = self->device->endpoints[ep_in].interval * 1000;
 
-    // printf("[HID %d %06x %d %d %d %d]\n", self->device->hci->slot_id, self->class_code, ifno, ep_in, ps, interval);
-
     switch (self->class_code) {
         case USB_CLASS_HID_KBD:
         {
-            int status = hid_set_protocol(self->device, ifno, HID_BOOT_PROTOCOL);
-            int f = 2;
+            status = hid_set_protocol(self->device, ifno, HID_BOOT_PROTOCOL);
+            int f = 1;
             if (self->device->vid_pid == VID_PID(0x0603, 0x0002)) { // GPD WIN Keyboard
                 f = 0; // Workaround: disable flash
             }
             for (int i = 0; i < f; i++) {
                 // flash
                 uint8_t *p = self->device->buffer;
-                p[0] = 1 << i;
+                p[0] = 7;
                 hid_set_report(self->device, ifno, 2, 0, 0x01);
                 moe_usleep(50000);
                 p[0] = 0x00;
@@ -666,7 +659,7 @@ void hid_thread(void *args) {
 
         case USB_CLASS_HID_MOS:
         {
-            int status = hid_set_protocol(self->device, ifno, HID_BOOT_PROTOCOL);
+            status = hid_set_protocol(self->device, ifno, HID_BOOT_PROTOCOL);
             moe_hid_mos_state_t mos;
             while (self->device->isAlive) {
                 status = usb_read_data(self->device, ep_in, ps);
@@ -685,7 +678,7 @@ void hid_thread(void *args) {
         default:
         {
             while(self->device->isAlive) {
-                int status = usb_read_data(self->device, ep_in, ps);
+                status = usb_read_data(self->device, ep_in, ps);
                 (void)status;
                 if (!self->device->isAlive) break;
                 // uint64_t *p = self->device->buffer;
