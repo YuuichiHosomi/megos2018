@@ -23,7 +23,7 @@ void usb_new_device(usb_host_interface_t *hci);
 #define MAX_PORT_CHANGE     64
 
 #define MAX_URB             256
-#define URB_DISPOSE_TIMEOUT 100000
+#define URB_DISPOSE_TIMEOUT 10000
 
 
 /*********************************************************************/
@@ -69,11 +69,13 @@ typedef struct {
 
 
 typedef struct xhci_t {
-    usb_host_interface_t hci_vtt;
+    usb_host_interface_t hci_vt;
 
     moe_semaphore_t *sem_event;
     moe_semaphore_t *sem_urb;
-    moe_semaphore_t *sem_config;
+    moe_semaphore_t *sem_config_thread;
+    moe_semaphore_t *sem_control;
+    moe_semaphore_t *sem_config_mode;
 
     ring_context tr_ctx[MAX_TR];
 
@@ -114,7 +116,8 @@ void xhci_msi_handler(int irq) {
 
 
 static xhci_trb_t trb_create(int type) {
-    xhci_trb_t result = {{{0}}};
+    xhci_trb_t result;
+    memset(&result, 0, sizeof(xhci_trb_t));
     result.common.type = type;
     return result;
 }
@@ -175,7 +178,7 @@ static uintptr_t alloc_ep_ring(xhci_t *self, int slot_id, int epno) {
 
 static void copy_trb(xhci_trb_t *buffer, const xhci_trb_t *trb, int cycle) {
     _Atomic uint32_t *p = (void *)buffer;
-    uint32_t *q = (void *)trb;
+    _Atomic const uint32_t *q = (void *)trb;
     atomic_store(&p[0], q[0]);
     atomic_store(&p[1], q[1]);
     atomic_store(&p[2], q[2]);
@@ -254,18 +257,13 @@ usb_request_block_t *urb_find_by_trb(xhci_t *self, xhci_trb_t *trb, urb_state_t 
 }
 
 
-int schedule_transfer(xhci_t *self, moe_semaphore_t *semaphore, int slot_id, int epno, xhci_trb_t *trb, xhci_trb_t *response, int doorbell, int64_t timeout) {
-    if (timeout == 0) {
-        timeout = 1000000;
-    } else if (timeout < 0) {
-        timeout = MOE_FOREVER;
-    }
+int schedule_transfer(xhci_t *self, moe_semaphore_t *semaphore, int slot_id, int epno, xhci_trb_t *trb, xhci_trb_t *response, int doorbell) {
     usb_request_block_t *urb = urb_allocate(self, semaphore);
     if (urb) {
         // DEBUG_PRINT("<TRB %d %d %d>", slot_id, epno, trb->common.type);
         xhci_write_transfer(self, urb, slot_id, epno, trb, doorbell);
     }
-    if (!moe_sem_wait(semaphore, timeout)) {
+    if (!moe_sem_wait(semaphore, MOE_FOREVER)) {
         *response = urb->response;
         urb_dispose(urb);
         return 0;
@@ -286,10 +284,10 @@ int schedule_transfer(xhci_t *self, moe_semaphore_t *semaphore, int slot_id, int
 }
 
 
-int execute_command(xhci_t *self, moe_semaphore_t *semaphore, xhci_trb_t *trb, xhci_trb_t *response, int64_t timeout) {
-    static moe_spinlock_t lock;
+int execute_command(xhci_t *self, moe_semaphore_t *semaphore, xhci_trb_t *trb, xhci_trb_t *response) {
+    static moe_spinlock_t lock = 0;
     moe_spinlock_acquire(&lock);
-    int result = schedule_transfer(self, semaphore, 0, 0, trb, response, 1, timeout);
+    int result = schedule_transfer(self, semaphore, 0, 0, trb, response, 1);
     moe_spinlock_release(&lock);
     return result;
 }
@@ -323,19 +321,41 @@ uint64_t configure_endpoint(xhci_t *self, int slot_id, uint32_t dci, uint32_t ep
         // ep->max_esit_payload_lo = ps;
     } else {
         switch(slot->speed) {
-            case 4: // SS
+            case USB_PSIV_SS:
+            default:
                 ep->max_packet_size = 512;
                 break;
-            case 3: // HS
+            case USB_PSIV_HS:
                 ep->max_packet_size = 64;
                 break;
-            default:
+            case USB_PSIV_LS:
+            case USB_PSIV_FS:
                 ep->max_packet_size = 8;
                 break;
         }
         ep->average_trb_len = 8;
     }
-    ep->interval = interval;
+    if (interval) {
+        switch (slot->speed) {
+            case USB_PSIV_LS:
+            case USB_PSIV_FS:
+            {
+                if ((ep_type & 3) == 3) { // Interrupt
+                    int iv = 32 - __builtin_clz(interval) + 3;
+                    ep->interval = iv;
+                } else {
+                    ep->interval = interval + 2;
+                }
+            }
+                break;
+
+            case USB_PSIV_HS:
+            case USB_PSIV_SS:
+            default:
+                ep->interval = interval - 1;
+                break;
+        }
+    }
     ep->error_count = 3;
     ep->TRDP = TR;
 
@@ -365,11 +385,11 @@ uint32_t xhci_reset_port(xhci_t *self, int port_id) {
 }
 
 
-int uhi_configure_ep(usb_host_interface_t *uhc, usb_endpoint_descriptor_t *endpoint, int64_t timeout) {
+int uhi_configure_endpoint(usb_host_interface_t *hci, usb_endpoint_descriptor_t *endpoint) {
     xhci_trb_t response = trb_create(0);
 
-    xhci_t *self = uhc->context;
-    int slot_id = uhc->slot_id;
+    xhci_t *self = hci->host_context;
+    int slot_id = hci->slot_id;
     uint32_t max_packet_size = ((endpoint->wMaxPacketSize[1] << 8) | endpoint->wMaxPacketSize[0]);
     int epno = endpoint->bEndpointAddress;
     uint32_t dci = ((epno & 15) << 1) | ((epno & 0x80) ? 1 : 0);
@@ -380,7 +400,7 @@ int uhi_configure_ep(usb_host_interface_t *uhc, usb_endpoint_descriptor_t *endpo
     xhci_trb_t trb = trb_create(TRB_CONFIGURE_ENDPOINT_COMMAND);
     trb.address_device_command.ptr = input_context;
     trb.address_device_command.slot_id = slot_id;
-    execute_command(self, uhc->semaphore, &trb, &response, timeout);
+    execute_command(self, hci->semaphore, &trb, &response);
 
     switch (response.cce.completion) {
         case TRB_CC_NULL:
@@ -392,16 +412,16 @@ int uhi_configure_ep(usb_host_interface_t *uhc, usb_endpoint_descriptor_t *endpo
     }
 }
 
-int uhi_reset_ep(usb_host_interface_t *uhc, int epno, int64_t timeout) {
+int uhi_reset_endpoint(usb_host_interface_t *hci, int epno) {
     xhci_trb_t response = trb_create(0);
 
-    xhci_t *self = uhc->context;
-    int slot_id = uhc->slot_id;
+    xhci_t *self = hci->host_context;
+    int slot_id = hci->slot_id;
 
     xhci_trb_t trb = trb_create(TRB_RESET_ENDPOINT_COMMAND);
     trb.transfer_event.slot_id = slot_id;
     trb.transfer_event.endpoint_id = epno;
-    execute_command(self, uhc->semaphore, &trb, &response, timeout);
+    execute_command(self, hci->semaphore, &trb, &response);
 
     switch (response.cce.completion) {
         case TRB_CC_NULL:
@@ -413,9 +433,9 @@ int uhi_reset_ep(usb_host_interface_t *uhc, int epno, int64_t timeout) {
     }
 }
 
-int uhi_get_max_packet_size(usb_host_interface_t *uhc) {
-    xhci_t *self = uhc->context;
-    int slot_id = uhc->slot_id;
+int uhi_get_max_packet_size(usb_host_interface_t *hci) {
+    xhci_t *self = hci->host_context;
+    int slot_id = hci->slot_id;
 
     uint64_t device_context = self->DCBAA[slot_id];
     xhci_endpoint_ctx_data_t *ep = MOE_PA2VA(device_context + self->context_size);
@@ -423,10 +443,10 @@ int uhi_get_max_packet_size(usb_host_interface_t *uhc) {
     return ep->max_packet_size;
 }
 
-int uhi_set_max_packet_size(usb_host_interface_t *uhc, int max_packet_size, int64_t timeout) {
+int uhi_set_max_packet_size(usb_host_interface_t *hci, int max_packet_size) {
     xhci_trb_t response = trb_create(0);
-    xhci_t *self = uhc->context;
-    int slot_id = uhc->slot_id;
+    xhci_t *self = hci->host_context;
+    int slot_id = hci->slot_id;
 
     uint64_t input_context = self->usb_devices[slot_id].input_context;
     xhci_slot_ctx_data_t *slot = MOE_PA2VA(input_context + self->context_size);
@@ -446,7 +466,7 @@ int uhi_set_max_packet_size(usb_host_interface_t *uhc, int max_packet_size, int6
     trb.transfer_event.ptr = input_context;
     trb.transfer_event.slot_id = slot_id;
     trb.transfer_event.endpoint_id = 1;
-    execute_command(self, uhc->semaphore, &trb, &response, timeout);
+    execute_command(self, hci->semaphore, &trb, &response);
 
     switch (response.cce.completion) {
         case TRB_CC_NULL:
@@ -458,12 +478,15 @@ int uhi_set_max_packet_size(usb_host_interface_t *uhc, int max_packet_size, int6
     }
 }
 
-int uhi_control(usb_host_interface_t *uhc, int dci, int trt, urb_setup_data_t setup_data, uintptr_t buffer, int64_t timeout) {
-    xhci_t *self = uhc->context;
-    int slot_id = uhc->slot_id;
+
+int uhi_control(usb_host_interface_t *hci, int trt, urb_setup_data_t setup_data, uintptr_t buffer) {
+    xhci_t *self = hci->host_context;
+    int slot_id = hci->slot_id;
+    int dci = 1;
 
     int has_data = (buffer != 0) && (setup_data.setup.wLength != 0);
 
+    moe_sem_wait(self->sem_control, MOE_FOREVER);
     xhci_trb_t setup = trb_create(TRB_SETUP);
     setup.u32[0] = setup_data.u32[0];
     setup.u32[1] = setup_data.u32[1];
@@ -490,7 +513,8 @@ int uhi_control(usb_host_interface_t *uhc, int dci, int trt, urb_setup_data_t se
     ring_context *ctx = find_ep_ring(self, slot_id, dci);
     ctx->response = trb_create(0);
     xhci_write_transfer(self, NULL, slot_id, dci, &status, 1);
-    int result = moe_sem_wait(ctx->sem, timeout);
+    int result = moe_sem_wait(ctx->sem, MOE_FOREVER);
+    moe_sem_signal(self->sem_control);
 
     if (result < 0) return -1;
 
@@ -504,9 +528,9 @@ int uhi_control(usb_host_interface_t *uhc, int dci, int trt, urb_setup_data_t se
     }
 }
 
-int uhi_data_transfer(usb_host_interface_t *uhc, int dci, uintptr_t buffer, uint16_t length, int64_t timeout) {
-    xhci_t *self = uhc->context;
-    int slot_id = uhc->slot_id;
+int uhi_data_transfer(usb_host_interface_t *hci, int dci, uintptr_t buffer, uint16_t length) {
+    xhci_t *self = hci->host_context;
+    int slot_id = hci->slot_id;
 
     xhci_trb_t trb = trb_create(TRB_NORMAL);
     trb.normal.ptr = buffer;
@@ -517,7 +541,7 @@ int uhi_data_transfer(usb_host_interface_t *uhc, int dci, uintptr_t buffer, uint
     ring_context *ctx = find_ep_ring(self, slot_id, dci);
     ctx->response = trb_create(0);
     xhci_write_transfer(self, NULL, slot_id, dci, &trb, 1);
-    int result = moe_sem_wait(ctx->sem, timeout);
+    int result = moe_sem_wait(ctx->sem, MOE_FOREVER);
 
     if (result < 0) return -1;
 
@@ -533,15 +557,160 @@ int uhi_data_transfer(usb_host_interface_t *uhc, int dci, uintptr_t buffer, uint
 }
 
 
+int uhi_configure_hub(usb_host_interface_t *hci, usb_hub_descriptor_t *hub_desc, int mtt) {
+    xhci_trb_t response = trb_create(0);
+    xhci_t *self = hci->host_context;
+    int slot_id = hci->slot_id;
+
+    uint64_t input_context = self->usb_devices[slot_id].input_context;
+    xhci_slot_ctx_data_t *slot = MOE_PA2VA(input_context + self->context_size);
+    xhci_input_control_ctx_t *icc = MOE_PA2VA(input_context);
+    memset(icc, 0, self->context_size);
+    icc->add = 1;
+
+    uint64_t device_context = self->DCBAA[slot_id];
+    void *q = MOE_PA2VA(device_context);
+    memcpy(slot, q, self->context_size * 2);
+
+    slot->hub = 1;
+    slot->number_of_ports = hub_desc->bNbrPorts;
+    slot->MTT = mtt;
+    slot->TTT = hub_desc->wHubCharacteristics[0] >> 5; // TODO:
+
+    xhci_trb_t trb = trb_create(TRB_EVALUATE_CONTEXT_COMMAND);
+    trb.transfer_event.ptr = input_context;
+    trb.transfer_event.slot_id = slot_id;
+    trb.transfer_event.endpoint_id = 1;
+    execute_command(self, hci->semaphore, &trb, &response);
+
+    switch (response.cce.completion) {
+        case TRB_CC_NULL:
+            return -1;
+        case TRB_CC_SUCCESS:
+            return 0;
+        default:
+            return -(response.transfer_event.completion);
+    }
+}
+
+
+usb_host_interface_t *uhi_hub_attach_device(usb_host_interface_t *hub, int port_id, int speed) {
+
+    xhci_t *self = hub->host_context;
+
+    uint32_t new_route = hub->route_string;
+    for (int i = 0; i < 5; i++) {
+        unsigned shift = i * 4;
+        if ((new_route & (0xF << shift)) == 0) {
+            new_route |= (port_id << shift);
+            break;
+        }
+    }
+
+    xhci_trb_t cmd = trb_create(TRB_ENABLE_SLOT_COMMAND);
+    xhci_trb_t result = trb_create(0);
+    execute_command(self, self->sem_urb, &cmd, &result);
+    if (result.cce.completion != TRB_CC_SUCCESS) {
+        DEBUG_PRINT("\n[ENABLE_SLOT PORT %d ERROR %d]", port_id, result.cce.completion);
+        return NULL;
+    }
+    int slot_id = result.cce.slot_id;
+
+    usb_device_context *usb_device = &self->usb_devices[slot_id];
+
+    size_t size_device_context = self->context_size * 32;
+    uint64_t device_context = moe_alloc_physical_page(size_device_context);
+    memset(MOE_PA2VA(device_context), 0, size_device_context);
+    self->DCBAA[slot_id] = device_context;
+
+    size_t size_input_context = self->context_size * 33;
+    uint64_t input_context = moe_alloc_physical_page(size_input_context);
+    xhci_input_control_ctx_t *icc = MOE_PA2VA(input_context);
+    memset(icc, 0, size_input_context);
+    usb_device->input_context = input_context;
+
+    xhci_slot_ctx_data_t *slot = MOE_PA2VA(input_context + self->context_size);
+    slot->speed = speed;
+    slot->context_entries = 1;
+    slot->route_string = new_route;
+    slot->root_hub_port_no = hub->port_id;
+    switch (speed) {
+        case USB_PSIV_LS:
+        case USB_PSIV_FS:
+            slot->parent_port_no = port_id;
+            slot->parent_hub_slot_id = hub->slot_id;
+            break;
+    }
+
+    configure_endpoint(self, slot_id, 1, 4, 0, 0, 0);
+
+    for (int i = 0; i < 1; i++) {
+        moe_usleep(50000);
+        result = trb_create(0);
+        xhci_trb_t adc = trb_create(TRB_ADDRESS_DEVICE_COMMAND);
+        adc.address_device_command.ptr = input_context;
+        adc.address_device_command.slot_id = slot_id;
+        execute_command(self, self->sem_urb, &adc, &result);
+        if (result.cce.completion == TRB_CC_SUCCESS) break;
+    }
+    if (result.cce.completion != TRB_CC_SUCCESS) {
+        printf("\n[ADDRESS_DEVICE SLOT %d PORT %d ERROR %d]", slot_id, port_id, result.cce.completion);
+        return NULL;
+    }
+
+    usb_host_interface_t *hci = self->usb_devices[slot_id].hci = moe_alloc_object(sizeof(usb_host_interface_t), 1);
+    *hci = self->hci_vt;
+    hci->route_string = new_route;
+    hci->slot_id = slot_id;
+    hci->port_id = hub->port_id;
+    hci->parent_slot_id = hub->slot_id;
+    hci->psiv = speed;
+    hci->semaphore = moe_sem_create(0);
+    usb_new_device(hci);
+    return hci;
+}
+
+
+void uhi_hub_detach_device(usb_host_interface_t *hci) {
+    if (!hci) return;
+    xhci_t *self = hci->host_context;
+    int slot_id = hci->slot_id;
+    if (hci->dispose) {
+        hci->dispose(hci);
+    }
+    xhci_trb_t cmd = trb_create(TRB_DISABLE_SLOT_COMMAND);
+    xhci_trb_t result;
+    cmd.enable_slot_command.slot_id = slot_id;
+    int status = execute_command(self, self->sem_urb, &cmd, &result);
+    (void)status;
+    self->DCBAA[slot_id] = 0;
+}
+
+void uhi_enter_configuration(usb_host_interface_t *hci) {
+    xhci_t *self = hci->host_context;
+    moe_sem_wait(self->sem_config_mode, MOE_FOREVER);
+}
+
+void uhi_leave_configuration(usb_host_interface_t *hci) {
+    xhci_t *self = hci->host_context;
+    moe_sem_signal(self->sem_config_mode);
+}
+
+
 int xhci_init_dev(xhci_t *self) {
 
-    self->hci_vtt.context = self;
-    self->hci_vtt.configure_ep = uhi_configure_ep;
-    self->hci_vtt.reset_ep = uhi_reset_ep;
-    self->hci_vtt.get_max_packet_size = uhi_get_max_packet_size;
-    self->hci_vtt.set_max_packet_size = uhi_set_max_packet_size;
-    self->hci_vtt.control = uhi_control;
-    self->hci_vtt.data_transfer = uhi_data_transfer;
+    self->hci_vt.host_context = self;
+    self->hci_vt.configure_endpoint = uhi_configure_endpoint;
+    self->hci_vt.reset_endpoint = uhi_reset_endpoint;
+    self->hci_vt.get_max_packet_size = uhi_get_max_packet_size;
+    self->hci_vt.set_max_packet_size = uhi_set_max_packet_size;
+    self->hci_vt.control = uhi_control;
+    self->hci_vt.data_transfer = uhi_data_transfer;
+    self->hci_vt.configure_hub = uhi_configure_hub;
+    self->hci_vt.hub_attach_device = uhi_hub_attach_device;
+    self->hci_vt.hub_detach_device = uhi_hub_detach_device;
+    self->hci_vt.enter_configuration = uhi_enter_configuration;
+    self->hci_vt.leave_configuration = uhi_leave_configuration;
 
     self->cap = MOE_PA2VA(self->base_address);
     uint8_t CAP_LENGTH = self->cap->caplength & 0xFF;
@@ -570,6 +739,19 @@ int xhci_init_dev(xhci_t *self) {
                 data = (data & 0x000E1FEE) | 0xE0000000;
                 WRITE_PHYSICAL_UINT32(xecp_base + 4, data);
                 break;
+
+            // case 0x02: // Supported Protocol
+            // {
+            //     // TODO: PSIV
+            //     xhci_xecp_supported_protocol_t *sp = MOE_PA2VA(xecp_base);
+            //     printf("Protcol [%.4s %x.%x] port %d %d\n", sp->name, sp->rev_major, sp->rev_minor, sp->com_port_no, sp->n_com_ports);
+            //     xhci_psi_t *psi = sp->speed_ids;
+            //     for (int i = 0; i < sp->PSIC; i++) {
+            //         printf(" PSIV %d PSIE %d PLT %d PFD %d LP %d PSIM %d\n", psi[i].PSIV, psi[i].PSIE, psi[i].PLT, psi[i].PFD, psi[i].LP, psi[i].PSIM);
+            //     }
+            // }
+            //     break;
+
         }
         xecp_ptr = ((xecp >> 8) & 255) << 2;
         xecp_base += xecp_ptr;
@@ -655,16 +837,11 @@ int xhci_init_dev(xhci_t *self) {
         moe_usleep(1000);
     }
 
-    // Reset all ports (qemu)
-    for (int i = 1; i <= self->max_port; i++) {
-        xhci_reset_port(self, i);
-    }
-
     return 0;
 }
 
 
-void process_event(xhci_t *self) {
+static void process_event(xhci_t *self) {
 
     int cycle = self->event_cycle;
     for (;;) {
@@ -683,7 +860,7 @@ void process_event(xhci_t *self) {
                 DEBUG_PRINT("PSC(%d %d %08x)", port_id, trb->psc.completion, atomic_load(portsc));
 #endif
                 moe_queue_write(self->port_change_queue, port_id);
-                moe_sem_signal(self->sem_config);
+                moe_sem_signal(self->sem_config_thread);
             }
                 break;
 
@@ -741,9 +918,9 @@ void process_event(xhci_t *self) {
 _Noreturn void xhci_event_thread(void *args) {
     xhci_t *self = args;
 
-    moe_create_thread(&xhci_config_thread, priority_normal, &xhci, "xhci.config");
-
     xhci_init_dev(self);
+
+    moe_create_thread(&xhci_config_thread, priority_normal, &xhci, "xhci.config");
 
 #ifdef DEBUG
     uint8_t SBRN = pci_read_config(self->pci_base + 0x60);
@@ -751,7 +928,7 @@ _Noreturn void xhci_event_thread(void *args) {
     uint32_t HCSPARAMS1 = self->cap->hcsparams1;
     int MAX_DEV_SLOT = HCSPARAMS1 & 255;
     int MAX_INT = (HCSPARAMS1 >> 8) & 0x7FF;
-    DEBUG_PRINT("xHC v%d.%d.%d USB v%d.%d BASE %012llx IRQ# %d SLOT %d/%d INT %d PORT %d\n"
+    printf("xHC v%d.%d.%d USB v%d.%d BASE %012llx IRQ# %d SLOT %d/%d INT %d PORT %d\n"
         "# USB DEBUG MODE\n",
         (ver >> 8), (ver >> 4) & 15, (ver & 15), (SBRN >> 4) & 15, SBRN & 15,
         self->base_address, self->irq,
@@ -767,7 +944,6 @@ _Noreturn void xhci_event_thread(void *args) {
 
 
 static int port_initialize(xhci_t *self, int port_id) {
-    const int64_t timeout = 3000000;
     const int64_t csc_timeout = 100000;
 
     _Atomic uint32_t *portsc = MOE_PA2VA(get_portsc(self, port_id));
@@ -796,15 +972,14 @@ static int port_initialize(xhci_t *self, int port_id) {
             }
 
             xhci_trb_t cmd = trb_create(TRB_ENABLE_SLOT_COMMAND);
-            xhci_trb_t result;
-            int status = execute_command(self, self->sem_urb, &cmd, &result, timeout);
-            if (status) {
-                DEBUG_PRINT("\n[ENABLE SLOT on PORT %d TIMED_OUT]", port_id);
+            xhci_trb_t result = trb_create(0);
+            execute_command(self, self->sem_urb, &cmd, &result);
+            if (result.cce.completion != TRB_CC_SUCCESS) {
+                DEBUG_PRINT("\n[ENABLE_SLOT PORT %d ERROR %d]", port_id, result.cce.completion);
                 return 0;
             }
             int slot_id = result.cce.slot_id;
             self->port2slot[port_id] = slot_id;
-            // DEBUG_PRINT("\n[ENABLE SLOT %d PORT %d CC %d]", slot_id, port_id, result.cce.completion);
 
             usb_device_context *usb_device = &self->usb_devices[slot_id];
 
@@ -826,27 +1001,34 @@ static int port_initialize(xhci_t *self, int port_id) {
 
             configure_endpoint(self, slot_id, 1, 4, 0, 0, 0);
 
-            xhci_trb_t adc = trb_create(TRB_ADDRESS_DEVICE_COMMAND);
-            adc.address_device_command.ptr = input_context;
-            adc.address_device_command.slot_id = slot_id;
-            status = execute_command(self, self->sem_urb, &adc, &result, timeout);
-            if (status) {
-                DEBUG_PRINT("\n[ADDRESS DEVICE SLOT %d PORT %d TIMED_OUT]", slot_id, port_id);
+            for (int i = 0; i < 3; i++) {
+                result = trb_create(0);
+                xhci_trb_t adc = trb_create(TRB_ADDRESS_DEVICE_COMMAND);
+                adc.address_device_command.ptr = input_context;
+                adc.address_device_command.slot_id = slot_id;
+                execute_command(self, self->sem_urb, &adc, &result);
+                if (result.cce.completion == TRB_CC_SUCCESS) break;
+                moe_usleep(100000);
+            }
+            if (result.cce.completion != TRB_CC_SUCCESS) {
+                printf("\n[ADDRESS_DEVICE SLOT %d PORT %d ERROR %d]", slot_id, port_id, result.cce.completion);
                 return 0;
-            } else {
-                // DEBUG_PRINT("\n[ADDRESS DEVICE SLOT %d PORT %d CC %d]", slot_id, port_id, result.cce.completion);
             }
 
             return slot_id;
 
         } else {
             if (self->port2slot[port_id]) {
+                int slot_id = self->port2slot[port_id];
+                usb_host_interface_t *hci = self->usb_devices[slot_id].hci;
+                if (hci && hci->dispose) {
+                    hci->dispose(hci);
+                }
                 atomic_store(portsc, (port_status & PORTSC_MAGIC_WORD) | USB_PORTSC_CSC);
                 xhci_trb_t cmd = trb_create(TRB_DISABLE_SLOT_COMMAND);
                 xhci_trb_t result;
-                int slot_id = self->port2slot[port_id];
                 cmd.enable_slot_command.slot_id = slot_id;
-                int status = execute_command(self, self->sem_urb, &cmd, &result, timeout);
+                int status = execute_command(self, self->sem_urb, &cmd, &result);
                 self->port2slot[port_id] = 0;
                 self->DCBAA[slot_id] = 0;
                 if (status) {
@@ -867,22 +1049,35 @@ static int port_initialize(xhci_t *self, int port_id) {
 _Noreturn void xhci_config_thread(void *args) {
     xhci_t *self = args;
 
+    // Reset all ports (qemu)
+    for (int i = 1; i <= self->max_port; i++) {
+        xhci_reset_port(self, i);
+    }
+
     for (;;) {
-        moe_sem_wait(self->sem_config, MOE_FOREVER);
+        moe_sem_wait(self->sem_config_thread, MOE_FOREVER);
 
         int port_id;
         do {
+            moe_sem_wait(self->sem_config_mode, MOE_FOREVER);
             port_id = moe_queue_read(self->port_change_queue, 0);
             if (port_id > 0) {
+                moe_sem_wait(self->sem_control, MOE_FOREVER);
                 int slot_id = port_initialize(self, port_id);
+                moe_sem_signal(self->sem_control);
                 if (slot_id > 0) {
                     usb_host_interface_t *hci = self->usb_devices[slot_id].hci = moe_alloc_object(sizeof(usb_host_interface_t), 1);
-                    *hci = self->hci_vtt;
+                    *hci = self->hci_vt;
                     hci->slot_id = slot_id;
+                    hci->port_id = port_id;
+                    _Atomic uint32_t *portsc = MOE_PA2VA(get_portsc(self, port_id));
+                    hci->psiv = (atomic_load(portsc) >> 10) & 15;
                     hci->semaphore = moe_sem_create(0);
                     usb_new_device(hci);
+                    moe_usleep(10000);
                 }
             }
+            moe_sem_signal(self->sem_config_mode);
         } while (port_id > 0);
 
     }
@@ -904,8 +1099,10 @@ void xhci_init() {
         xhci.pci_base = base;
 
         xhci.sem_event = moe_sem_create(0);
-        xhci.sem_config = moe_sem_create(0);
+        xhci.sem_config_thread = moe_sem_create(0);
         xhci.sem_urb = moe_sem_create(0);
+        xhci.sem_control = moe_sem_create(1);
+        xhci.sem_config_mode = moe_sem_create(1);
         xhci.port_change_queue = moe_queue_create(MAX_PORT_CHANGE);
         xhci.urbs = moe_alloc_object(sizeof(usb_request_block_t), MAX_URB);
 

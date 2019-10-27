@@ -3,6 +3,7 @@
 // License: MIT
 
 #include "boot.h"
+#include "efish.h"
 
 #define	INVALID_UNICHAR	0xFFFE
 #define	ZWNBSP	0xFEFF
@@ -18,16 +19,11 @@ CONST EFI_GUID EfiSimpleFileSystemProtocolGuid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL
 CONST EFI_GUID EfiGraphicsOutputProtocolGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 CONST EFI_GUID efi_acpi_20_table_guid = EFI_ACPI_20_TABLE_GUID;
 CONST EFI_GUID smbios3_table_guid = SMBIOS3_TABLE_GUID;
+CONST EFI_GUID EfiShellParametersProtocolGuid = EFI_SHELL_PARAMETERS_PROTOCOL_GUID;
 
-
-int is_valid_arch(void);
+int is_64bit_processor(void);
 
 #define	EFI_PRINT(s)	gST->ConOut->OutputString(st->ConOut, L ## s)
-
-typedef struct {
-	void* base;
-	size_t size;
-} base_and_size;
 
 EFI_SYSTEM_TABLE *gST;
 EFI_BOOT_SERVICES *gBS;
@@ -69,7 +65,14 @@ static void free(void* p) {
     }
 }
 
-static EFI_STATUS efi_get_file_content(IN EFI_FILE_HANDLE fs, IN CONST CHAR16* path, OUT base_and_size* result) {
+size_t wcslen(const wchar_t *s) {
+    size_t count = 0;
+    for (; s[count]; count++) {}
+    return count;
+}
+
+
+static EFI_STATUS efi_get_file_content(IN EFI_FILE_HANDLE fs, IN CONST CHAR16* path, OUT struct iovec* result) {
     EFI_STATUS status;
     EFI_FILE_HANDLE handle = NULL;
     void* buff = NULL;
@@ -105,8 +108,8 @@ static EFI_STATUS efi_get_file_content(IN EFI_FILE_HANDLE fs, IN CONST CHAR16* p
     status = handle->Close(handle);
     if (EFI_ERROR(status)) goto error;
 
-    result->base = buff;
-    result->size = read_count;
+    result->iov_base = buff;
+    result->iov_len = read_count;
 
     return EFI_SUCCESS;
 
@@ -143,7 +146,7 @@ moe_bootinfo_t bootinfo;
 
 EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
     EFI_STATUS status;
-    base_and_size kernel_ptr;
+    struct iovec kernel_vec;
     IMAGE_LOCATOR locator = NULL;
 
     // Init UEFI Environments
@@ -152,10 +155,46 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
     gRT = st->RuntimeServices;
 
     // check processor
+#if defined(__i386__)
+    if (!is_64bit_processor()) {
+        EFI_PRINT("This operating system needs 64bit processor\r\n");
+        return EFI_UNSUPPORTED;
+    }
+#endif
+
+    // Command line
     {
-        if (!is_valid_arch()) {
-            EFI_PRINT("This operating system needs 64bit processor\r\n");
-            return EFI_UNSUPPORTED;
+        EFI_SHELL_PARAMETERS_PROTOCOL *params;
+        status = gBS->OpenProtocol(image, &EfiShellParametersProtocolGuid, (void **)&params, image, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+        if (!EFI_ERROR(status)) {
+            size_t size = 0;
+            for (size_t i = 1; i < params->Argc; i++) {
+                size += 1 + wcslen(params->Argv[i]);
+            }
+            size = (size + 1) *  sizeof(wchar_t);
+            wchar_t *buffer = malloc(size);
+            size_t index = 0;
+            for (size_t i = 1; i < params->Argc; i++) {
+                buffer[index++] = ' ';
+                size_t delta = wcslen(params->Argv[i]);
+                memcpy(buffer + index, params->Argv[i], delta * sizeof(wchar_t));
+                index += delta;
+            }
+            buffer[index] = 0;
+            bootinfo.cmdline = (uintptr_t)buffer;
+        } else {
+            EFI_LOADED_IMAGE_PROTOCOL* li;
+            status = gBS->OpenProtocol(image, &EfiLoadedImageProtocolGuid, (void **)&li, image, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+            if (!EFI_ERROR(status)) {
+                size_t option_size = li->LoadOptionsSize;
+                if (option_size) {
+                    size_t size = option_size + sizeof(wchar_t);
+                    wchar_t *buffer = malloc(size);
+                    memcpy(buffer, li->LoadOptions, option_size);
+                    buffer[option_size / sizeof(wchar_t)] = 0;
+                    bootinfo.cmdline = (uintptr_t)buffer;
+                }
+            }
         }
     }
 
@@ -171,12 +210,12 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
         status = fs->OpenVolume(fs, &file);
         if (EFI_ERROR(status)) return EFI_LOAD_ERROR;
 
-        status = efi_get_file_content(file, KERNEL_PATH, &kernel_ptr);
+        status = efi_get_file_content(file, KERNEL_PATH, &kernel_vec);
         if (EFI_ERROR(status)) {
             EFI_PRINT("ERROR: KERNEL NOT FOUND\r\n");
             return EFI_NOT_FOUND;
         }
-        locator = recognize_kernel_signature(kernel_ptr.base, kernel_ptr.size);
+        locator = recognize_kernel_signature(kernel_vec);
         if (!locator) {
             EFI_PRINT("ERROR: BAD KERNEL SIGNATURE FOUND\r\n");
             return EFI_LOAD_ERROR;
@@ -211,6 +250,12 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE image, IN EFI_SYSTEM_TABLE *st) {
         bootinfo.screen.width = gop->Mode->Info->HorizontalResolution;
         bootinfo.screen.height = gop->Mode->Info->VerticalResolution;
         bootinfo.screen.delta = gop->Mode->Info->PixelsPerScanLine;
+        if (bootinfo.screen.width > bootinfo.screen.delta) {
+            // GPD Micro PC Pseudo Landscape Mode
+            int temp = bootinfo.screen.width;
+            bootinfo.screen.width = bootinfo.screen.height;
+            bootinfo.screen.height = temp;
+        }
     }
 
     // EFI TIME

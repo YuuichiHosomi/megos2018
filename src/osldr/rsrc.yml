@@ -2,7 +2,7 @@
 prefix: rsrc
 strings: 
   default: 
-    main_title: MEG-OS Boot Menu v0.6
+    main_title: MEG-OS Boot Menu v0.7
     starting: Starting up...
     press_esc_to_menu: Press the space bar to display the advanced options menu...
     load_error_title: Load Error
@@ -11,7 +11,7 @@ strings:
     press_any_key: Press any key to continue...
     choose_an_option: Choose an option
     start_normally: Start Normally
-    advanced_option: Advanced Option Menu
+    advanced_option: Other Options
     return_to_previous: Return to Previous Screen
     other_devices: Other Devices
     system_info: System Information
@@ -20,6 +20,7 @@ strings:
     shutdown: Shutdown
     boot_to_fw_ui: UEFI BIOS Setup
     display_settings: Display Settings
+    # peaceful_mode: Peaceful Mode
   ja: 
     starting: 起動中...
     press_esc_to_menu: メニューを表示するにはスペースキーを押してください...
@@ -28,7 +29,7 @@ strings:
     press_any_key: 何かキーを押すと続行します...
     choose_an_option: オプションを選択してください
     start_normally: 通常起動する
-    advanced_option: 拡張オプションメニュー
+    advanced_option: その他のオプション
     return_to_previous: 前の画面に戻る
     system_info: システム情報
     shell: UEFI シェルを起動
@@ -36,3 +37,4 @@ strings:
     shutdown: シャットダウン
     boot_to_fw_ui: UEFI BIOS セットアップ
     display_settings: 画面の設定
+    # peaceful_mode: ピースフルモード

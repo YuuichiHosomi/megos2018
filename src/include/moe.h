@@ -13,10 +13,12 @@
 #define MIN(a, b)   ((a) < (b) ? (a) : (b))
 
 int printf(const char *format, ...);
+int vprintf(const char *format, va_list args);
 int snprintf(char* buffer, size_t n, const char* format, ...);
 char *strchr(const char *s, int c);
 char *strncpy(char *s1, const char *s2, size_t n);
 int strncmp(const char *s1, const char *s2, size_t n);
+size_t strlen(const char *s);
 void *memcpy(void *p, const void *q, size_t n);
 void *memset(void *p, int v, size_t n);
 
@@ -76,10 +78,25 @@ void *moe_alloc_object(size_t size, size_t count);
 #define PROT_EXEC   0x4
 #define PROT_NONE   0x0
 
+typedef struct {
+    void *context;
+    _Atomic int ref_cnt;
+} moe_shared_t;
+typedef void (*MOE_DEALLOC)(void *self);
+
+static inline moe_shared_t *moe_shared_init(moe_shared_t *self, void *context) {
+    if (self) {
+        self->ref_cnt = 1;
+        self->context = context;
+    }
+    return self;
+}
+moe_shared_t *moe_retain(moe_shared_t *self);
+void moe_release(moe_shared_t *self, MOE_DEALLOC dealloc);
+
 
 //  Threading Service
 typedef struct moe_thread_t moe_thread_t;
-typedef struct moe_fiber_t moe_fiber_t;
 typedef enum {
     priority_idle = 0,
     priority_low,
@@ -100,14 +117,6 @@ int moe_get_number_of_active_cpus(void);
 int moe_get_pid(void);
 int moe_raise_pid(void);
 int moe_create_process(moe_thread_start start, moe_priority_level_t priority, void *args, const char *name);
-
-moe_fiber_t *moe_create_fiber(moe_thread_start start, void *args, size_t stack_size, const char *name);
-moe_fiber_t *moe_get_primary_fiber(void);
-moe_fiber_t *moe_get_current_fiber(void);
-_Noreturn void moe_exit_fiber(uint32_t exit_code);
-int moe_get_current_fiber_id(void);
-const char *moe_get_current_fiber_name(void);
-void moe_yield(void);
 
 
 typedef _Atomic uintptr_t moe_spinlock_t;

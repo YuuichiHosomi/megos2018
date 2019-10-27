@@ -15,9 +15,9 @@
 [section .text]
 
 
-; int is_valid_arch(void);
-    global _is_valid_arch
-_is_valid_arch:
+; int is_64bit_processor(void);
+    global _is_64bit_processor
+_is_64bit_processor:
     push ebx
 
     mov eax, 0x80000000

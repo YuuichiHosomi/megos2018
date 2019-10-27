@@ -1,6 +1,8 @@
 // Pseudo Shell Interface
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
+
+#include <stdatomic.h>
 #include "moe.h"
 #include "kernel.h"
 #include "hid.h"
@@ -54,8 +56,13 @@ int cmd_shutdown(int argc, char **argv) {
 }
 
 int cmd_help(int argc, char **argv);
-int cmd_cpuid(int argc, char **argv);
-int cmd_ps(int argc, char **argv);
+int cmd_cpuid(int argc, char **argv) __attribute__((weak));
+int cmd_ps(int argc, char **argv) __attribute__((weak));
+int cmd_exp(int argc, char **argv);
+int cmd_stall(int argc, char **argv);
+int cmd_lsusb(int argc, char **argv) __attribute__((weak));
+int cmd_lspci(int argc, char **argv) __attribute__((weak));
+int cmd_mode(int argc, char **argv) __attribute__((weak));
 
 command_list_t commands[] = {
     { "help", cmd_help, "Display this help" },
@@ -64,16 +71,50 @@ command_list_t commands[] = {
     { "reboot", cmd_reboot, "Restart computer" },
     { "exit", cmd_shutdown, "Exit" },
     { "cpuid", cmd_cpuid, "Show cpuid information" },
+    { "lspci", cmd_lspci, "Show pci informations" },
+    { "lsusb", cmd_lsusb, "Show usb informations" },
     { "ps", cmd_ps, NULL },
+    { "exp", cmd_exp, NULL },
+    { "stall", cmd_stall, NULL},
+    { "mode", cmd_mode, NULL},
     { 0 },
 };
 
+
 int cmd_help(int argc, char **argv) {
     for (int i = 0; commands[i].name; i++) {
-        if (commands[i].tips) {
-            _zprintf("%s\t%s\n", commands[i].name, commands[i].tips);
+        if (commands[i].tips && commands[i].proc) {
+            printf("%s\t%s\n", commands[i].name, commands[i].tips);
         }
     }
+    return 0;
+}
+
+
+// user mode experiments
+_Atomic intptr_t uid_src = 1;
+extern void exp_user_mode(void *base, void *stack_top);
+void proc_hello(void *args) {
+    uintptr_t base = atomic_fetch_add(&uid_src, 1) << 39;
+    size_t code_size = 0x10000;
+    size_t padding = 0x400000;
+    size_t stack_size = 0x10000;
+    void *code = pg_map_user(base, code_size, 0);
+    uint8_t *data = pg_map_user(base + padding, stack_size, 0);
+    moe_usleep(100000);
+
+    exp_user_mode(code, data + stack_size);
+}
+
+int cmd_exp(int argc, char **argv) {
+    moe_create_process(&proc_hello, 0, NULL, "hello");
+    return 0;
+}
+
+int cmd_stall(int argc, char **argv) {
+    int time = argv[1][0] & 15;
+    if (!time) time = 3;
+    moe_usleep(time * 1000000);
     return 0;
 }
 
@@ -135,12 +176,12 @@ int read_cmdline(char* buffer, size_t max_len) {
                     if (c < 0x80) {
                         buffer[len++] = c;
                         if (c < 0x20) { // ^X
-                            _zprintf("^%c", c | 0x40);
+                            printf("^%c", c | 0x40);
                         } else {
-                            _zprintf("%c", c);
+                            printf("%c", c);
                         }
                     } else { // non ascii
-                        _zprintf("?+%04x", c);
+                        printf("?+%04x", c);
                     }
                 }
                 break;
@@ -154,54 +195,22 @@ int read_cmdline(char* buffer, size_t max_len) {
 
 
 /*********************************************************************/
-
-
-_Noreturn void fiber_test_1(void *args) {
-    int k = moe_get_current_fiber_id();
-    int padding = 2;
-    int w = 10;
-    moe_rect_t rect = {{k * w, padding}, {w - padding, w - padding}};
-    uint32_t color = k * 0x010101;
-    for (;;) {
-        moe_fill_rect(NULL, &rect, color);
-        color += k;
-        moe_yield();
-    }
-}
-
-_Noreturn void fiber_test_thread(void *args) {
-    for (int i = 0; i < 20; i++) {
-        char name[32];
-        snprintf(name, 32, "test_#%d", 1 + i);
-        moe_create_fiber(&fiber_test_1, NULL, 0, name);
-        putchar('.');
-        moe_yield();
-        moe_usleep(10000);
-    }
-    for (;;) {
-        moe_usleep(10000);
-        moe_yield();
-    }
-}
-
-
-/*********************************************************************/
 //  Pseudo shell
 
 #define MAX_CMDLINE 80
 #define MAX_ARGV    256
 #define MAX_ARGBUFF 256
 
-void shell_start() {
+void shell_start(const wchar_t *cmdline) {
 
     cin = moe_queue_create(256);
 
     cmd_ver(0, NULL);
 
-    moe_create_thread(&fiber_test_thread, 0, NULL, "fiber_test");
+    // moe_create_thread(&fiber_test_thread, 0, NULL, "fiber_test");
     moe_usleep(1000000);
 
-    // const char *autoexec = "ps\n";
+    // const char *autoexec = "stall 3\nlsusb\n";
     // for (int i = 0; autoexec[i]; i++) {
     //     moe_queue_write(cin, autoexec[i]);
     // }
@@ -211,7 +220,7 @@ void shell_start() {
     char con_buff[MAX_CMDLINE];
     char arg_buff[MAX_ARGBUFF];
 
-    printf("\n\n[Pseudo shell]\n");
+    printf("\n%s\n", get_string(string_banner));
     for (;;) {
         printf(">");
         read_cmdline(con_buff, MAX_CMDLINE);
@@ -271,8 +280,6 @@ void shell_start() {
             }
         } while (!stop);
 
-        if (argv[0][0] == '!') { __asm__ volatile ("int3"); }
-
         command_list_t *cmd_to_run = NULL;
         for (int i = 0; commands[i].name; i++) {
             int x = strncmp(commands[i].name, argv[0], 8);
@@ -281,10 +288,10 @@ void shell_start() {
                 break;
             }
         }
-        if (cmd_to_run) {
+        if (cmd_to_run && cmd_to_run->proc) {
             cmd_to_run->proc(argc, argv);
         } else {
-            _zprintf("%s\n", get_string(string_bad_command));
+            printf("%s\n", get_string(string_bad_command));
         }
    }
 }

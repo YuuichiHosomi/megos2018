@@ -1,4 +1,4 @@
-// EFI Simple Text Output Protocol wrapper for MEG-OS
+// Graphical Console for EFI
 // Copyright (c) 2018 MEG-OS project, All rights reserved.
 // License: MIT
 #include "efi.h"
@@ -9,8 +9,18 @@
 #include "megh0816.h"
 #define FONT_PROPERTY(x) MEGH0816_ ## x
 
+#include "cp932.h"
+
 void *memset(void *, int, size_t);
-void *malloc(size_t);
+
+static void *malloc(size_t n) {
+    void *result = 0;
+    EFI_STATUS status = gST->BootServices->AllocatePool(EfiBootServicesData, n, &result);
+    if(EFI_ERROR(status)){
+        return 0;
+    }
+    return result;
+}
 
 void *blt_buffer = NULL;
 
@@ -20,7 +30,7 @@ typedef struct {
     EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL* text;
     EFI_GRAPHICS_OUTPUT_PROTOCOL* gop;
     uint32_t fgcolor, bgcolor;
-    intptr_t cols, rows, padding_x, padding_y, rotate;
+    intptr_t cols, rows, padding_x, padding_y, portrait, gpdmicro_landscape;
     intptr_t font_w, font_h, font_w8, line_height, font_offset;
     const uint8_t *font_data;
     uint8_t mode_cols, mode_rows;
@@ -58,7 +68,7 @@ typedef struct {
 static uint16_t *uni2ansi_tbl = NULL;
 static fontx2_zn_font font_zn;
 
-EFI_STATUS cp932_tbl_init(base_and_size table_bin_ptr) {
+EFI_STATUS cp932_tbl_init(struct iovec table_bin_vec) {
 
     const size_t sizeof_unitable = 0x20000;
     uni2ansi_tbl = malloc(sizeof_unitable);
@@ -66,8 +76,8 @@ EFI_STATUS cp932_tbl_init(base_and_size table_bin_ptr) {
     memset(uni2ansi_tbl, 0, sizeof_unitable);
 
     uint16_t cp932_code = 0x8140;
-    uint16_t *p = table_bin_ptr.base;
-    size_t length = *p++;
+    uint16_t *p = table_bin_vec.iov_base;
+    size_t length = table_bin_vec.iov_len / 2;
     for (int i = 0; i < length; i++, p++){
         uni2ansi_tbl[*p] = cp932_code;
         cp932_code++;
@@ -84,9 +94,9 @@ EFI_STATUS cp932_tbl_init(base_and_size table_bin_ptr) {
     return EFI_SUCCESS;
 }
 
-EFI_STATUS cp932_font_init(base_and_size font_ptr) {
+EFI_STATUS cp932_font_init(struct iovec font_vec) {
 
-    font_zn.rawPtr	= font_ptr.base;
+    font_zn.rawPtr	= font_vec.iov_base;
     font_zn.font_w	= font_zn.rawPtr[0x0E];
     font_zn.font_h	= font_zn.rawPtr[0x0F];
     font_zn.font_w8 = (font_zn.font_w + 7) >> 3;
@@ -109,6 +119,296 @@ EFI_STATUS cp932_font_init(base_and_size font_ptr) {
 }
 
 
+moe_bitmap_t main_screen;
+moe_bitmap_t back_buffer;
+
+void moe_bitmap_init(moe_bitmap_t *self, uint32_t *bitmap, int width, int height, int delta, int flags) {
+    self->bitmap = bitmap;
+    self->width = width;
+    self->height = height;
+    self->delta = delta;
+    self->flags = flags;
+}
+
+void moe_blt(moe_bitmap_t* dest, moe_bitmap_t* src, moe_point_t *origin, moe_rect_t *rect, uint32_t options) {
+
+    moe_bitmap_t temp_dest;
+    if (!dest) dest = &main_screen;
+    if (!src) src = &main_screen;
+
+    int rotate = 0;
+    if (dest->flags & MOE_BMP_ROTATE) {
+        if (src->flags & MOE_BMP_IGNORE_ROTATE) {
+            temp_dest = *dest;
+            int temp = temp_dest.width;
+            temp_dest.width = temp_dest.height;
+            temp_dest.height = temp;
+            temp_dest.flags &= ~MOE_BMP_ROTATE;
+            dest = &temp_dest;
+        } else {
+            rotate = 1;
+        }
+    }
+
+    intptr_t dx, dy, w, h, sx, sy;
+    if (origin) {
+        dx = origin->x;
+        dy = origin->y;
+    } else {
+        dx = dy = 0;
+    }
+    if (rect) {
+        sx = rect->origin.x;
+        sy = rect->origin.y;
+        w = rect->size.width;
+        h = rect->size.height;
+    } else {
+        sx = sy = 0;
+        w = src->width;
+        h = src->height;
+    }
+
+    // Clipping
+    {
+        if (dx < 0) {
+            sx -= dx;
+            w += dx;
+            dx = 0;
+        }
+        if (dy < 0) {
+            sy -= dy;
+            h += dy;
+            dy = 0;
+        }
+        if (w > src->width) w = src->width;
+        if (h > src->height) h = src->height;
+        intptr_t r = dx + w;
+        intptr_t b = dy + h;
+        if (r >= dest->width) w = dest->width - dx;
+        if (b >= dest->height) h = dest->height - dy;
+        if (w <= 0 || h <= 0) return;
+    }
+
+    // Transfer
+
+    if (rotate) {
+        intptr_t temp = dx;
+        dx = dest->height - dy;
+        dy = temp;
+        uint32_t *p = dest->bitmap;
+        p += dx + dy * dest->delta - h;
+        uint32_t *q = src->bitmap;
+        q += sx + (sy + h - 1) * src->delta;
+        uintptr_t sdy = src->delta, ddy = dest->delta - h;
+        // #pragma clang loop vectorize(enable) interleave(enable)
+        for (uintptr_t i = 0; i < w; i++) {
+            uint32_t *q0 = q + i;
+            for (uintptr_t j = 0; j < h; j++) {
+                *p++ = *q0;
+                q0 -= sdy;
+            }
+            p += ddy;
+        }
+        return;
+    }
+
+    uint32_t *p = dest->bitmap;
+    p += dx + dy * dest->delta;
+    uint32_t *q = src->bitmap;
+    q += sx + sy * src->delta;
+    uintptr_t sd = src->delta - w;
+    uintptr_t dd = dest->delta - w;
+
+    if (src->flags & MOE_BMP_ALPHA) { // ARGB Transparency
+        for (uintptr_t i = 0; i < h; i++) {
+            #pragma clang loop vectorize(enable) interleave(enable)
+            for (uintptr_t j = 0; j < w; j++) {
+                uint8_t *p0 = (uint8_t*)p;
+                uint8_t *q0 = (uint8_t*)q;
+                uint8_t alpha = q0[3];
+                uint8_t alpha_n = 255 - alpha;
+                p0[0] = (q0[0] * alpha + p0[0] * alpha_n) / 256;
+                p0[1] = (q0[1] * alpha + p0[1] * alpha_n) / 256;
+                p0[2] = (q0[2] * alpha + p0[2] * alpha_n) / 256;
+                p0[3] = (q0[3] * alpha + p0[3] * alpha_n) / 256;
+                // p0[3] = 0;
+                p++, q++;
+            }
+            p += dd;
+            q += sd;
+        }
+    } else {
+        if (dd == 0 && sd == 0) {
+            uintptr_t limit = w * h;
+            #pragma clang loop vectorize(enable) interleave(enable)
+            for (uintptr_t i = 0; i < limit; i++) {
+                *p++ = *q++;
+            }
+        } else if (dd == 0) {
+            for (uintptr_t i = 0; i < h; i++) {
+                #pragma clang loop vectorize(enable) interleave(enable)
+                for (uintptr_t j = 0; j < w; j++) {
+                    *p++ = *q++;
+                }
+                q += sd;
+            }
+        } else if (sd == 0) {
+            for (uintptr_t i = 0; i < h; i++) {
+                #pragma clang loop vectorize(enable) interleave(enable)
+                for (uintptr_t j = 0; j < w; j++) {
+                    *p++ = *q++;
+                }
+                p += dd;
+            }
+        } else {
+            for (uintptr_t i = 0; i < h; i++) {
+                #pragma clang loop vectorize(enable) interleave(enable)
+                for (uintptr_t j = 0; j < w; j++) {
+                    *p++ = *q++;
+                }
+                p += dd;
+                q += sd;
+            }
+        }
+    }
+}
+
+
+void moe_fill_rect(moe_bitmap_t* dest, moe_rect_t *rect, uint32_t color) {
+
+    if (!dest) dest = &main_screen;
+
+    intptr_t dx, dy, w, h;
+    if (rect) {
+        dx = rect->origin.x;
+        dy = rect->origin.y;
+        w = rect->size.width;
+        h = rect->size.height;
+    } else {
+        dx = dy = 0;
+        w = dest->width;
+        h = dest->height;
+    }
+
+    {
+        if (dx < 0) {
+            w += dx;
+            dx = 0;
+        }
+        if (dy < 0) {
+            h += dy;
+            dy = 0;
+        }
+        intptr_t r = dx + w;
+        intptr_t b = dy + h;
+        if (r >= dest->width) w = dest->width - dx;
+        if (b >= dest->height) h = dest->height - dy;
+        if (w <= 0 || h <= 0) return;
+    }
+
+    if (dest->flags & MOE_BMP_ROTATE) {
+        intptr_t temp = dx;
+        dx = dest->height - dy - h;
+        dy = temp;
+        temp = w;
+        w = h;
+        h = temp;
+    }
+
+    uint32_t *p = dest->bitmap;
+    p += dx + dy * dest->delta;
+    uintptr_t dd = dest->delta - w;
+
+    if (dd == 0) {
+        uintptr_t limit = w * h;
+        #pragma clang loop vectorize(enable) interleave(enable)
+        for (uintptr_t i = 0; i < limit; i++) {
+            *p++ = color;
+        }
+    } else {
+        for (uintptr_t i = 0; i < h; i++) {
+            #pragma clang loop vectorize(enable) interleave(enable)
+            for (uintptr_t j = 0; j < w; j++) {
+                *p++ = color;
+            }
+            p += dd;
+        }
+    }
+}
+
+
+void draw_pattern(moe_bitmap_t *dest, moe_rect_t* rect, const uint8_t* pattern, uint32_t fgcolor) {
+
+    if (!dest) dest = &main_screen;
+
+    intptr_t x = rect->origin.x, y = rect->origin.y, w = rect->size.width, h = rect->size.height;
+    uintptr_t delta = dest->delta;
+    uintptr_t w8 = (w + 7) / 8;
+
+    intptr_t hl = dest->height - y;
+    if (hl < h) {
+        h = hl;
+    }
+
+    if (x < 0 || x >= dest->width || y < 0 || y >= dest->height || h == 0) return;
+
+    if (dest->flags & MOE_BMP_ROTATE) {
+        y = dest->height - y - h;
+        uintptr_t wl = delta - h;
+        uint32_t* p = dest->bitmap + x * delta + y;
+
+        uintptr_t l = w;
+        for(uintptr_t k = 0; k < w8; k++, l -= 8) {
+            uintptr_t m = (l > 8) ? 8 : l;
+            for(uintptr_t i = 0; i < m; i++) {
+                uint32_t mask = 0x80 >> i;
+                #pragma clang loop vectorize(enable) interleave(enable)
+                for(intptr_t j = h - 1; j >= 0; j--, p++) {
+                    if(pattern[j * w8 + k] & mask) {
+                        *p = fgcolor;
+                    }
+                }
+                p += wl;
+            }
+        }
+
+    } else {
+        uintptr_t wl = delta - w;
+        uint32_t* p = dest->bitmap + y * delta + x;
+
+        for(uintptr_t i = 0; i < h; i++) {
+            uintptr_t l = w;
+            for(uintptr_t k = 0; k < w8; k++, l -= 8) {
+                uintptr_t m = (l > 8) ? 8 : l;
+                uint8_t font_pattern = *pattern++;
+                #pragma clang loop vectorize(enable) interleave(enable)
+                for(uintptr_t j = 0; j < m; j++, p++) {
+                    if(font_pattern & (0x80 >> j)) {
+                        *p = fgcolor;
+                    }
+                }
+            }
+            p += wl;
+        }
+    }
+
+}
+
+
+static void ATOP_sync_gop(ATOP_Context *self) {
+    int sw = self->gop->Mode->Info->HorizontalResolution;
+    int sh = self->gop->Mode->Info->VerticalResolution;
+    int ppsl = self->gop->Mode->Info->PixelsPerScanLine;
+    if (self->gpdmicro_landscape) {
+        moe_bitmap_init(&main_screen, (void *)self->gop->Mode->FrameBufferBase, sw, sh, ppsl, MOE_BMP_ROTATE);
+    } else if (self->portrait) {
+        moe_bitmap_init(&main_screen, (void *)self->gop->Mode->FrameBufferBase, sh, sw, ppsl, MOE_BMP_ROTATE);
+    } else {
+        moe_bitmap_init(&main_screen, (void *)self->gop->Mode->FrameBufferBase, sw, sh, ppsl, 0);
+    }
+}
+
+
 static int ATOP_col_to_x(ATOP_Context *self, int x) {
     return self->padding_x + self->font_w * x;
 }
@@ -123,76 +423,13 @@ static ATOP_Context* ATOP_unboxing(EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL* text) {
 
 
 static void ATOP_fill_rect(ATOP_Context *self, int x, int y, int w, int h, uint32_t color) {
-    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = self->gop;
-
-    if(self->rotate) {
-        int z = x;
-        x = gop->Mode->Info->HorizontalResolution - y - h;
-        y = z;
-        z = w;
-        w = h;
-        h = z;
-    }
-
-    int r = x + w, b = y + h, sw = self->gop->Mode->Info->HorizontalResolution, sh = self->gop->Mode->Info->VerticalResolution;
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    if (r > sw) r = sw;
-    if (b > sh) b = sh;
-    w = r - x;
-    h = b - y;
-    if (x > sw || y > sh || w <= 0 || h <= 0) return;
-
-    gop->Blt(gop, (EFI_GRAPHICS_OUTPUT_BLT_PIXEL *)&color, EfiBltVideoFill, 0, 0, x, y, w, h, 0);
+    moe_rect_t rect = {{x, y}, {w, h}};
+    moe_fill_rect(NULL, &rect, color);
 }
 
-//	TODO: more better code
 static void ATOP_draw_pattern(ATOP_Context *self, int x, int y, int w, int h, const uint8_t *pattern, uint32_t color) {
-    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = self->gop;
-    int sw = self->gop->Mode->Info->HorizontalResolution;
-    int ppl = gop->Mode->Info->PixelsPerScanLine;
-    int w8 = (w + 7) / 8;
-
-    if (x < 0 || y < 0) return;
-
-    if (self->rotate) {
-        y = sw - y - h;
-        int wl = ppl - h;
-        uint32_t *p = (uint32_t *)gop->Mode->FrameBufferBase + x * ppl + y;
-
-        int l = w;
-        for (int k = 0; k < w8; k++, l -= 8) {
-            int m = (l > 8) ? 8 : l;
-            for (int i = 0; i < m; i++) {
-                uint32_t mask = 0x80 >> i;
-                for (int j = h - 1; j >= 0; j--,p++) {
-                    if (pattern[j * w8 + k] & mask) {
-                        *p = color;
-                    }
-                }
-                p += wl;
-            }
-        }
-
-    } else {
-        int wl = ppl - w;
-        uint32_t *p = (uint32_t *)gop->Mode->FrameBufferBase + y * ppl + x;
-
-        for (int i = 0; i < h; i++) {
-            int l = w;
-            for (int k = 0; k < w8; k++, l -= 8) {
-                int m = (l > 8) ? 8 : l;
-                uint8_t font_pattern = *pattern++;
-                for (int j = 0; j < m; j++, p++) {
-                    if (font_pattern & (0x80 >> j)) {
-                        *p = color;
-                    }
-                }
-            }
-            p += wl;
-        }
-    }
-
+    moe_rect_t rect = {{x, y}, {w, h}};
+    draw_pattern(NULL, &rect, pattern, color);
 }
 
 
@@ -280,7 +517,7 @@ static int ATOP_check_scroll(ATOP_Context *self) {
         int w0 = self->cols * self->font_w;
         int h0 = (self->rows-1) * self->line_height;
 
-        if (self->rotate) {
+        if (self->portrait) {
             int sw = self->gop->Mode->Info->HorizontalResolution;
             int x1 = sw - y1 - h0;
             int z0 = x0;
@@ -350,7 +587,6 @@ static EFI_STATUS ATOP_putchar(ATOP_Context *self, wchar_t c) {
 }
 
 
-
 static EFI_STATUS EFIAPI ATOP_RESET (
     IN EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *This,
     IN BOOLEAN ExtendedVerification
@@ -358,18 +594,11 @@ static EFI_STATUS EFIAPI ATOP_RESET (
     ATOP_Context *self = ATOP_unboxing(This);
     if(!self) return EFI_DEVICE_ERROR;
 
-    EFI_GRAPHICS_OUTPUT_BLT_PIXEL zero = {0, 0, 0, 0};
-    self->gop->Blt(self->gop, (EFI_GRAPHICS_OUTPUT_BLT_PIXEL *)&zero, EfiBltVideoFill,
-        0, 0, 0, 0, self->gop->Mode->Info->HorizontalResolution, self->gop->Mode->Info->VerticalResolution, 0);
+    ATOP_sync_gop(self);
+    moe_fill_rect(NULL, NULL, 0);
 
-    int scrW, scrH;
-    if (self->rotate) {
-        scrW = self->gop->Mode->Info->VerticalResolution;
-        scrH = self->gop->Mode->Info->HorizontalResolution;
-    } else {
-        scrH = self->gop->Mode->Info->VerticalResolution;
-        scrW = self->gop->Mode->Info->HorizontalResolution;
-    }
+    int scrW = main_screen.width;
+    int scrH = main_screen.height;
 
     self->cols = self->mode_cols;
     if (!self->cols) self->cols = scrW / self->font_w;
@@ -378,8 +607,6 @@ static EFI_STATUS EFIAPI ATOP_RESET (
 
     self->padding_x = ((scrW - (self->cols * self->font_w)) / 2) & ~3;
     self->padding_y = ((scrH - (self->rows * self->line_height)) / 2) & ~3;
-
-    This->ClearScreen(This);
 
     return EFI_SUCCESS;
 }
@@ -449,16 +676,11 @@ static EFI_STATUS EFIAPI ATOP_SET_MODE (
     }
 
     if (self->mode.Mode != ModeNumber) {
+        ATOP_sync_gop(self);
         coords mode = mode_templates[ModeNumber];
         if (mode.cols > 0 && mode.rows > 0) {
-            int scrW, scrH;
-            if (self->rotate) {
-                scrW = self->gop->Mode->Info->VerticalResolution;
-                scrH = self->gop->Mode->Info->HorizontalResolution;
-            } else {
-                scrH = self->gop->Mode->Info->VerticalResolution;
-                scrW = self->gop->Mode->Info->HorizontalResolution;
-            }
+            int scrW = main_screen.width;
+            int scrH = main_screen.height;
             int fw = scrW / mode.cols, fh = scrH / mode.rows;
             if (fw < self->font_w || fh < self->font_h) {
                 return EFI_UNSUPPORTED;
@@ -537,12 +759,15 @@ static EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL static_stop;
 static ATOP_Context static_context;
 
 
-EFIAPI EFI_STATUS ATOP_init(
+EFIAPI EFI_STATUS console_init(
     IN EFI_GRAPHICS_OUTPUT_PROTOCOL* gop,
     OUT EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL** result
 ) {
 
     if (!gop) return EFI_DEVICE_ERROR;
+
+    struct iovec cp932tbl_vec = {cp932_tbl, sizeof(cp932_tbl)};
+    cp932_tbl_init(cp932tbl_vec);
 
     ATOP_Context *ctx = &static_context;
     memset(ctx, 0, sizeof(ATOP_Context));
@@ -578,14 +803,14 @@ EFIAPI EFI_STATUS ATOP_init(
         EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info;
         gop->QueryMode(gop, 0, &sizeOfInfo, &info);
         if (info->HorizontalResolution < info->VerticalResolution) {
-            ctx->rotate = 1;
+            ctx->portrait = 1;
+        } else if (info->HorizontalResolution > info->PixelsPerScanLine) {
+            // GPD Micro PC Pseudo Landscape Mode
+            ctx->gpdmicro_landscape = 1;
         }
-    // ctx->rotate = 1; // for DEBUG
     }
 
-    if (ctx->rotate) {
-        blt_buffer = malloc(sizeof(EFI_GRAPHICS_OUTPUT_BLT_PIXEL) * gop->Mode->Info->HorizontalResolution * gop->Mode->Info->PixelsPerScanLine);
-    }
+    blt_buffer = malloc(sizeof(EFI_GRAPHICS_OUTPUT_BLT_PIXEL) * gop->Mode->Info->HorizontalResolution * gop->Mode->Info->PixelsPerScanLine);
 
     buffer->SetAttribute(buffer, DEFAULT_COLOR);
     buffer->SetMode(buffer, 0);

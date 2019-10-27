@@ -1,6 +1,7 @@
 // Page Manager
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
+
 #include <stdatomic.h>
 #include "moe.h"
 #include "kernel.h"
@@ -80,7 +81,7 @@ void invalidate_tlb() {
 
 void *pg_map(uintptr_t base_pa, void *base_va, size_t size, uint64_t attributes) {
     size_t count = ceil_page(size, NATIVE_PAGE_SIZE) / NATIVE_PAGE_SIZE;
-    pte_t common_attributes = PTE_PRESENT | PTE_WRITE;
+    pte_t common_attributes = (attributes & PTE_USER) | PTE_PRESENT | PTE_WRITE;
     uintptr_t flags = io_lock_irq();
     for (size_t i = 0; i < count; i++) {
         uintptr_t target_va = (uintptr_t)base_va + i * NATIVE_PAGE_SIZE;
@@ -113,6 +114,11 @@ void *pg_map_vram(uintptr_t base, size_t size) {
     return pg_map(base, (void *)root_page_to_va(VRAM_PAGE), size, PTE_NOT_EXECUTE | PTE_USER | PTE_WRITE | PTE_PRESENT);
 }
 
+
+void *pg_map_user(uintptr_t base, size_t size, int reserved) {
+    MOE_PHYSICAL_ADDRESS pa = moe_alloc_physical_page(size);
+    return pg_map(pa, (void *)base, size, PTE_USER | PTE_WRITE | PTE_PRESENT);
+}
 
 void *pg_valloc(uintptr_t pa, size_t size) {
     size_t vsize = ceil_page(size, VIRTUAL_PAGE_SIZE) + VIRTUAL_PAGE_SIZE;

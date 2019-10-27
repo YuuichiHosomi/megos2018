@@ -1,6 +1,7 @@
 // Minimal Memory Manager
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
+
 #include <stdatomic.h>
 #include "moe.h"
 #include "kernel.h"
@@ -16,19 +17,37 @@ static uintptr_t ceil_pagesize(size_t n) {
 }
 
 
-int atomic_btr(_Atomic uint32_t *p, uint32_t bit) {
-    int result;
-    __asm__ volatile (
-        "lock btr %[bit], %[ptr];\n"
-        "sbb %0, %0;\n"
-    :"=r"(result)
-    :[ptr]"m"(*p), [bit]"Ir"(bit));
-    return result;
+// Reference counting object
+moe_shared_t *moe_retain(moe_shared_t *self) {
+    if (!self) return NULL;
+    int delta = 1;
+    int ref_cnt = self->ref_cnt;
+    while (ref_cnt > 0) {
+        if (atomic_compare_exchange_weak(&self->ref_cnt, &ref_cnt, ref_cnt + delta)) {
+            return self;
+        } else {
+            cpu_relax();
+        }
+    }
+    return NULL;
 }
+
+void moe_release(moe_shared_t *self, MOE_DEALLOC dealloc) {
+    if (!self) return;
+    int old_cnt = atomic_fetch_add(&self->ref_cnt, -1);
+    if (old_cnt == 1) {
+        if (dealloc) {
+            dealloc(self->context);
+        }
+    } else if (old_cnt <= 0) {
+        // TODO: double free
+    }
+}
+
 
 uintptr_t moe_alloc_gates_memory() {
     for (uintptr_t i = 1; i < 160; i++) {
-        if (atomic_btr(gates_memory_bitmap, i)) {
+        if (atomic_bit_test_and_clear(gates_memory_bitmap, i)) {
             return i << 12;
         }
     }
@@ -59,6 +78,18 @@ void *moe_alloc_object(size_t size, size_t count) {
     }
     return va;
 }
+
+
+uintptr_t moe_alloc_io_buffer(size_t size) {
+    size_t sz = ceil_pagesize(size);
+    uintptr_t pa = moe_alloc_physical_page(sz);
+    if (pa) {
+        void *va = MOE_PA2VA(pa);
+        memset(va, 0, sz);
+    }
+    return pa;
+}
+
 
 void mm_init(moe_bootinfo_t *bootinfo) {
     static_start = bootinfo->static_start;

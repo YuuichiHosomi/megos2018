@@ -19,29 +19,30 @@
 #else
 #define EFI_VENDOR_PATH "\\EFI\\MEGOS\\"
 #endif
-CONST CHAR16* KERNEL_PATH = L"" EFI_VENDOR_PATH "BOOT" EFI_SUFFIX ".EFI";
-CONST CHAR16* cp932_bin_path = L"" EFI_VENDOR_PATH "CP932.BIN";
-CONST CHAR16* cp932_fnt_path = L"" EFI_VENDOR_PATH "CP932.FNT";
-CONST CHAR16* SHELL_PATH = L"\\SHELL" EFI_SUFFIX ".EFI";
+CONST CHAR16 *KERNEL_PATH = L"" EFI_VENDOR_PATH "BOOT" EFI_SUFFIX ".EFI";
+CONST CHAR16 *cp932_fnt_path = L"" EFI_VENDOR_PATH "CP932.FNT";
+CONST CHAR16 *SHELL_PATH = L"\\EFI\\BOOT\\SHELL" EFI_SUFFIX ".EFI";
 
 CONST EFI_GUID EfiLoadedImageProtocolGuid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
 CONST EFI_GUID EfiSimpleFileSystemProtocolGuid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
-CONST EFI_GUID EfiGlovalVariableGuid = EFI_GLOBAL_VARIABLE;
+CONST EFI_GUID EfiGlobalVariableGuid = EFI_GLOBAL_VARIABLE;
 CONST EFI_GUID EfiGraphicsOutputProtocolGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 CONST EFI_GUID EfiConsoleControlProtocolGuid = EFI_CONSOLE_CONTROL_PROTOCOL_GUID;
 CONST EFI_GUID EfiEdidActiveProtocolGuid = EFI_EDID_ACTIVE_PROTOCOL_GUID;
 CONST EFI_GUID EfiEdidDiscoveredProtocolGuid = EFI_EDID_DISCOVERED_PROTOCOL_GUID;
 CONST EFI_GUID EfiDevicePathProtocolGuid = EFI_DEVICE_PATH_PROTOCOL_GUID;
 CONST EFI_GUID EfiDevicePathToTextProtocolGuid = EFI_DEVICE_PATH_TO_TEXT_PROTOCOL_GUID;
-CONST EFI_GUID efi_acpi_20_table_guid = EFI_ACPI_20_TABLE_GUID;
+CONST EFI_GUID EfiAcpi20TableGuid = EFI_ACPI_20_TABLE_GUID;
 
 
-int printf(const char*, ...);
-int snprintf(char*, size_t, const char*, ...);
-int puts(const char*);
-void* malloc(size_t);
-void free(void*);
-void* memset(void *, int, size_t);
+int printf(const char *, ...);
+int snprintf(char *, size_t, const char *, ...);
+int puts(const char *);
+void *malloc(size_t);
+void free(void *);
+void *memset(void *, int, size_t);
+EFI_STATUS exec(CONST CHAR16 *path);
+
 
 typedef enum {
     menu_item_start_normally = 1,
@@ -57,30 +58,35 @@ typedef enum {
 } menu_ids;
 
 
-EFI_SYSTEM_TABLE* gST;
-EFI_BOOT_SERVICES* gBS;
-EFI_RUNTIME_SERVICES* gRT;
-EFI_HANDLE* image;
+EFI_SYSTEM_TABLE *gST;
+EFI_BOOT_SERVICES *gBS;
+EFI_RUNTIME_SERVICES *gRT;
+EFI_HANDLE *image;
 
-EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL* cout = NULL;
-EFI_GRAPHICS_OUTPUT_PROTOCOL* gop = NULL;
+EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *cout = NULL;
+EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
 int edid_x = 0, edid_y = 0;
 EFI_FILE_HANDLE sysdrv = NULL;
 
-acpi_rsd_ptr_t* rsdp = NULL;
-acpi_xsdt_t* xsdt = NULL;
+acpi_rsd_ptr_t *rsdp = NULL;
+acpi_xsdt_t *xsdt = NULL;
 int n_entries_xsdt = 0;
 
 
-static inline int IsEqualGUID(CONST EFI_GUID* guid1, CONST EFI_GUID* guid2) {
-    uint64_t* p = (uint64_t*)guid1;
-    uint64_t* q = (uint64_t*)guid2;
+void efi_print(CONST CHAR16 *s) {
+    cout->OutputString(cout, s);
+}
+
+
+static inline int IsEqualGUID(CONST EFI_GUID *guid1, CONST EFI_GUID *guid2) {
+    uint64_t *p = (uint64_t *)guid1;
+    uint64_t *q = (uint64_t *)guid2;
     return (p[0] == q[0]) && (p[1] == q[1]);
 }
 
-static void* efi_find_config_table(EFI_SYSTEM_TABLE *st, CONST EFI_GUID* guid) {
+static void *efi_find_config_table(EFI_SYSTEM_TABLE *st, CONST EFI_GUID *guid) {
     for (int i = 0; i < st->NumberOfTableEntries; i++) {
-        EFI_CONFIGURATION_TABLE* tab = st->ConfigurationTable + i;
+        EFI_CONFIGURATION_TABLE *tab = st->ConfigurationTable + i;
         if (IsEqualGUID(&tab->VendorGuid, guid)) {
             return tab->VendorTable;
         }
@@ -88,13 +94,13 @@ static void* efi_find_config_table(EFI_SYSTEM_TABLE *st, CONST EFI_GUID* guid) {
     return NULL;
 }
 
-static int is_equal_signature(const void* p1, const void* p2) {
-    const uint32_t* _p1 = (const uint32_t*)p1;
-    const uint32_t* _p2 = (const uint32_t*)p2;
+static int is_equal_signature(const void *p1, const void *p2) {
+    const uint32_t *_p1 = (const uint32_t *)p1;
+    const uint32_t *_p2 = (const uint32_t *)p2;
     return (*_p1 == *_p2);
 }
 
-void* acpi_find_table(const char* signature) {
+void *acpi_find_table(const char *signature) {
     if (!xsdt) return NULL;
     for (int i = 0; i < n_entries_xsdt; i++) {
         acpi_header_t *entry = (acpi_header_t *)xsdt->Entry[i];
@@ -106,23 +112,22 @@ void* acpi_find_table(const char* signature) {
 }
 
 
-CHAR16 *devicePathToText(EFI_DEVICE_PATH_PROTOCOL* path) {
-    static EFI_DEVICE_PATH_TO_TEXT_PROTOCOL* dp2tp = NULL;
-    if(!dp2tp) {
-        gBS->LocateProtocol(&EfiDevicePathToTextProtocolGuid, NULL, (void**)&dp2tp);
+CHAR16 *devicePathToText(EFI_DEVICE_PATH_PROTOCOL *path) {
+    static EFI_DEVICE_PATH_TO_TEXT_PROTOCOL *dp2tp = NULL;
+    if (!dp2tp) {
+        gBS->LocateProtocol(&EfiDevicePathToTextProtocolGuid, NULL, (void **)&dp2tp);
     }
-    if(dp2tp) {
+    if (dp2tp) {
         return dp2tp->ConvertDevicePathToText(path, TRUE, TRUE);
     } else {
         return NULL;
     }
 }
-EFI_STATUS exec(CONST CHAR16* path);
 
 
 BOOLEAN rsrc_ja_enabled = FALSE;
 
-const char* get_string(rsrc id) {
+const char *get_string(rsrc id) {
     if(id >= rsrc_max) return NULL;
 
     const char *retval = NULL;
@@ -139,62 +144,9 @@ const char* get_string(rsrc id) {
 }
 
 
-int putchar(unsigned char c) {
-    static uint8_t state[2] = {0};
-    uint32_t ch = INVALID_UNICHAR;
 
-    if(c < 0x80) { // ASCII
-        if(state[0] == 0){
-            ch = c;
-        } else {
-            state[0] = 0;
-        }
-    } else if(c < 0xC0) { // Trail Bytes
-        if(state[0] < 0xE0) { // 2bytes (Cx 8x .. Dx Bx)
-            ch = ((state[0]&0x1F)<<6)|(c&0x3F);
-            state[0] = 0;
-        } else if (state[0] < 0xF0) { // 3bytes (Ex 8x 8x)
-            if(state[1] == 0){
-                state[1] = c;
-                ch = ZWNBSP;
-            } else {
-                ch = ((state[0]&0x0F)<<12)|((state[1]&0x3F)<<6)|(c&0x3F);
-                state[0] = 0;
-            }
-        }
-    } else if(c >= 0xC2 && c <= 0xEF) { // Leading Byte
-        state[0] = c;
-        state[1] = 0;
-        ch = ZWNBSP;
-    } else { // invalid sequence
-        state[0] = 0;
-    }
-
-    if(ch == INVALID_UNICHAR) ch ='?';
-
-    switch(ch) {
-        default:
-        {
-            CHAR16 box[] = { ch, 0 };
-            EFI_STATUS status = cout->OutputString(cout, box);
-            return status ? 0 : 1;
-        }
-
-        case '\n':
-        {
-            static CONST CHAR16* crlf = L"\r\n";
-            EFI_STATUS status = cout->OutputString(cout, crlf);
-            return status ? 0 : 1;
-        }
-
-        case ZWNBSP:
-            return 0;
-    }
-
-}
-
-void* malloc(size_t n) {
-    void* result = 0;
+void *malloc(size_t n) {
+    void *result = 0;
     EFI_STATUS status = gST->BootServices->AllocatePool(EfiLoaderData, n, &result);
     if(EFI_ERROR(status)){
         return 0;
@@ -202,7 +154,7 @@ void* malloc(size_t n) {
     return result;
 }
 
-void free(void* p) {
+void free(void *p) {
     if(p) {
         gBS->FreePool(p);
     }
@@ -210,13 +162,13 @@ void free(void* p) {
 
 #define EDID_LENGTH 0x80
 
-int validate_edid(size_t size, void* _edid) {
+int validate_edid(size_t size, void *_edid) {
     if (size < EDID_LENGTH) return 0;
     if (!_edid) return 0;
     uint64_t edid_signature = 0x00FFFFFFFFFFFF00;
-    if (*((uint64_t*)_edid) != edid_signature) return 0;
+    if (*((uint64_t *)_edid) != edid_signature) return 0;
 
-    uint8_t* edid = (uint8_t*)_edid;
+    uint8_t *edid = (uint8_t *)_edid;
     uint8_t sum = 0;
     for (int i = 0; i < EDID_LENGTH; i++) {
         sum += edid[i];
@@ -226,47 +178,47 @@ int validate_edid(size_t size, void* _edid) {
     return 1;
 }
 
-EFI_STATUS init_gop(EFI_HANDLE* image) {
+EFI_STATUS init_gop(EFI_HANDLE *image) {
     EFI_STATUS status;
 
     UINTN handleCount = 0;
-    EFI_HANDLE* handleBuffer = NULL;
+    EFI_HANDLE *handleBuffer = NULL;
     status = gBS->LocateHandleBuffer(ByProtocol, &EfiGraphicsOutputProtocolGuid, NULL, &handleCount, &handleBuffer);
-    if(EFI_ERROR(status)) {
+    if (EFI_ERROR(status)) {
         return EFI_NOT_FOUND;
     } else {
-        gBS->OpenProtocol(handleBuffer[0], &EfiGraphicsOutputProtocolGuid, (void*)&gop, image, NULL, EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL);
-        if(EFI_ERROR(status)) {
+        gBS->OpenProtocol(handleBuffer[0], &EfiGraphicsOutputProtocolGuid, (void *)&gop, image, NULL, EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL);
+        if (EFI_ERROR(status)) {
             return EFI_NOT_FOUND;
         }
     }
 
-    EFI_EDID_ACTIVE_PROTOCOL* edid1;
-    status = gBS->LocateProtocol(&EfiEdidActiveProtocolGuid, NULL, (void**)&edid1);
-    if(!EFI_ERROR(status) && validate_edid(edid1->SizeOfEdid, edid1->Edid)) {
-        edid_x = ((edid1->Edid[58]&0xF0)<<4) + edid1->Edid[56];
-        edid_y = ((edid1->Edid[61]&0xF0)<<4) + edid1->Edid[59];
+    EFI_EDID_ACTIVE_PROTOCOL *edid1;
+    status = gBS->LocateProtocol(&EfiEdidActiveProtocolGuid, NULL, (void **)&edid1);
+    if (!EFI_ERROR(status) && validate_edid(edid1->SizeOfEdid, edid1->Edid)) {
+        edid_x = ((edid1->Edid[58] & 0xF0) << 4) + edid1->Edid[56];
+        edid_y = ((edid1->Edid[61] & 0xF0) << 4) + edid1->Edid[59];
     }else{
-        EFI_EDID_DISCOVERED_PROTOCOL* edid2;
-        status = gBS->LocateProtocol(&EfiEdidDiscoveredProtocolGuid, NULL, (void**)&edid2);
-        if(!EFI_ERROR(status) && validate_edid(edid2->SizeOfEdid, edid2->Edid)) {
-            edid_x = ((edid2->Edid[58]&0xF0)<<4) + edid2->Edid[56];
-            edid_y = ((edid2->Edid[61]&0xF0)<<4) + edid2->Edid[59];
+        EFI_EDID_DISCOVERED_PROTOCOL *edid2;
+        status = gBS->LocateProtocol(&EfiEdidDiscoveredProtocolGuid, NULL, (void **)&edid2);
+        if (!EFI_ERROR(status) && validate_edid(edid2->SizeOfEdid, edid2->Edid)) {
+            edid_x = ((edid2->Edid[58] & 0xF0) << 4) + edid2->Edid[56];
+            edid_y = ((edid2->Edid[61] & 0xF0) << 4) + edid2->Edid[59];
         }
     }
 
-    EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE* mode = gop->Mode;
+    EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE *mode = gop->Mode;
     uint32_t mode_to_be = -1;
-    if(edid_x>0 && edid_y>0) {
-        for(int i=0; i<mode->MaxMode;i++) {
+    if (edid_x > 0 && edid_y > 0) {
+        for (int i = 0; i < mode->MaxMode; i++) {
             UINTN sizeOfInfo;
-            EFI_GRAPHICS_OUTPUT_MODE_INFORMATION* info;
+            EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info;
             gop->QueryMode(gop, i, &sizeOfInfo, &info);
-            if(info->HorizontalResolution == edid_x && info->VerticalResolution == edid_y) {
+            if (info->HorizontalResolution == edid_x && info->VerticalResolution == edid_y) {
                 mode_to_be = i;
             }
         }
-        if(mode->Mode != mode_to_be) {
+        if (mode->Mode != mode_to_be) {
             gop->SetMode(gop, mode_to_be);
         }
     }
@@ -278,35 +230,26 @@ EFI_STATUS init_gop(EFI_HANDLE* image) {
 void efi_console_control(BOOLEAN textMode) {
     cout->EnableCursor(cout, FALSE);
     EFI_STATUS status;
-    EFI_CONSOLE_CONTROL_PROTOCOL* efi_cc = NULL;
+    EFI_CONSOLE_CONTROL_PROTOCOL *efi_cc = NULL;
     EFI_CONSOLE_CONTROL_SCREEN_MODE mode_to_be = textMode ? EfiConsoleControlScreenText : EfiConsoleControlScreenGraphics;
-    status = gBS->LocateProtocol(&EfiConsoleControlProtocolGuid, NULL, (void**)&efi_cc);
+    status = gBS->LocateProtocol(&EfiConsoleControlProtocolGuid, NULL, (void **)&efi_cc);
     if (!EFI_ERROR(status)) {
         efi_cc->SetMode(efi_cc, mode_to_be);
     }
 }
 
 
-void gop_cls(EFI_GRAPHICS_OUTPUT_PROTOCOL* gop) {
-    if(gop){
-        EFI_GRAPHICS_OUTPUT_BLT_PIXEL color = { 0, 0, 0, 0 };
-        gop->Blt(gop, &color, EfiBltVideoFill, 0, 0, 0, 0, gop->Mode->Info->HorizontalResolution, gop->Mode->Info->VerticalResolution, 0);
-    } else {
-        cout->ClearScreen(cout);
-    }
-}
-
 void change_resolution_menu() {
 
-    menu_buffer* items = init_menu();
+    menu_buffer *items = init_menu();
     menu_add(items, get_string(rsrc_return_to_previous), 0);
     menu_add(items, NULL, 0);
 
-    EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE* mode = gop->Mode;
+    EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE *mode = gop->Mode;
     uint32_t maxmode = mode->MaxMode;
-    for(int i=0; i<maxmode; i++) {
+    for (int i = 0; i < maxmode; i++) {
         UINTN sizeOfInfo;
-        EFI_GRAPHICS_OUTPUT_MODE_INFORMATION* info;
+        EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info;
         gop->QueryMode(gop, i, &sizeOfInfo, &info);
 
         BOOLEAN white = TRUE;
@@ -320,14 +263,15 @@ void change_resolution_menu() {
         ) {
             white = FALSE;
         }
-        if (info->PixelFormat != GOP_STANDARD_RGB)
+        if (info->PixelFormat != GOP_STANDARD_RGB) {
             white = FALSE;
-        if (white){
+        }
+        if (white) {
             if(mode->Mode == i) {
                 items->selected_index = items->item_count;
             }
             EFI_STATUS status = menu_add_format(items, i+1, "%4d x %4d (%d)", info->HorizontalResolution, info->VerticalResolution, i);
-            if(EFI_ERROR(status)) {
+            if (EFI_ERROR(status)) {
                 break;
             }
         }
@@ -337,11 +281,11 @@ void change_resolution_menu() {
     do {
         menuresult = show_menu(items, get_string(rsrc_display_settings), NULL);
 
-        if(menuresult) {
+        if (menuresult) {
             gop->SetMode(gop, menuresult-1);
             cout->Reset(cout, TRUE);
         }
-    }while(menuresult);
+    } while(menuresult);
 
 }
 
@@ -352,17 +296,17 @@ void system_info() {
     uint32_t uver = gST->Hdr.Revision;
 
 #if defined(__x86_64__)
-    const char *arch = "amd64";
+    const char *arch = "amd64 (x86-64)";
 #elif defined(__aarch64__)
-    const char *arch = "aa64";
+    const char *arch = "arm64 (aarch64)";
 #elif defined(__i386__)
     const char *arch = "i386";
 #elif defined(__arm__)
     const char *arch = "arm";
 #endif
 
-    snprintf(caption, 1023, "UEFI ver %d.%d (%S %08x)\n  Arch: %s (%zd bit)\n",
-     (int)(uver >> 16), (int)(uver & 0xFFFF), gST->FirmwareVendor, gST->FirmwareRevision, arch, 8 * sizeof(void *));
+    snprintf(caption, 1023, "UEFI ver %d.%d (%S %08x)\n  Arch: %s\n",
+     (int)(uver >> 16), (int)(uver & 0xFFFF), gST->FirmwareVendor, gST->FirmwareRevision, arch);
 
     menu_buffer* items = init_menu();
     menu_add(items, get_string(rsrc_return_to_previous), 0);
@@ -448,15 +392,17 @@ void option_menu() {
             menu_add(items, get_string(rsrc_display_settings), menu_item_chgres);
             menu_add_separator(items);
         }
-        menu_add(items, get_string(rsrc_other_devices), menu_item_device);
-        menu_add(items, get_string(rsrc_system_info), menu_item_sysinfo);
+        // menu_add(items, get_string(rsrc_peaceful_mode), 0);
+        // menu_add_separator(items);
+        // menu_add(items, get_string(rsrc_other_devices), menu_item_device);
+        // menu_add(items, get_string(rsrc_system_info), menu_item_sysinfo);
         menu_add(items, get_string(rsrc_shell), menu_item_shell);
         menu_add_separator(items);
         {
             uint32_t attributes = 0;
             uint64_t os_indications_supported = 0;
             UINTN data_size = sizeof(uint64_t);
-            gRT->GetVariable(OS_INDICATIONS_SUPPORTED_NAME, &EfiGlovalVariableGuid, &attributes, &data_size, &os_indications_supported);
+            gRT->GetVariable(OS_INDICATIONS_SUPPORTED_NAME, &EfiGlobalVariableGuid, &attributes, &data_size, &os_indications_supported);
             if(os_indications_supported & EFI_OS_INDICATIONS_BOOT_TO_FW_UI) {
                 menu_add(items, get_string(rsrc_boot_to_fw_ui), menu_item_bios );
             }
@@ -492,7 +438,7 @@ void option_menu() {
                 uint32_t attributes = EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS;
                 uint64_t os_indications = EFI_OS_INDICATIONS_BOOT_TO_FW_UI;
                 UINTN data_size = sizeof(os_indications);
-                EFI_STATUS status = gRT->SetVariable(OS_INDICATIONS_NAME, &EfiGlovalVariableGuid, attributes, data_size, &os_indications);
+                EFI_STATUS status = gRT->SetVariable(OS_INDICATIONS_NAME, &EfiGlobalVariableGuid, attributes, data_size, &os_indications);
                 if(!EFI_ERROR(status)) {
                     gRT->ResetSystem(EfiResetWarm, 0, 0, NULL);
                 }
@@ -512,7 +458,7 @@ void option_menu() {
 }
 
 
-EFI_STATUS efi_get_file_content(IN EFI_FILE_HANDLE fs, IN CONST CHAR16* path, OUT base_and_size* result) {
+EFI_STATUS efi_get_file_content(IN EFI_FILE_HANDLE fs, IN CONST CHAR16* path, OUT struct iovec* result) {
     EFI_STATUS status;
     EFI_FILE_HANDLE handle = NULL;
     void* buff = NULL;
@@ -548,8 +494,8 @@ EFI_STATUS efi_get_file_content(IN EFI_FILE_HANDLE fs, IN CONST CHAR16* path, OU
     status = handle->Close(handle);
     if(EFI_ERROR(status)) goto error;
 
-    result->base = buff;
-    result->size = read_count;
+    result->iov_base = buff;
+    result->iov_len = read_count;
 
     return EFI_SUCCESS;
 
@@ -563,24 +509,23 @@ error:
     return status;
 }
 
-EFI_STATUS exec(CONST CHAR16* path) {
+EFI_STATUS exec(CONST CHAR16 *path) {
     EFI_STATUS status;
-    // cout->ClearScreen(cout);
     EFI_HANDLE child = NULL;
-    EFI_DEVICE_PATH_PROTOCOL* dpath = NULL;
-    base_and_size exe_ptr;
-    status = efi_get_file_content(sysdrv, path, &exe_ptr);
+    EFI_DEVICE_PATH_PROTOCOL *dpath = NULL;
+    struct iovec exe_vec;
+    status = efi_get_file_content(sysdrv, path, &exe_vec);
     if(!EFI_ERROR(status)) {
-        status = gBS->LoadImage(FALSE, image, dpath, exe_ptr.base, exe_ptr.size, &child);
+        status = gBS->LoadImage(FALSE, image, dpath, exe_vec.iov_base, exe_vec.iov_len, &child);
     }
     if(!EFI_ERROR(status)) {
-        EFI_LOADED_IMAGE_PROTOCOL* li = NULL;
-        EFI_LOADED_IMAGE_PROTOCOL* li2 = NULL;
-        status = gBS->HandleProtocol(child, &EfiLoadedImageProtocolGuid, (void**)&li);
+        EFI_LOADED_IMAGE_PROTOCOL *li = NULL;
+        EFI_LOADED_IMAGE_PROTOCOL *li2 = NULL;
+        status = gBS->OpenProtocol(child, &EfiLoadedImageProtocolGuid, (void **)&li, image, NULL, EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL);
         if(!EFI_ERROR(status)) {
             li->SystemTable->ConOut = cout;
         }
-        status = gBS->HandleProtocol(image, &EfiLoadedImageProtocolGuid, (void**)&li2);
+        status = gBS->OpenProtocol(image, &EfiLoadedImageProtocolGuid, (void **)&li2, image, NULL, EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL);
         if(!EFI_ERROR(status)) {
             li->DeviceHandle = li2->DeviceHandle; // TODO:
         }
@@ -589,7 +534,6 @@ EFI_STATUS exec(CONST CHAR16* path) {
         status = gBS->StartImage(child, NULL, NULL);
     }
     if(EFI_ERROR(status)) {
-        // cout->ClearScreen(cout);
         // draw_title_bar(get_string(rsrc_load_error_title));
         printf("\n\n  %s\n\n  %s: %zx\n\n  %s\n", get_string(rsrc_load_error), get_string(rsrc_error_code),status, get_string(rsrc_press_any_key));
         efi_wait_any_key(TRUE, -1);
@@ -608,8 +552,8 @@ void efi_blt_bmp(uint8_t *bmp, int offset_x, int offset_y) {
     const uint8_t *msdib = bmp + *((uint32_t *)(bmp + 10));
 
     UINTN blt_delta = bmp_w * sizeof(EFI_GRAPHICS_OUTPUT_BLT_PIXEL);
-    EFI_GRAPHICS_OUTPUT_BLT_PIXEL *blt_buffer = malloc(blt_delta * bmp_h);
-    uint32_t *q = (uint32_t *)blt_buffer;
+    uint32_t *blt_buffer = malloc(blt_delta * bmp_h);
+    uint32_t *q = blt_buffer;
 
     switch (bmp_bpp) {
         case 24:
@@ -624,7 +568,14 @@ void efi_blt_bmp(uint8_t *bmp, int offset_x, int offset_y) {
             break;
     }
 
-    gop->Blt(gop, blt_buffer, EfiBltBufferToVideo, 0, 0, offset_x, offset_y, bmp_w, bmp_h, blt_delta);
+    moe_bitmap_t bitmap;
+    if (bmp_w > bmp_h) {
+        moe_bitmap_init(&bitmap, blt_buffer, bmp_w, bmp_h, bmp_w, 0);
+    } else {
+        moe_bitmap_init(&bitmap, blt_buffer, bmp_w, bmp_h, bmp_w, MOE_BMP_IGNORE_ROTATE);
+    }
+    moe_point_t origin = {offset_x, offset_y};
+    moe_blt(NULL, &bitmap, &origin, NULL, 0);
 
     free(blt_buffer);
 }
@@ -651,7 +602,7 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE _image, IN EFI_SYSTEM_TABLE *st) {
     image = _image;
     cout = gST->ConOut;
 
-    rsdp = efi_find_config_table(st, &efi_acpi_20_table_guid);
+    rsdp = efi_find_config_table(st, &EfiAcpi20TableGuid);
     xsdt = (acpi_xsdt_t*)(rsdp->xsdtaddr);
     n_entries_xsdt = (xsdt->Header.length - 0x24) / sizeof(xsdt->Entry[0]);
 
@@ -670,29 +621,21 @@ EFI_STATUS EFIAPI efi_main(IN EFI_HANDLE _image, IN EFI_SYSTEM_TABLE *st) {
     //	Init Screen
     init_gop(image);
     efi_console_control(!gop);
-    if(gop) {
+    if (gop) {
 
-        base_and_size cp932_bin_ptr;
-        status = efi_get_file_content(sysdrv, cp932_bin_path, &cp932_bin_ptr);
-        if(EFI_ERROR(status)) {
-            printf("ERROR: can't read %S (%zx)\n", cp932_bin_path, status);
-            goto cp932_exit;
-        }
-        cp932_tbl_init(cp932_bin_ptr);
-
-        base_and_size cp932_fnt_ptr;
-        status = efi_get_file_content(sysdrv, cp932_fnt_path, &cp932_fnt_ptr);
-        if(EFI_ERROR(status)) {
+        struct iovec cp932_fnt_vec;
+        status = efi_get_file_content(sysdrv, cp932_fnt_path, &cp932_fnt_vec);
+        if (EFI_ERROR(status)) {
             printf("ERROR: can't read %S (%zx)\n", cp932_fnt_path, status);
             goto cp932_exit;
         }
-        cp932_font_init(cp932_fnt_ptr);
+        cp932_font_init(cp932_fnt_vec);
 
         rsrc_ja_enabled = TRUE;
 
 cp932_exit:
 
-        ATOP_init(gop, &cout);
+        console_init(gop, &cout);
     }
 
 

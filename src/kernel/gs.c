@@ -8,6 +8,7 @@
 
 moe_bitmap_t main_screen;
 moe_bitmap_t back_buffer;
+MOE_PHYSICAL_ADDRESS vram_base;
 
 void moe_blt(moe_bitmap_t* dest, moe_bitmap_t* src, moe_point_t *origin, moe_rect_t *rect, uint32_t options) {
 
@@ -265,9 +266,8 @@ const int console_padding_h = 16, console_padding_v = 16;
 const int font_w = MEGH0816_width, font_h = MEGH0816_height;
 uint32_t main_console_bgcolor = 0x000000;
 uint32_t main_console_fgcolor = 0xCCCCCC;
-int main_console_cursor_x = 0;
-int main_console_cursor_y = 0;
-int main_console_cols = 0;
+int main_console_cursor_x = 0, main_console_cursor_y = 0;
+int main_console_cols = 0, main_console_rows = 0;
 int main_console_cursor_visible = 0;
 
 int putchar(int _c) {
@@ -377,8 +377,10 @@ void gradient(moe_bitmap_t *dest, uint32_t _start, uint32_t _end) {
 
 
 void gs_bsod() {
-    main_console_cursor_x = 0;
-    main_console_cursor_y = 0;
+    if (main_console_cursor_x) {
+        main_console_cursor_x = 0;
+        main_console_cursor_y++;
+    }
     moe_set_console_cursor_visible(NULL, 0);
     // blur(&back_buffer, &main_screen, 0x000000);
     // moe_blt(NULL, &back_buffer, NULL, NULL, 0);
@@ -391,6 +393,7 @@ void gs_init(moe_bootinfo_t* info) {
     main_screen.height = info->screen.height;
     main_screen.delta = info->screen.delta;
     main_screen.bitmap = pg_map_vram(info->vram_base, 4 * info->screen.delta * info->screen.height);
+    vram_base = info->vram_base;
 
     if (main_screen.width < main_screen.height) {
         int temp = main_screen.width;
@@ -400,6 +403,7 @@ void gs_init(moe_bootinfo_t* info) {
     }
 
     main_console_cols = (main_screen.width - console_padding_h * 2) / font_w;
+    main_console_rows = (main_screen.height - console_padding_v * 2) / font_h;
 
     // if (main_console_bgcolor) {
     //     moe_fill_rect(&main_screen, NULL, main_console_bgcolor);
@@ -412,4 +416,13 @@ void gs_init(moe_bootinfo_t* info) {
     // gradient(&back_buffer, 0x1A237E, 0x455A64);
     // moe_blt(NULL, &back_buffer, NULL, NULL, 0);
 
+}
+
+int cmd_mode(int argc, char **argv) {
+    printf("Console %d x %d Font %d x %d\n", main_console_cols, main_console_rows, font_w, font_h);
+    printf("Screen %d x %d Delta %d VRAM %012zx Flags: %s\n",
+        main_screen.width, main_screen.height, main_screen.delta, vram_base,
+        (main_screen.flags & MOE_BMP_ROTATE) ? "ROTATE" : ""
+    );
+    return 0;
 }

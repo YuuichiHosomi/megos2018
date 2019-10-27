@@ -5,9 +5,10 @@ targets:
     valid_arch: all
     sources:
       - osldr
-      - atop
+      - console
       - menu
       - libstd
+      - eficon
   boot:
     valid_arch: x64 i386
     sources:
@@ -33,7 +34,9 @@ targets:
       - memory
       - moe
       - page
+      - pci
       - shell
+      - syscall
       - usb
       - xhci
       - cpuid

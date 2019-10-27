@@ -10,12 +10,6 @@
 [BITS 64]
 [section .text]
 
-; int is_valid_arch(void);
-    global is_valid_arch
-is_valid_arch:
-    mov eax, 1
-    ret
-
 
 ; _Noreturn void start_kernel(moe_bootinfo_t* bootinfo, uint64_t* param);
     global start_kernel
