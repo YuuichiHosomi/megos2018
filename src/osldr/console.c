@@ -6,8 +6,10 @@
 
 #define	DEFAULT_COLOR	0x07
 
-#include "megh0816.h"
-#define FONT_PROPERTY(x) MEGH0816_ ## x
+// #include "megh0816.h"
+// #define FONT_PROPERTY(x) MEGH0816_ ## x
+#include "moesys16.h"
+#define FONT_PROPERTY(x) MOESYS16_ ## x
 
 #include "cp932.h"
 
