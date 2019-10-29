@@ -7,16 +7,10 @@
 #include "hid.h"
 
 
-typedef enum {
-    ps2_state_nodata,
-    ps2_state_key,
-    ps2_state_mouse,
-    ps2_state_continued,
-} ps2_state_t;
-
-
 /*********************************************************************/
 //  PS/2 Keyboard and Mouse
+
+#define PS2_SIZE_BUFFER     128
 
 #define PS2_DATA_PORT       0x0060
 #define PS2_STATUS_PORT     0x0064
@@ -35,6 +29,13 @@ typedef enum {
 #define PS2_FIFO_KEY_MAX    0x1FF
 #define PS2_FIFO_MOUSE_MIN  0x200
 #define PS2_FIFO_MOUSE_MAX  0x2FF
+
+typedef enum {
+    ps2_state_nodata,
+    ps2_state_key,
+    ps2_state_mouse,
+    ps2_state_continued,
+} ps2_state_t;
 
 static moe_queue_t *ps2_event_queue;
 
@@ -260,9 +261,6 @@ static int ps2_init() {
         ps2_read_data();
     }
 
-    uintptr_t size_of_buffer = 128;
-    ps2_event_queue = moe_queue_create(size_of_buffer);
-
     if (ps2_wait_for_write(1) != 0) goto ps2_timeout_error;
     ps2_write_command(0x60);
     if (ps2_wait_for_write(1) != 0) goto ps2_timeout_error;
@@ -279,6 +277,7 @@ static int ps2_init() {
     if (ps2_wait_for_write(1) != 0) goto ps2_timeout_error;
     ps2_write_data(0xF4);
 
+    ps2_event_queue = moe_queue_create(PS2_SIZE_BUFFER);
     moe_install_irq(1, &ps2k_irq_handler);
     moe_install_irq(12, &ps2m_irq_handler);
     moe_create_thread(&ps2_hid_thread, priority_realtime, 0, "ps2.hid");

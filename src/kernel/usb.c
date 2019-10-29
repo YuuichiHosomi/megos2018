@@ -93,10 +93,10 @@ struct {
     { USB_CLASS_HID_KBD, "HID Keyboard" },
     { USB_CLASS_HID_MOS, "HID Mouse" },
     { USB_CLASS_STORAGE_BULK, "Mass Storage Device" },
-    { USB_CLASS_FLOPPY, "Floppy Device"},
-    { USB_CLASS_HUB_HS_STT, "Hi speed Hub"},
-    { USB_CLASS_HUB_HS_MTT, "Hi speed Hub with multi TT"},
-    { USB_CLASS_HUB_SS, "Super speed Hub"},
+    { USB_CLASS_FLOPPY, "Floppy Drive"},
+    { USB_CLASS_HUB_HS_STT, "USB 2.0 Hub"},
+    { USB_CLASS_HUB_HS_MTT, "USB 2.0 Hub with multi TT"},
+    { USB_CLASS_HUB_SS, "USB 3.0 Hub"},
     { USB_CLASS_BLUETOOTH, "Bluetooth Interface"},
     { USB_CLASS_XINPUT, "XInput Device"},
     { 0, NULL },
@@ -815,12 +815,9 @@ void lsusb_sub(uint32_t parent, int nest) {
                     product_name = "Composite Device";
                 }
             }
-            printf("Device %d ID %04x:%04x Class %06x PSIV %d PS %d USB %x.%x IF %d %dmA %s\n",
-                i, device->vid, device->pid, device->dev_class,
-                device->hci->psiv, device->dev_desc.bMaxPacketSize0,
-                device->dev_desc.bcdUSB[1], device->dev_desc.bcdUSB[0],
-                config->bNumInterface, config->bMaxPower * 2, product_name
-            );
+
+            printf("Device %d ID %04x:%04x Class %06x %s\n", i, device->vid, device->pid, device->dev_class, product_name);
+
             // for (int j = 0; j < device->current_config->bNumInterface; j++) {
             //     const size_t size_buffer = 256;
             //     char ep_strings[size_buffer];
