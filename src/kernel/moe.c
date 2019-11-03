@@ -493,7 +493,7 @@ int moe_sem_wait(moe_semaphore_t *self, int64_t us) {
 
     moe_measure_t deadline = moe_create_measure(us);
     const int64_t timeout_min = 100;
-    const int64_t timeout_max = 1000000;
+    const int64_t timeout_max = 100000;
     int64_t timeout = timeout_min;
     moe_thread_t *current = _get_current_thread();
     do {
@@ -507,6 +507,8 @@ int moe_sem_wait(moe_semaphore_t *self, int64_t us) {
                 }
                 timeout = MIN(timeout_max, timeout * 2);
             }
+            expected = current;
+            atomic_compare_exchange_strong(&self->thread, &expected, NULL);
             return -1;
         }
         moe_usleep(timeout);

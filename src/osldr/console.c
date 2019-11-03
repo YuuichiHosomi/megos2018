@@ -807,7 +807,7 @@ EFIAPI EFI_STATUS console_init(
         if (info->HorizontalResolution < info->VerticalResolution) {
             ctx->portrait = 1;
         } else if (info->HorizontalResolution > info->PixelsPerScanLine) {
-            // GPD Micro PC Pseudo Landscape Mode
+            // GPD Micro PC's Fake Landscape Mode
             ctx->gpdmicro_landscape = 1;
         }
     }

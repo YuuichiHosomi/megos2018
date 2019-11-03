@@ -5,6 +5,7 @@
 #include "pe.h"
 
 uintptr_t pe_offset_0;
+size_t pe_size;
 pe64_header_t* pe_hdr;
 pe_section_table_t *sec_tbl;
 
@@ -12,21 +13,30 @@ uint64_t pe64_locate(uint64_t base);
 
 IMAGE_LOCATOR recognize_kernel_signature(struct iovec obj) {
     pe_offset_0 = (uintptr_t)obj.iov_base;
+    pe_size = obj.iov_len;
 
-    uint16_t *mz = (uint16_t*)pe_offset_0;
-    if (mz[0] != IMAGE_DOS_SIGNATURE) return NULL;
+    uint16_t magic16 = *((uint16_t *)pe_offset_0);
+    switch (magic16) {
+        case IMAGE_DOS_SIGNATURE:
+        {
+            uint32_t ne_ptr = *((uint32_t *)(pe_offset_0 + 0x3C));
+            pe_hdr = (pe64_header_t *)(pe_offset_0 + ne_ptr);
+            if (pe_hdr->pe_signature != IMAGE_NT_SIGNATURE
+                || pe_hdr->coff_header.machine != IMAGE_FILE_MACHINE_AMD64
+                || (pe_hdr->coff_header.coff_flags & IMAGE_FILE_EXECUTABLE_IMAGE) == 0
+                || pe_hdr->optional_header.magic != MAGIC_PE64
+                ) return NULL;
 
-    uint32_t ne_ptr = *((uint32_t *)(pe_offset_0 + 0x3C));
-    pe_hdr = (pe64_header_t *)(pe_offset_0 + ne_ptr);
-    if (pe_hdr->pe_signature != IMAGE_NT_SIGNATURE
-        || pe_hdr->coff_header.machine != IMAGE_FILE_MACHINE_AMD64
-        || (pe_hdr->coff_header.coff_flags & IMAGE_FILE_EXECUTABLE_IMAGE) == 0
-        || pe_hdr->optional_header.magic != MAGIC_PE64
-        ) return NULL;
+            sec_tbl = (pe_section_table_t *)((uintptr_t)pe_hdr + 4 + sizeof(pe_coff_header_t) + pe_hdr->coff_header.size_of_optional);
 
-    sec_tbl = (pe_section_table_t *)((uintptr_t)pe_hdr + 4 + sizeof(pe_coff_header_t) + pe_hdr->coff_header.size_of_optional);
+            return &pe64_locate;
+        }
 
-    return &pe64_locate;
+        case EFI_TE_IMAGE_HEADER_SIGNATURE:
+        default:
+            return NULL;
+    }
+
 }
 
 uint64_t pe64_locate(uint64_t base) {
@@ -64,6 +74,9 @@ uint64_t pe64_locate(uint64_t base) {
                         uint64_t *p = (uint64_t *)(vmem + rva);
                         *p = *p - image_base + base;
                     }
+                    break;
+                default:
+                    // TODO:
                     break;
             }
         }

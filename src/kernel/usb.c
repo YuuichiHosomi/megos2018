@@ -16,7 +16,7 @@
 #define MAX_USB_BUFFER      4096
 #define MAX_STRING_BUFFER   4096
 #define ERROR_TIMEOUT       -1
-#define MAX_USB_DEVICES     127
+#define MAX_USB_DEVICES     128
 
 typedef struct {
     moe_shared_t shared;
@@ -797,14 +797,19 @@ void xinput_class_driver(usb_device *self, int ifno) {
 
 /*********************************************************************/
 
+#define LSUSB_OPT_V 0x0001
 
-void lsusb_sub(uint32_t parent, int nest) {
+static inline void print_nest(int nest) {
+    for (int i = 0; i < nest; i++) {
+        printf("  ");
+    }
+}
+
+void lsusb_sub(uint32_t parent, int nest, int options) {
     for (int i = 0; i < MAX_USB_DEVICES; i++) {
         usb_device *device = usb_devices[i];
         if (!device || device->hci->parent_slot_id != parent) continue;
-        for (int j = 0; j < nest; j++) {
-            printf("  ");
-        }
+        print_nest(nest);
         usb_configuration_descriptor_t *config = device->current_config;
         if (config) {
             const char *product_name = device->sProduct;
@@ -816,59 +821,75 @@ void lsusb_sub(uint32_t parent, int nest) {
                 }
             }
 
-            printf("Device %d ID %04x:%04x Class %06x %s\n", i, device->vid, device->pid, device->dev_class, product_name);
-
-            // for (int j = 0; j < device->current_config->bNumInterface; j++) {
-            //     const size_t size_buffer = 256;
-            //     char ep_strings[size_buffer];
-            //     uint32_t if_class = device->interfaces[j].if_class;
-            //     int ep_bmp = device->interfaces[j].endpoint_bitmap;
-            //     intptr_t ep_index = 0;
-            //     for (int i = 0; i < MAX_ENDPOINTS; i++) {
-            //         if (ep_bmp & (1 << i)) {
-            //             if (ep_index > 0) {
-            //                 ep_strings[ep_index++] = ',';
-            //             }
-            //             int epno = i & 15;
-            //             if (i > 16) {
-            //                 ep_index += snprintf(ep_strings + ep_index, size_buffer - ep_index, "%di", epno);
-            //             } else {
-            //                 ep_index += snprintf(ep_strings + ep_index, size_buffer - ep_index, "%do", epno);
-            //             }
-            //         }
-            //     }
-            //     ep_strings[ep_index] = '\0';
-            //     const char *if_string = device->interfaces[j].sInterface;
-            //     if (!if_string) {
-            //         if_string = usb_get_generic_name(device->interfaces[j].if_class);
-            //     }
-            //     printf(" IF#%d Class %06x ep (%s) %s\n", j, if_class, ep_strings, if_string);
-            // }
-            // for (int i = 0; i < MAX_ENDPOINTS; i++) {
-            //     int dci = device->endpoints[i].dci;
-            //     if (!dci) continue;
-            //     int interval = device->endpoints[i].interval;
-            //     int ps = device->endpoints[i].ps;
-            //     int epno = i & 15;
-            //     printf(" EP#%d%c dci %d size %d interval %d\n", epno, (i < 16) ? 'o' : 'i', dci, ps, interval);
-            // }
+            if (options & LSUSB_OPT_V) {
+                printf("Device %03d ID %04x:%04x %s\n", i, device->vid, device->pid, product_name);
+                print_nest(nest);
+                printf(" Port %d Route %05x Class %06x\n", device->hci->port_id, device->hci->route_string, device->dev_class);
+                for (int j = 0; j < device->current_config->bNumInterface; j++) {
+                    const size_t size_buffer = 256;
+                    char ep_strings[size_buffer];
+                    uint32_t if_class = device->interfaces[j].if_class;
+                    int ep_bmp = device->interfaces[j].endpoint_bitmap;
+                    intptr_t ep_index = 0;
+                    for (int i = 0; i < MAX_ENDPOINTS; i++) {
+                        if (ep_bmp & (1 << i)) {
+                            if (ep_index > 0) {
+                                ep_strings[ep_index++] = ',';
+                            }
+                            int epno = i & 15;
+                            if (i > 16) {
+                                ep_index += snprintf(ep_strings + ep_index, size_buffer - ep_index, "%di", epno);
+                            } else {
+                                ep_index += snprintf(ep_strings + ep_index, size_buffer - ep_index, "%do", epno);
+                            }
+                        }
+                    }
+                    ep_strings[ep_index] = '\0';
+                    const char *if_string = device->interfaces[j].sInterface;
+                    if (!if_string) {
+                        if_string = usb_get_generic_name(device->interfaces[j].if_class);
+                    }
+                    print_nest(nest);
+                    printf(" IF#%d Class %06x Endpoints (%s) %s\n", j, if_class, ep_strings, if_string);
+                }
+                // for (int i = 0; i < MAX_ENDPOINTS; i++) {
+                //     int dci = device->endpoints[i].dci;
+                //     if (!dci) continue;
+                //     int interval = device->endpoints[i].interval;
+                //     int ps = device->endpoints[i].ps;
+                //     int epno = i & 15;
+                //     print_nest(nest);
+                //     printf(" EP#%d%c dci %d size %d interval %d\n", epno, (i < 16) ? 'o' : 'i', dci, ps, interval);
+                // }
+            } else {
+                printf("Device %03d ID %04x:%04x %s\n", i, device->vid, device->pid, product_name);
+            }
         } else {
-            printf("Device %d ID %04x:%04x Class %06x PSIV %d PS %d USB %x.%x [NOT CONFIGURED]\n",
-                i, device->vid, device->pid, device->dev_class,
-                device->hci->psiv, device->dev_desc.bMaxPacketSize0,
-                device->dev_desc.bcdUSB[1], device->dev_desc.bcdUSB[0]
+            printf("Device %03d ID %04x:%04x [NOT CONFIGURED] Class %06x\n",
+                i, device->vid, device->pid, device->dev_class
             );
-            // printf("Device %d NOT CONFIGURED\n", i);
         }
         if (device->dev_desc.bDeviceClass == USB_BASE_CLASS_HUB) {
-            lsusb_sub(i, nest + 1);
+            lsusb_sub(i, nest + 1, options);
         }
     }
 
 }
 
 
+static inline int str_equals(const char *s1, const char *s2) {
+    int len = strlen(s2);
+    return strncmp(s1, s2, len + 1) == 0;
+}
+
 int cmd_lsusb(int argc, char **argv) {
-    lsusb_sub(0, 0);
+    int options = 0;
+    for (int i = 1; i < argc; i++) {
+        const char *arg = argv[i];
+        if (str_equals(arg, "-v")) {
+            options |= LSUSB_OPT_V;
+        }
+    }
+    lsusb_sub(0, 0, options);
     return 0;
 }

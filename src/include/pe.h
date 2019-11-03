@@ -2,10 +2,8 @@
 #include <stdint.h>
 
 
-// MZ
-#define IMAGE_DOS_SIGNATURE             0x5A4D
-// PE
-#define IMAGE_NT_SIGNATURE              0x00004550
+#define IMAGE_DOS_SIGNATURE             0x5A4D // "MZ"
+#define IMAGE_NT_SIGNATURE              0x00004550 // "PE"
 
 
 typedef struct {
@@ -149,3 +147,21 @@ typedef struct {
 #define IMAGE_REL_BASED_RISCV_LOW12S        8
 #define IMAGE_REL_BASED_MIPS_JMPADDR16      9
 #define IMAGE_REL_BASED_DIR64               10
+
+
+typedef struct {
+    uint16_t signature;
+    uint16_t machine;
+    uint8_t n_sections;
+    uint8_t subsystem;
+    uint16_t stripped_size;
+    uint32_t entrypoint;
+    uint32_t base_of_code;
+    uint64_t image_base;
+    pe_image_data_directory_t dir[2];
+} __attribute__((packed)) EFI_TE_IMAGE_HEADER;
+
+#define EFI_TE_IMAGE_HEADER_SIGNATURE       0x5A56 // “VZ”
+
+#define EFI_TE_IMAGE_DIRECTORY_ENTRY_BASERELOC  0
+#define EFI_TE_IMAGE_DIRECTORY_ENTRY_DEBUG  1

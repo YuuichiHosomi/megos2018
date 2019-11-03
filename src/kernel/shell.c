@@ -13,10 +13,9 @@ extern int putchar(int);
 extern void gs_cls();
 
 
-typedef int (*PSEUDO_MAIN)(int, char**);
 typedef struct {
     const char *name;
-    PSEUDO_MAIN proc;
+    int (*proc)(int, char**);
     const char *tips;
 } command_list_t;
 
@@ -55,6 +54,18 @@ int cmd_shutdown(int argc, char **argv) {
     return 0;
 }
 
+int cmd_echo(int argc, char **argv) {
+    int initial = 1;
+    for (int i = initial; i < argc; i++) {
+        if (i != initial) {
+            printf(" ");
+        }
+        printf("%s", argv[i]);
+    }
+    printf("\n");
+    return 0;
+}
+
 int cmd_help(int argc, char **argv);
 int cmd_cpuid(int argc, char **argv) __attribute__((weak));
 int cmd_ps(int argc, char **argv) __attribute__((weak));
@@ -75,8 +86,9 @@ command_list_t commands[] = {
     { "lsusb", cmd_lsusb, "Show USB Informations" },
     { "ps", cmd_ps, NULL },
     { "exp", cmd_exp, NULL },
-    { "stall", cmd_stall, NULL},
-    { "mode", cmd_mode, NULL},
+    { "stall", cmd_stall, NULL },
+    { "mode", cmd_mode, NULL },
+    { "echo", cmd_echo, NULL },
     { 0 },
 };
 
@@ -220,7 +232,7 @@ void shell_start(const wchar_t *cmdline) {
     char con_buff[MAX_CMDLINE];
     char arg_buff[MAX_ARGBUFF];
 
-    printf("\n%s\n", get_string(string_banner));
+    // printf("\n%s\n", get_string(string_banner));
     for (;;) {
         printf(">");
         read_cmdline(con_buff, MAX_CMDLINE);
