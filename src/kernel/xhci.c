@@ -5,7 +5,6 @@
 // #define DEBUG
 #include "moe.h"
 #include "kernel.h"
-#include <stdatomic.h>
 #include "usb.h"
 #include "xhci.h"
 

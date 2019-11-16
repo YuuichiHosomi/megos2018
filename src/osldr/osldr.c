@@ -544,11 +544,11 @@ EFI_STATUS exec(CONST CHAR16 *path) {
 
 
 void efi_blt_bmp(uint8_t *bmp, int offset_x, int offset_y) {
-    int bmp_w = *((uint32_t *)(bmp + 18));
-    int bmp_h = *((uint32_t *)(bmp + 22));
-    int bmp_bpp = *((uint16_t *)(bmp + 28));
-    int bmp_bpp8 = (bmp_bpp + 7) / 8;
-    int bmp_delta = (bmp_bpp8 * bmp_w + 3) & 0xFFFFFFFC;
+    uint32_t bmp_w = *((uint32_t *)(bmp + 18));
+    uint32_t bmp_h = *((uint32_t *)(bmp + 22));
+    unsigned bmp_bpp = *((uint16_t *)(bmp + 28));
+    unsigned bmp_bpp8 = (bmp_bpp + 7) / 8;
+    uint32_t bmp_delta = (bmp_bpp8 * bmp_w + 3) & ~3;
     const uint8_t *msdib = bmp + *((uint32_t *)(bmp + 10));
 
     UINTN blt_delta = bmp_w * sizeof(EFI_GRAPHICS_OUTPUT_BLT_PIXEL);

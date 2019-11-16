@@ -2,7 +2,6 @@
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
 
-#include <stdatomic.h>
 #include "moe.h"
 #include "kernel.h"
 #include "x86.h"
@@ -21,22 +20,24 @@ enum {
 };
 static const uint64_t MAX_PA = UINT64_C(0x000000FFFFFFFFFF);
 static const uint64_t MAX_VA = UINT64_C(0x0000FFFFFFFFFFFF);
-static MOE_PHYSICAL_ADDRESS global_cr3;
-static _Atomic uintptr_t base_kernel_heap = 0;
+
 typedef uint64_t pte_t;
 
+static MOE_PHYSICAL_ADDRESS global_cr3;
+static _Atomic uintptr_t base_kernel_heap = 0;
 
-static void io_set_cr3(uintptr_t cr3) {
+
+static inline void io_set_cr3(uintptr_t cr3) {
     __asm__ volatile("movq %0, %%cr3"::"r"(cr3));
 }
 
-static void io_invalidate_tlb() {
+static inline void io_invalidate_tlb() {
     uintptr_t rax;
     __asm__ volatile("movq %%cr3, %0; movq %0, %%cr3;": "=r"(rax));
 }
 
 
-static uintptr_t ceil_page(uintptr_t n, size_t page_size) {
+static inline uintptr_t ceil_page(uintptr_t n, size_t page_size) {
     return ((n + page_size - 1) & ~(page_size - 1));
 }
 
@@ -50,21 +51,21 @@ static uint64_t get_rec_base(int level) {
     return base | rec;
 }
 
-static uintptr_t va_to_offset(uintptr_t ptr, int level) {
+static inline uintptr_t va_to_offset(uintptr_t ptr, int level) {
     return ((ptr & MAX_VA) >> (SHIFT_PER_LEVEL * level)) & ~7;
 }
 
-pte_t pg_get_pte(uintptr_t ptr, int level) {
+static inline pte_t pg_get_pte(uintptr_t ptr, int level) {
     _Atomic pte_t *pta = (void *)(get_rec_base(level) + va_to_offset(ptr, level));
     return *pta;
 }
 
-void pg_set_pte(uintptr_t ptr, pte_t pte, int level) {
+static inline void pg_set_pte(uintptr_t ptr, pte_t pte, int level) {
     _Atomic pte_t *pta = (void *)(get_rec_base(level) + va_to_offset(ptr, level));
     *pta = pte;
 }
 
-static uintptr_t root_page_to_va(uintptr_t page) {
+static inline uintptr_t root_page_to_va(uintptr_t page) {
     if (page < 0x100) {
         return page << (MAX_PAGE_LEVEL * SHIFT_PER_LEVEL + 3);
     } else {
@@ -73,7 +74,7 @@ static uintptr_t root_page_to_va(uintptr_t page) {
 }
 
 
-void invalidate_tlb() {
+static inline void invalidate_tlb() {
     io_invalidate_tlb();
     smp_send_invalidate_tlb();
 }
@@ -173,45 +174,45 @@ void page_init(moe_bootinfo_t *bootinfo) {
 
 
 void *MOE_PA2VA(MOE_PHYSICAL_ADDRESS pa) {
-    return (void*)(pa + root_page_to_va(DIRECT_MAP_PAGE));
+    return (void *)(root_page_to_va(DIRECT_MAP_PAGE) + pa);
 }
 
-uint8_t READ_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p) {
-    _Atomic uint8_t *p = MOE_PA2VA(_p);
-    return atomic_load(p);
+uint8_t READ_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS pa) {
+    _Atomic uint8_t *va = MOE_PA2VA(pa);
+    return atomic_load(va);
 }
 
-void WRITE_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p, uint8_t v) {
-    _Atomic uint8_t *p = MOE_PA2VA(_p);
-    atomic_store(p, v);
+void WRITE_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS pa, uint8_t v) {
+    _Atomic uint8_t *va = MOE_PA2VA(pa);
+    atomic_store(va, v);
 }
 
-uint16_t READ_PHYSICAL_UINT16(MOE_PHYSICAL_ADDRESS _p) {
-    _Atomic uint16_t *p = MOE_PA2VA(_p);
-    return atomic_load(p);
+uint16_t READ_PHYSICAL_UINT16(MOE_PHYSICAL_ADDRESS pa) {
+    _Atomic uint16_t *va = MOE_PA2VA(pa);
+    return atomic_load(va);
 }
 
-void WRITE_PHYSICAL_UINT16(MOE_PHYSICAL_ADDRESS _p, uint16_t v) {
-    _Atomic uint16_t *p = MOE_PA2VA(_p);
-    atomic_store(p, v);
+void WRITE_PHYSICAL_UINT16(MOE_PHYSICAL_ADDRESS pa, uint16_t v) {
+    _Atomic uint16_t *va = MOE_PA2VA(pa);
+    atomic_store(va, v);
 }
 
-uint32_t READ_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p) {
-    _Atomic uint32_t *p = MOE_PA2VA(_p);
-    return atomic_load(p);
+uint32_t READ_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS pa) {
+    _Atomic uint32_t *va = MOE_PA2VA(pa);
+    return atomic_load(va);
 }
 
-void WRITE_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p, uint32_t v) {
-    _Atomic uint32_t *p = MOE_PA2VA(_p);
-    atomic_store(p, v);
+void WRITE_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS pa, uint32_t v) {
+    _Atomic uint32_t *va = MOE_PA2VA(pa);
+    atomic_store(va, v);
 }
 
-uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p) {
-    _Atomic uint64_t *p = MOE_PA2VA(_p);
-    return atomic_load(p);
+uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS pa) {
+    _Atomic uint64_t *va = MOE_PA2VA(pa);
+    return atomic_load(va);
 }
 
-void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v) {
-    _Atomic uint64_t *p = MOE_PA2VA(_p);
-    atomic_store(p, v);
+void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS pa, uint64_t v) {
+    _Atomic uint64_t *va = MOE_PA2VA(pa);
+    atomic_store(va, v);
 }

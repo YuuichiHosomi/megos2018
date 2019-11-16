@@ -1,6 +1,7 @@
 // Graphical Console for EFI
 // Copyright (c) 2018 MEG-OS project, All rights reserved.
 // License: MIT
+
 #include "efi.h"
 #include "osldr.h"
 
@@ -106,13 +107,13 @@ EFI_STATUS cp932_font_init(struct iovec font_vec) {
     font_zn.table = malloc(sizeof(fontx2_zn_table) * font_zn.tbl_cnt);
     if(!font_zn.table) return EFI_OUT_OF_RESOURCES;
 
-    int sizeof_font = font_zn.font_w8*font_zn.font_h;
+    int sizeof_font = font_zn.font_w8 * font_zn.font_h;
 
     uint32_t base = 0x12 + font_zn.tbl_cnt * 4;
     for (int i = 0; i < font_zn.tbl_cnt; i++) {
         int a = i * 4 + 0x12;
-        font_zn.table[i].begin	= font_zn.rawPtr[a+1] * 256 + font_zn.rawPtr[a + 0];
-        font_zn.table[i].end	= font_zn.rawPtr[a+3] * 256 + font_zn.rawPtr[a + 2];
+        font_zn.table[i].begin	= font_zn.rawPtr[a + 1] * 256 + font_zn.rawPtr[a + 0];
+        font_zn.table[i].end	= font_zn.rawPtr[a + 3] * 256 + font_zn.rawPtr[a + 2];
         font_zn.table[i].off	= base;
         base += sizeof_font * (font_zn.table[i].end - font_zn.table[i].begin + 1);
     }
@@ -482,6 +483,7 @@ static void ATOP_draw_widechar(ATOP_Context *self, int x, int y, wchar_t c, uint
             return;
         }
     }
+    // Otherwise draw the Tofu
     ATOP_fill_block(self, x, y, 3, 1, color);
 }
 
@@ -720,10 +722,9 @@ static EFI_STATUS EFIAPI ATOP_CLEAR_SCREEN (
     ATOP_Context *self = ATOP_unboxing(This);
     if (!self) return EFI_DEVICE_ERROR;
 
-    This->SetCursorPosition(This, 0, 0);
-    {
-        ATOP_fill_block(self, 0, 0, self->cols, self->rows, self->bgcolor);
-    }
+    self->mode.CursorColumn = 0;
+    self->mode.CursorRow = 0;
+    ATOP_fill_block(self, 0, 0, self->cols, self->rows, self->bgcolor);
 
     return EFI_SUCCESS;
 }

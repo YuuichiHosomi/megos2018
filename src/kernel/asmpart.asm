@@ -47,6 +47,7 @@
     extern _irq_main
     extern smp_init_ap
     extern ipi_sche_main
+    extern ipi_invtlb_main
     extern thread_on_start
     extern moe_exit_thread
     extern arch_syscall_entry
@@ -676,6 +677,31 @@ _ipi_sche:
     cld
 
     call ipi_sche_main
+
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdx
+    pop rcx
+    pop rax
+    iretq
+
+
+    global _ipi_invtlb
+_ipi_invtlb:
+    push rax
+    push rcx
+    push rdx
+    push r8
+    push r9
+    push r10
+    push r11
+    cld
+
+    mov rcx, cr3
+    mov cr3, rcx
+    call ipi_invtlb_main
 
     pop r11
     pop r10

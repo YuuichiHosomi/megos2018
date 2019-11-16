@@ -1,8 +1,7 @@
-// MOE Subsystem
+// Multi Tasking Services
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
 
-#include <stdatomic.h>
 #include "moe.h"
 #include "kernel.h"
 
@@ -14,7 +13,6 @@
 #define N_SCHEDULE_QUEUE            2
 #define MAX_THREADS                 256
 
-typedef uint32_t moe_affinity_t;
 typedef int context_id;
 
 #define CONTEXT_SAVE_AREA_SIZE      1024
@@ -449,17 +447,7 @@ void moe_spinlock_release(moe_spinlock_t *lock) {
 
 
 /*********************************************************************/
-// Semaphore
-
-typedef struct moe_semaphore_t {
-    moe_thread_t * _Atomic thread;
-    _Atomic intptr_t value;
-} moe_semaphore_t;
-
-void moe_sem_init(moe_semaphore_t *self, intptr_t value) {
-    self->thread = NULL;
-    self->value = value;
-}
+// Simple Semaphore Service
 
 moe_semaphore_t *moe_sem_create(intptr_t value) {
     moe_semaphore_t *result = moe_alloc_object(sizeof(moe_semaphore_t), 1);
@@ -467,10 +455,6 @@ moe_semaphore_t *moe_sem_create(intptr_t value) {
         moe_sem_init(result, value);
     }
     return result;
-}
-
-intptr_t moe_sem_getvalue(moe_semaphore_t *self) {
-    return atomic_load(&self->value);
 }
 
 int moe_sem_trywait(moe_semaphore_t *self) {
@@ -493,7 +477,7 @@ int moe_sem_wait(moe_semaphore_t *self, int64_t us) {
 
     moe_measure_t deadline = moe_create_measure(us);
     const int64_t timeout_min = 100;
-    const int64_t timeout_max = 100000;
+    const int64_t timeout_max = 1000000;
     int64_t timeout = timeout_min;
     moe_thread_t *current = _get_current_thread();
     do {
@@ -529,7 +513,7 @@ void moe_sem_signal(moe_semaphore_t *self) {
 
 
 /*********************************************************************/
-// Queue
+// Concurrent Queue Service
 
 typedef struct moe_queue_t {
     moe_semaphore_t read_sem;

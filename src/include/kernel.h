@@ -42,22 +42,23 @@ typedef struct {
 } moe_bootinfo_t;
 
 
+typedef uint32_t moe_affinity_t;
 typedef void (*MOE_IRQ_HANDLER)(int irq);
 int moe_install_irq(uint8_t irq, MOE_IRQ_HANDLER handler);
 int moe_uninstall_irq(uint8_t irq);
 int moe_install_msi(MOE_IRQ_HANDLER handler);
 uint8_t moe_make_msi_data(int irq, int mode, uint64_t *addr, uint32_t *data);
 
-typedef uintptr_t MOE_PHYSICAL_ADDRESS;
-void *MOE_PA2VA(MOE_PHYSICAL_ADDRESS va);
-uint8_t READ_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p);
-void WRITE_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS _p, uint8_t v);
-uint16_t READ_PHYSICAL_UINT16(MOE_PHYSICAL_ADDRESS _p);
-void WRITE_PHYSICAL_UINT16(MOE_PHYSICAL_ADDRESS _p, uint16_t v);
-uint32_t READ_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p);
-void WRITE_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS _p, uint32_t v);
-uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p);
-void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS _p, uint64_t v);
+typedef uint64_t MOE_PHYSICAL_ADDRESS;
+void *MOE_PA2VA(MOE_PHYSICAL_ADDRESS pa);
+uint8_t READ_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS pa);
+void WRITE_PHYSICAL_UINT8(MOE_PHYSICAL_ADDRESS pa, uint8_t v);
+uint16_t READ_PHYSICAL_UINT16(MOE_PHYSICAL_ADDRESS pa);
+void WRITE_PHYSICAL_UINT16(MOE_PHYSICAL_ADDRESS pa, uint16_t v);
+uint32_t READ_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS pa);
+void WRITE_PHYSICAL_UINT32(MOE_PHYSICAL_ADDRESS pa, uint32_t v);
+uint64_t READ_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS pa);
+void WRITE_PHYSICAL_UINT64(MOE_PHYSICAL_ADDRESS pa, uint64_t v);
 
 
 // Low Level Memory Manager
@@ -65,8 +66,6 @@ uintptr_t moe_alloc_physical_page(size_t n);
 uintptr_t moe_alloc_gates_memory();
 uintptr_t moe_alloc_io_buffer(size_t size);
 
-uint64_t pg_get_pte(uintptr_t ptr, int level);
-void pg_set_pte(uintptr_t ptr, uint64_t pte, int level);
 int smp_send_invalidate_tlb();
 void *pg_map_mmio(uintptr_t base, size_t size);
 void *pg_valloc(uintptr_t pa, size_t size);

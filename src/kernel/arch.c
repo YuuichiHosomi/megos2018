@@ -2,7 +2,6 @@
 // Copyright (c) 2019 MEG-OS project, All rights reserved.
 // License: MIT
 
-#include <stdatomic.h>
 #include "moe.h"
 #include "kernel.h"
 #include "x86.h"
@@ -94,6 +93,8 @@ extern void pci_init(void);
 
 static int hpet_init(void);
 
+uintptr_t smp_get_current_cpuid();
+
 
 static inline tuple_eax_edx_t cpu_rdmsr(uint32_t const addr) {
     tuple_eax_edx_t result;
@@ -138,10 +139,13 @@ moe_measure_t moe_create_measure(int64_t us) {
 }
 
 int moe_measure_until(moe_measure_t deadline) {
-    if (deadline == MOE_FOREVER) {
+    if (deadline == 0) {
+        return 0;
+    } else if (deadline == MOE_FOREVER) {
         return 1;
+    } else {
+        return measure_vt.until(deadline);
     }
-    return measure_vt.until(deadline);
 }
 
 int64_t moe_measure_diff(moe_measure_t from) {
@@ -168,7 +172,7 @@ void idt_set_handler(uint8_t num, uintptr_t offset, uint16_t sel, uint8_t attr, 
     idt[num] = desc;
 }
 
-static void idt_set_kernel_handler(uint8_t num, uintptr_t offset, unsigned dpl, uint8_t ist) {
+static void idt_set_kernel_handler(uint8_t num, uintptr_t offset, uint8_t dpl, uint8_t ist) {
     idt_set_handler(num, offset, cs_sel, 0x8E | (dpl << 5), ist);
 }
 
@@ -300,6 +304,8 @@ apic_madt_ovr_t gsi_table[MAX_IRQ];
 apic_id_t apic_ids[MAX_CPU];
 uint8_t apicid_to_cpuids[256];
 int n_cpu = 0;
+moe_affinity_t system_affinity = 1;
+_Atomic moe_affinity_t invtlb_bitmap = 0;
 MOE_PHYSICAL_ADDRESS lapic_base = 0;
 void *ioapic_base = NULL;
 _Atomic int smp_mode = 0;
@@ -341,6 +347,9 @@ static uint32_t apic_read_lapic(int index) {
 static void apic_end_of_irq(uint8_t irq) {
     apic_write_lapic(0x0B0, 0);
 }
+
+// static void apic_broadcast_ipi() {
+// }
 
 static apic_madt_ovr_t get_madt_ovr(uint8_t irq) {
     apic_madt_ovr_t retval = gsi_table[irq];
@@ -432,14 +441,18 @@ int64_t lapic_measure_diff(moe_measure_t from) {
 }
 
 int smp_send_invalidate_tlb() {
-    // if (smp_mode) {
-    //     apic_write_lapic(0x300, 0xC0000 + IRQ_INVALIDATE_TLB);
-    //     moe_usleep(10000);
-    // }
+    if (smp_mode) {
+        atomic_store(&invtlb_bitmap, system_affinity & ~(1 << smp_get_current_cpuid()));
+        apic_write_lapic(0x300, 0xC0000 + IRQ_INVALIDATE_TLB);
+        while (atomic_load(&invtlb_bitmap) != 0) {
+            cpu_relax();
+        }
+    }
     return 0;
 }
 
 void ipi_invtlb_main(uintptr_t cr3) {
+    atomic_bit_test_and_clear(&invtlb_bitmap, smp_get_current_cpuid());
     apic_end_of_irq(0);
 }
 
@@ -448,7 +461,7 @@ void ipi_sche_main() {
     thread_reschedule();
 }
 
-apic_id_t apic_read_apicid() {
+static apic_id_t apic_read_apicid() {
     return apic_read_lapic(0x020) >> 24;
 }
 
@@ -474,8 +487,8 @@ void smp_init_ap(uint8_t cpuid) {
 
     io_set_lazy_fpu_restore();
 
-    tuple_eax_edx_t tuple = { cpuid };
-    cpu_wrmsr(IA32_TSC_AUX_MSR, tuple);
+    // tuple_eax_edx_t tuple = { cpuid };
+    // cpu_wrmsr(IA32_TSC_AUX_MSR, tuple);
 
     tuple_eax_edx_t msr_lapic = cpu_rdmsr(IA32_APIC_BASE_MSR);
     msr_lapic.u64 |= IA32_APIC_BASE_MSR_ENABLE;
@@ -489,6 +502,8 @@ void smp_init_ap(uint8_t cpuid) {
     apic_write_lapic(0x3E0, 0x0000000B);
     apic_write_lapic(0x320, 0x00030000 | IRQ_LAPIC_TIMER);
     apic_write_lapic(0x380, lapic_timer_div);
+
+    atomic_bit_test_and_set(&system_affinity, cpuid);
 }
 
 
@@ -628,7 +643,7 @@ static void apic_init() {
         idt_set_kernel_handler(IRQ_BASE + 47, (uintptr_t)&_irq47, 0, 0);
 
         idt_set_kernel_handler(IRQ_SCHEDULE, (uintptr_t)&_ipi_sche, 0, 0);
-        // idt_set_kernel_handler(IRQ_INVALIDATE_TLB, (uintptr_t)&_ipi_invtlb, 0, 0);
+        idt_set_kernel_handler(IRQ_INVALIDATE_TLB, (uintptr_t)&_ipi_invtlb, 0, 0);
 
 
         // HPET, Local APIC Timer
@@ -787,8 +802,8 @@ _Noreturn void arch_reset() {
 
 void arch_init(moe_bootinfo_t* info) {
 
-    tuple_eax_edx_t tuple = { 0 };
-    cpu_wrmsr(IA32_TSC_AUX_MSR, tuple);
+    // tuple_eax_edx_t tuple = { 0 };
+    // cpu_wrmsr(IA32_TSC_AUX_MSR, tuple);
     cs_sel = cpu_init();
     gdt_setup();
     idt_init();

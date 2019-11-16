@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdatomic.h>
 
 
 #define MAX(a, b)   ((a) > (b) ? (a) : (b))
@@ -124,13 +125,27 @@ int moe_spinlock_try(moe_spinlock_t *lock);
 int moe_spinlock_acquire(moe_spinlock_t *lock);
 void moe_spinlock_release(moe_spinlock_t *lock);
 
-typedef struct moe_semaphore_t moe_semaphore_t;
+
+typedef struct moe_semaphore_t {
+    _Atomic (moe_thread_t *) thread;
+    _Atomic intptr_t value;
+} moe_semaphore_t;
+
+static inline moe_semaphore_t *moe_sem_init(moe_semaphore_t *self, intptr_t value) {
+    self->thread = NULL;
+    self->value = value;
+    return self;
+}
+
 moe_semaphore_t *moe_sem_create(intptr_t value);
-// void moe_sem_init(moe_semaphore_t *self, intptr_t value);
 int moe_sem_trywait(moe_semaphore_t *self);
 int moe_sem_wait(moe_semaphore_t *self, int64_t us);
 void moe_sem_signal(moe_semaphore_t *self);
-intptr_t moe_sem_getvalue(moe_semaphore_t *self);
+
+static inline intptr_t moe_sem_getvalue(moe_semaphore_t *self) {
+    return self->value;
+}
+
 
 #define MOE_FOREVER INT64_MAX
 typedef uint64_t moe_measure_t;
